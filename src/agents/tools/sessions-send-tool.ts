@@ -8,7 +8,6 @@ import { tryResolveLegacyCompatibilityAgentId } from "../../config/legacy.defaul
 import type { SessionDeliveryGeneration } from "../../config/sessions/session-delivery-generation.types.js";
 import { resolvePersistedSessionStoreOwnerForKey } from "../../config/sessions/session-store-owner.js";
 import type { AgentRouteBinding } from "../../config/types.agents.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { shouldResumeParentSubagent } from "../../gateway/session-subagent-resume.js";
 import { resolveGatewaySessionStoreTargetWithStore } from "../../gateway/session-utils-store-lookup.js";
 import { formatErrorMessage } from "../../infra/errors.js";
@@ -28,7 +27,6 @@ import {
   normalizeAccountId,
   normalizeAgentId,
   normalizeAgentIdStrict,
-  toAgentStoreSessionKey,
 } from "../../routing/session-key.js";
 import { annotateInterSessionPromptText } from "../../sessions/input-provenance.js";
 import { deriveSessionChatTypeFromKey } from "../../sessions/session-chat-type-shared.js";
@@ -41,7 +39,7 @@ import { recordSessionParticipantBestEffort } from "../../sessions/session-parti
 import { registerSessionStateWatch } from "../../sessions/session-state-events.js";
 import { normalizeDeliveryContext } from "../../utils/delivery-context.shared.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
-import { listAgentIds, resolveSessionAgentId } from "../agent-scope.js";
+import { resolveSessionAgentId } from "../agent-scope.js";
 import { bindRequesterYieldCronAuthority } from "../cron-creator-authority-context.js";
 import { resolveNestedAgentLaneForSession } from "../lanes.js";
 import { isTerminalAgentWaitTimeout, waitForAgentRunReply } from "../run-wait.js";
@@ -81,7 +79,9 @@ import { captureSessionsSendResumeCaller, resumeSessionsSendTask } from "./sessi
 import { normalizeSessionsSendArguments } from "./sessions-send-tool.arguments.js";
 import {
   createConfiguredAgentMainSession,
+  isConfiguredAgentMainSessionKey,
   notifySessionsSendSession,
+  resolveConfiguredAgentMainSessionKey,
   trySessionsSendActiveRunDelivery,
 } from "./sessions-send-tool.delivery.js";
 import { SessionsSendToolSchema, SessionsSendOutputSchema } from "./sessions-send-tool.schema.js";
@@ -103,44 +103,6 @@ function sendFailure(
     error,
     ...(sessionKey !== undefined ? { sessionKey } : {}),
   });
-}
-
-function resolveConfiguredAgentMainSessionKey(params: {
-  cfg: OpenClawConfig;
-  agentId: string;
-  mainKey: string;
-}): string | undefined {
-  const agentId = normalizeAgentId(params.agentId);
-  if (!listAgentIds(params.cfg).includes(agentId)) {
-    return undefined;
-  }
-  return toAgentStoreSessionKey({
-    agentId,
-    requestKey: "main",
-    mainKey: params.mainKey,
-  });
-}
-
-function isConfiguredAgentMainSessionKey(params: {
-  cfg: OpenClawConfig;
-  sessionKey: string;
-  mainKey: string;
-}): boolean {
-  if (isUnscopedSessionKeySentinel(params.sessionKey)) {
-    return false;
-  }
-  if (params.sessionKey === params.mainKey) {
-    return true;
-  }
-  const agentId = parseAgentSessionKey(params.sessionKey)?.agentId;
-  return agentId
-    ? params.sessionKey ===
-        resolveConfiguredAgentMainSessionKey({
-          cfg: params.cfg,
-          agentId,
-          mainKey: params.mainKey,
-        })
-    : false;
 }
 
 export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgentTool {
