@@ -159,14 +159,6 @@ const EXCLUDED_SCHEMA_EXPORTS = [
   "WorkerAdmissionResponseFrameSchema",
   "WorkerConnectRequestFrameSchema",
   "WorkerExecutionModeSchema",
-  "WorkerGatewayToolCancelParamsSchema",
-  "WorkerGatewayToolCancelResponseFrameSchema",
-  "WorkerGatewayToolCancelResultSchema",
-  "WorkerGatewayToolInvokeParamsSchema",
-  "WorkerGatewayToolResponseFrameSchema",
-  "WorkerGatewayToolResultSchema",
-  "WorkerGatewayToolUpdateFrameSchema",
-  "WorkerToolSurfaceSchema",
   "WorkerHeartbeatParamsSchema",
   "WorkerHeartbeatRequestFrameSchema",
   "WorkerHeartbeatResponseFrameSchema",
@@ -201,9 +193,11 @@ const EXCLUDED_SCHEMA_EXPORTS = [
 
 type ExcludedSchemaExport = (typeof EXCLUDED_SCHEMA_EXPORTS)[number];
 type DerivedProtocolSchemaMap = {
-  [Name in Exclude<SchemaExportName, ExcludedSchemaExport> as Name extends `${infer Key}Schema`
-    ? Key
-    : never]: (typeof schemaSources)[Name];
+  [
+    Name in Exclude<SchemaExportName, ExcludedSchemaExport> as Name extends `${infer Key}Schema`
+      ? Key
+      : never
+  ]: (typeof schemaSources)[Name];
 };
 
 function deriveProtocolSchemas(): DerivedProtocolSchemaMap {
