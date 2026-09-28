@@ -61,7 +61,9 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
         assertCurrent,
         readReceipt: (facts) => (isReceipt(facts) ? facts : undefined),
         stageCommit(facts) {
-          if (!isReceipt(facts)) throw new Error("Placement claim commit has no receipt");
+          if (!isReceipt(facts)) {
+            throw new Error("Placement claim commit has no receipt");
+          }
           prepared = facts;
           if (command.type === "placementTurns.recordStagedResult") {
             if (facts.placement?.sessionId !== command.input.claim.sessionId) {
@@ -77,7 +79,9 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
             : undefined;
         },
         publish(receipt) {
-          if (published) return;
+          if (published) {
+            return;
+          }
           published = true;
           if (receipt.placement) {
             close?.();

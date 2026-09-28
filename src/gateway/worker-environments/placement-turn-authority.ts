@@ -143,7 +143,9 @@ function prunePublication(owner: PlacementAuthorityOwner, sessionId: string): vo
     ![...owner.pending].some((change) => change.sessionId === sessionId)
   ) {
     owner.published.delete(sessionId);
-    if (!owner.tools.get(sessionId)?.authority) owner.tools.delete(sessionId);
+    if (!owner.tools.get(sessionId)?.authority) {
+      owner.tools.delete(sessionId);
+    }
   }
 }
 

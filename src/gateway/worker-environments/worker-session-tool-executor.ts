@@ -346,15 +346,17 @@ export function createWorkerSessionToolExecutor(
     const source = await exactSource({ identity: request.identity, placements: params.placements });
     if (request.toolName === "portal" || request.toolName === "skill_workshop") {
       return await runWithSource({ source, request }, async (authority, prepared) => {
-        if (prepared.toolName === "portal")
+        if (prepared.toolName === "portal") {
           return executePortal(prepared, source, authority.assertSource);
-        if (prepared.toolName === "skill_workshop" && params.skillWorkshop)
+        }
+        if (prepared.toolName === "skill_workshop" && params.skillWorkshop) {
           return params.skillWorkshop.execute(
             prepared.request.toolCallId,
             prepared.request.arguments,
             prepared.signal,
             prepared.onUpdate,
           );
+        }
         throw new Error("Worker tool policy changed the tool identity");
       });
     }
@@ -539,9 +541,13 @@ export function createWorkerGatewayTools(
   params: WorkerGatewayToolsDependencies & { identity: WorkerConnectionIdentity },
 ): AnyAgentTool[] {
   const claim = params.identity.turnClaim;
-  if (!claim) throw new Error("Worker source turn has no operational owner");
+  if (!claim) {
+    throw new Error("Worker source turn has no operational owner");
+  }
   const capability = getWorkerTurnExecutionIdentityCapability(params.placements, claim);
-  if (!capability) throw new Error("Worker source turn has no operational owner");
+  if (!capability) {
+    throw new Error("Worker source turn has no operational owner");
+  }
   const source = capability.sessionTarget;
   const execute = createWorkerSessionToolExecutor(params);
   const toolOptions = { agentSessionKey: source.sessionKey, workerPlacement: true };

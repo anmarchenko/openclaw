@@ -126,7 +126,7 @@ export function createPortalOperations(
       if (owner && !list().portals.some((portal) => portal.id === id)) {
         throw new Error(owner.ownershipError);
       }
-      await service.close(id, owner?.assertCurrent);
+      await service.close(id, owner?.assertCurrent.bind(owner));
       onChanged?.();
       owner?.assertCurrent();
       return { closed: true };
@@ -153,7 +153,7 @@ export function createPortalOperations(
                 remotePort: request.port,
                 connect: connection.connect,
               },
-              assertCurrent: owner.assertCurrent,
+              assertCurrent: owner.assertCurrent.bind(owner),
               onClose: connection.close,
               resourceOwnerKey: owner.resourceOwnerKey,
               ownerSignal: connection.ownerSignal,
