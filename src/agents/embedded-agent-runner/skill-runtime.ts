@@ -161,11 +161,10 @@ export async function prepareEmbeddedSkills(params: {
       : resolveSkillResourceCandidates(skillsSnapshot);
     if (workspaceSkillReader) {
       for (const skill of codeModeSkills) {
-        const candidate = candidates.find((entry) => entry.filePath === skill.source.filePath);
-        // Resolved ownership wins over a same-name Library pin that was filtered out.
+        // The selected resource owns the read: paths can coincide on different hosts.
         if (
-          candidate?.fileHost === "workspace" ||
-          (candidate?.fileHost !== "gateway" &&
+          skill.source.fileHost === "workspace" ||
+          (skill.source.fileHost !== "gateway" &&
             !skillsSnapshot?.librarySelections?.some((selection) => selection.name === skill.name))
         ) {
           skill.reader = ({ signal }) =>
