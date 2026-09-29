@@ -180,7 +180,7 @@ export type ManagedOutgoingMediaArtifactDownload = {
   expiresAt: string;
 };
 
-export function resolveManagedImageAttachmentLimits(
+function resolveManagedImageAttachmentLimits(
   config?: ManagedImageAttachmentLimitsConfig | null,
 ): ManagedImageAttachmentLimits {
   return {
