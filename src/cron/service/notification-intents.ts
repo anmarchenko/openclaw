@@ -45,21 +45,13 @@ export type ResolvedFailureAlert = CronFailureAlertRoute & {
   repair: boolean;
 };
 
-type CronFailureAlertIntent = {
-  kind: "failure-alert";
-  job: CronNotificationJob;
-  payload: ReplyPayload;
-  runAtMs?: number;
-  route: CronFailureAlertRoute;
-};
-
 export type CronNotificationIntent =
   | { kind: "auto-disabled"; job: CronNotificationJob; text: string }
-  | CronFailureAlertIntent
+  | { kind: "failure-repair"; job: CronNotificationJob; text: string }
   | {
-      kind: "failure-repair";
+      kind: "failure-alert";
       job: CronNotificationJob;
-      text: string;
-      /** Sent when the job has no owner conversation to wake by dispatch time. */
-      fallback: CronFailureAlertIntent;
+      payload: ReplyPayload;
+      runAtMs?: number;
+      route: CronFailureAlertRoute;
     };

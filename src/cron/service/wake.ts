@@ -18,7 +18,7 @@ export function enqueueCronNotification(
   text: string,
   kind: "auto-disabled" | "failure-alert" | "failure-repair",
   owner?: { sessionKey: string; agentId?: string },
-): boolean {
+): void {
   const sessionKey =
     owner?.sessionKey ??
     (kind === "failure-alert" ? resolveCronDeliverySessionKey(job) : job.sessionKey);
@@ -32,7 +32,7 @@ export function enqueueCronNotification(
     sessionKey || (kind === "auto-disabled" && agentId)
       ? state.deps.resolveOriginDeliveryContext?.({ agentId, sessionKey })
       : undefined;
-  const enqueued = state.deps.enqueueSystemEvent(text, {
+  state.deps.enqueueSystemEvent(text, {
     agentId,
     sessionKey,
     contextKey: `cron:${job.id}:${kind}`,
@@ -47,7 +47,6 @@ export function enqueueCronNotification(
       sessionKey,
     });
   }
-  return enqueued !== false && !(typeof enqueued === "object" && enqueued.accepted === false);
 }
 
 /** Enqueues a manual cron wake event and optionally pokes the targeted heartbeat loop. */

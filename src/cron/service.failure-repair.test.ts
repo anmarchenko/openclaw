@@ -7,7 +7,6 @@ import {
   setupFailureAlertSuite,
 } from "./service.failure-alert.test-helpers.js";
 import { maybeEmitFailureAlert, resolveFailureAlert } from "./service/failure-alerts.js";
-import { dispatchCronNotification } from "./service/notification-dispatch.js";
 import type { CronJobPolicyContext, DeferredCronNotifications } from "./service/state.js";
 import type { CronJob } from "./types.js";
 
@@ -66,18 +65,6 @@ describe("CronService failure repair", () => {
     );
   });
 
-  it("sends the alert when the owner conversation rejects the repair request", async () => {
-    await withRepair(async ({ cron, sendCronFailureAlert, enqueueSystemEvent, addJob }) => {
-      enqueueSystemEvent.mockReturnValue({ accepted: false });
-      const job = await addJob("rejected sync", owned);
-      await cron.run(job.id, "force");
-      await cron.run(job.id, "force");
-      expect(enqueueSystemEvent).toHaveBeenCalledOnce();
-      expect(sendCronFailureAlert).toHaveBeenCalledOnce();
-      expectAlertTextContaining(sendCronFailureAlert, 'Automation "rejected sync" failed 2 times');
-    });
-  });
-
   it("clears the repair with the incident when the job succeeds again", async () => {
     await withRepair(async ({ cron, runIsolatedAgentJob, sendCronFailureAlert, addJob }) => {
       const job = await addJob("repaired sync", owned);
@@ -91,43 +78,27 @@ describe("CronService failure repair", () => {
   });
 
   it.each([
-    { name: "handed to another conversation", owner: "agent:main:telegram:direct:new", wakes: 1 },
-    { name: "removed", owner: undefined, wakes: 0 },
-  ])("wakes the live owner when the job was $name before dispatch", ({ owner, wakes }) => {
-    const enqueueSystemEvent = vi.fn(() => true);
-    const sendCronFailureAlert = vi.fn(async () => undefined);
-    const state = {
-      store: {
-        version: 1,
-        jobs: owner ? [{ id: "job", owner: { agentId: "main", sessionKey: owner } }] : [],
+    { name: "refused", refuse: () => ({ accepted: false }) },
+    {
+      name: "throws",
+      refuse: () => {
+        throw new Error("owner agent removed");
       },
-      deps: {
-        enqueueSystemEvent,
-        requestHeartbeat: vi.fn(),
-        sendCronFailureAlert,
-        log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      },
-    } as unknown as Parameters<typeof dispatchCronNotification>[0];
-    const job = { id: "job", name: "job", sessionTarget: "isolated", wakeMode: "now", state: {} };
-    dispatchCronNotification(state, {
-      kind: "failure-repair",
-      job: job as never,
-      text: "repair request",
-      fallback: {
-        kind: "failure-alert",
-        job: job as never,
-        payload: { text: 'Automation "job" failed 2 times' },
-        route: { channel: "telegram", to: "19098680", alternateRoute: false },
-      },
+    },
+  ])("alerts on the next failure when the repair request is $name", async ({ refuse }) => {
+    await withRepair(async ({ cron, sendCronFailureAlert, enqueueSystemEvent, addJob }) => {
+      enqueueSystemEvent.mockImplementation(refuse);
+      const job = await addJob("lost sync", owned);
+      await cron.run(job.id, "force");
+      await cron.run(job.id, "force");
+      expect(enqueueSystemEvent).toHaveBeenCalledOnce();
+      expect(sendCronFailureAlert).not.toHaveBeenCalled();
+
+      await cron.run(job.id, "force");
+      expect(sendCronFailureAlert).toHaveBeenCalledOnce();
+      expectAlertTextContaining(sendCronFailureAlert, "automatic repair was requested");
+      expect(cron.getJob(job.id)?.state.failureAlertIncident?.repair).toBeUndefined();
     });
-    expect(enqueueSystemEvent).toHaveBeenCalledTimes(wakes);
-    if (wakes) {
-      expect(enqueueSystemEvent).toHaveBeenCalledWith(
-        "repair request",
-        expect.objectContaining({ sessionKey: owner }),
-      );
-    }
-    expect(sendCronFailureAlert).not.toHaveBeenCalled();
   });
 
   it.each([

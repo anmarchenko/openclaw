@@ -377,22 +377,6 @@ export function maybeEmitFailureAlert(
     return;
   }
   const job = cronNotificationJob(params.job);
-  const alert = {
-    kind: "failure-alert" as const,
-    job,
-    payload: buildFailureAlertPayload({
-      job,
-      error: params.error,
-      errorReason: params.errorReason,
-      failureNotificationDetail: params.failureNotificationDetail,
-      consecutiveErrors: params.consecutiveCount,
-      route: alertConfig,
-      status: params.status,
-      repairRequested,
-    }),
-    runAtMs: params.runAtMs,
-    route: alertConfig,
-  };
   if (
     !repairRequested &&
     alertConfig.repair &&
@@ -414,11 +398,25 @@ export function maybeEmitFailureAlert(
         error: params.error,
         errorReason: params.errorReason,
       }),
-      fallback: alert,
     });
     return;
   }
-  params.deferredNotifications.push(alert);
+  params.deferredNotifications.push({
+    kind: "failure-alert",
+    job,
+    payload: buildFailureAlertPayload({
+      job,
+      error: params.error,
+      errorReason: params.errorReason,
+      failureNotificationDetail: params.failureNotificationDetail,
+      consecutiveErrors: params.consecutiveCount,
+      route: alertConfig,
+      status: params.status,
+      repairRequested,
+    }),
+    runAtMs: params.runAtMs,
+    route: alertConfig,
+  });
 }
 
 /**
