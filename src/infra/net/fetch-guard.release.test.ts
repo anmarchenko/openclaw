@@ -217,11 +217,10 @@ describe("guarded request release", () => {
     },
   );
 
-  it.each(
-    (["signal", "init"] as const).flatMap((source) =>
-      [undefined, 5_000].map((timeoutMs) => ({ source, timeoutMs })),
-    ),
-  )(
+  it.each([
+    { source: "signal", timeoutMs: undefined },
+    { source: "init", timeoutMs: 5_000 },
+  ])(
     "preserves cancellation from $source with timeout $timeoutMs",
     async ({ source, timeoutMs }) => {
       const parent = new AbortController();

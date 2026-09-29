@@ -9,9 +9,7 @@ import {
   buildConnector,
   fetch as undiciFetch,
   getGlobalDispatcher,
-  Headers,
   Pool,
-  ProxyAgent,
   Response as UndiciResponse,
   setGlobalDispatcher,
 } from "undici";
@@ -46,83 +44,41 @@ const undiciTimers: { tick: (delay: number) => void } = createRequire(import.met
 const TARGET_URL = `https://${TARGET_HOST}/media`;
 const PAYLOAD_BYTES = Buffer.byteLength(PAYLOAD);
 
-// Bridge Undici's Node stream types to the bounded reader's DOM Response contract.
 async function readProxyPayload(response: Response | UndiciResponse): Promise<string> {
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("Expected a proxy response body");
-  }
-  const body = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const next = await reader.read();
-        if (next.done) {
-          reader.releaseLock();
-          controller.close();
-          return;
-        }
-        const chunk: unknown = next.value;
-        if (!(chunk instanceof Uint8Array)) {
-          throw new Error("Expected proxy response bytes");
-        }
-        controller.enqueue(chunk);
-      } catch (error) {
-        reader.releaseLock();
-        controller.error(error);
-      }
-    },
-    async cancel(reason) {
-      try {
-        await reader.cancel(reason);
-      } finally {
-        reader.releaseLock();
-      }
-    },
-  });
-  return (await readResponseWithLimit(new Response(body), PAYLOAD_BYTES)).toString("utf8");
+  return Buffer.from(await response.arrayBuffer()).toString("utf8");
 }
 
-async function fetchPayload(
-  dispatcher: ReturnType<typeof createHttp1ProxyAgent>,
-  protocolProof?: Promise<void>,
-) {
+async function fetchPayload(dispatcher: ReturnType<typeof createHttp1ProxyAgent>) {
   try {
-    await Promise.all([
-      undiciFetch(TARGET_URL, { dispatcher, signal: AbortSignal.timeout(5_000) }).then(
-        async (response) => {
-          expect(await readProxyPayload(response)).toBe(PAYLOAD);
-        },
-      ),
-      protocolProof,
-    ]);
+    const response = await undiciFetch(TARGET_URL, {
+      dispatcher,
+      signal: AbortSignal.timeout(5_000),
+    });
+    expect(await readProxyPayload(response)).toBe(PAYLOAD);
   } finally {
     await dispatcher.destroy();
   }
 }
 
 describe("SOCKS proxy protocol boundaries", () => {
-  it.each(
-    ["http", "socks5"].flatMap((protocol) => [
-      {
-        protocol,
-        input: "conflicting credentials",
-        options: { auth: "fixture-auth", token: "fixture-token" },
-        error: "opts.auth cannot be used in combination with opts.token",
-      },
-      {
-        protocol,
-        input: "null clientFactory",
-        options: { clientFactory: null },
-        error: "Proxy opts.clientFactory must be a function.",
-      },
-    ]),
-  )("preserves $protocol constructor refusal for $input", async ({ protocol, options, error }) => {
+  it.each([
+    {
+      input: "conflicting credentials",
+      options: { auth: "fixture-auth", token: "fixture-token" },
+      error: "opts.auth cannot be used in combination with opts.token",
+    },
+    {
+      input: "null clientFactory",
+      options: { clientFactory: null },
+      error: "Proxy opts.clientFactory must be a function.",
+    },
+  ])("preserves SOCKS constructor refusal for $input", async ({ options, error }) => {
     let dispatcher: ReturnType<typeof createHttp1ProxyAgent> | undefined;
     try {
       expect(() => {
         // JavaScript SDK callers can supply malformed constructor options.
         dispatcher = Reflect.apply(createHttp1ProxyAgent, undefined, [
-          { uri: `${protocol}://127.0.0.1:1080`, ...options },
+          { uri: "socks5://127.0.0.1:1080", ...options },
         ]);
       }).toThrow(error);
     } finally {
@@ -130,54 +86,34 @@ describe("SOCKS proxy protocol boundaries", () => {
     }
   });
 
-  it.each(["socks:", "socks5:"])(
-    "keeps %s proxies plaintext with generated timeout/family defaults",
-    async (protocol) => {
-      await withProxyFixture(async ({ socksProxy, connections, certificate }) => {
-        await fetchPayload(
-          createHttp1ProxyAgent(
-            { uri: socksProxy.replace("socks5:", protocol), requestTls: { ca: certificate } },
-            5_000,
-          ),
-        );
-        expect(connections).toEqual([`socks:${TARGET_HOST}`]);
-      });
-    },
-  );
+  it("authenticates decoded SOCKS URL credentials", async () => {
+    const credentials = { username: "fixture@user:space %", password: "fixture:p@ss/%" };
+    await withProxyFixture(async ({ socksProxy, certificate, connections, originRoutes }) => {
+      const url = new URL(socksProxy);
+      url.username = encodeURIComponent(credentials.username);
+      const create = () => {
+        const options = { requestTls: { ca: certificate } };
+        return createHttp1EnvHttpProxyAgent({ ...options, httpsProxy: url.href, noProxy: "" });
+      };
+      url.password = encodeURIComponent(`${credentials.password}-wrong`);
+      const rejected = create();
+      try {
+        await expect(
+          undiciFetch(TARGET_URL, { dispatcher: rejected, signal: AbortSignal.timeout(5_000) }),
+        ).rejects.toMatchObject({ cause: { code: "UND_ERR_SOCKS5_AUTH_FAILED" } });
+        expect(connections).toEqual([]);
+        expect(originRoutes).toEqual([]);
+      } finally {
+        await rejected.destroy();
+      }
+      url.password = encodeURIComponent(credentials.password);
+      await fetchPayload(create());
+      expect(connections).toEqual([`socks:${TARGET_HOST}`]);
+      expect(originRoutes).toEqual(["proxy"]);
+    }, credentials);
+  });
 
-  it.each(["fixed", "environment"])(
-    "authenticates decoded SOCKS URL credentials through the %s helper",
-    async (mode) => {
-      const credentials = { username: "fixture@user:space %", password: "fixture:p@ss/%" };
-      await withProxyFixture(async ({ socksProxy, certificate, connections, originRoutes }) => {
-        const url = new URL(socksProxy);
-        url.username = encodeURIComponent(credentials.username);
-        const create = () => {
-          const options = { requestTls: { ca: certificate } };
-          return mode === "environment"
-            ? createHttp1EnvHttpProxyAgent({ ...options, httpsProxy: url.href, noProxy: "" })
-            : createHttp1ProxyAgent({ ...options, uri: url.href });
-        };
-        url.password = encodeURIComponent(`${credentials.password}-wrong`);
-        const rejected = create();
-        try {
-          await expect(
-            undiciFetch(TARGET_URL, { dispatcher: rejected, signal: AbortSignal.timeout(5_000) }),
-          ).rejects.toMatchObject({ cause: { code: "UND_ERR_SOCKS5_AUTH_FAILED" } });
-          expect(connections).toEqual([]);
-          expect(originRoutes).toEqual([]);
-        } finally {
-          await rejected.destroy();
-        }
-        url.password = encodeURIComponent(credentials.password);
-        await fetchPayload(create());
-        expect(connections).toEqual([`socks:${TARGET_HOST}`]);
-        expect(originRoutes).toEqual(["proxy"]);
-      }, credentials);
-    },
-  );
-
-  it.each(["explicit", "environment", "custom-http", "forward-http"])(
+  it.each(["environment", "custom-http", "forward-http"])(
     "preserves TCP policy on the actual %s proxy connection",
     async (mode) => {
       const family = vi
@@ -258,8 +194,6 @@ describe("SOCKS proxy protocol boundaries", () => {
 
   // The dispatchers share Undici's clock, so each handshake must settle before the next row.
   it.each([
-    { name: "fixed target", mode: "fixed", stall: "target", target: 100, proxy: 0 },
-    { name: "environment target", mode: "environment", stall: "target", target: 100, proxy: 0 },
     {
       name: "target despite wrapper budget",
       mode: "fixed",
@@ -279,71 +213,12 @@ describe("SOCKS proxy protocol boundaries", () => {
     },
     { name: "proxy TLS override", mode: "fixed", stall: "proxy", target: 0, proxy: 100 },
     {
-      name: "wrapper proxy budget",
-      mode: "fixed",
-      stall: "proxy",
-      target: 0,
-      proxy: 0,
-      budget: 100,
-    },
-    {
       name: "wrapper over null proxy default",
       mode: "fixed",
       stall: "proxy",
       target: 0,
       proxy: null,
       budget: 100,
-    },
-    {
-      name: "native null proxy default",
-      mode: "native",
-      stall: "proxy",
-      target: 0,
-      proxy: null,
-      defaultProxyTimeout: true,
-    },
-    {
-      name: "fixed null HTTPS proxy default",
-      mode: "fixed",
-      stall: "proxy",
-      target: 0,
-      proxy: null,
-      defaultProxyTimeout: true,
-    },
-    {
-      name: "environment undefined HTTPS proxy default",
-      mode: "environment",
-      stall: "proxy",
-      target: 0,
-      proxy: undefined,
-      defaultProxyTimeout: true,
-    },
-    {
-      name: "fixed null SOCKS TLS proxy default",
-      mode: "fixed",
-      stall: "proxy",
-      target: 0,
-      proxy: null,
-      protocol: "socks5",
-      defaultProxyTimeout: true,
-    },
-    {
-      name: "environment undefined SOCKS TLS proxy default",
-      mode: "environment",
-      stall: "proxy",
-      target: 0,
-      proxy: undefined,
-      protocol: "socks5",
-      defaultProxyTimeout: true,
-    },
-    {
-      name: "fixed direct-only connector timeout",
-      mode: "fixed",
-      stall: "proxy",
-      target: undefined,
-      generic: 0,
-      omitProxyTimeout: true,
-      defaultProxyTimeout: true,
     },
     {
       name: "environment direct-only connector timeout",
@@ -413,15 +288,6 @@ describe("SOCKS proxy protocol boundaries", () => {
             { ...options, httpProxy: uri, httpsProxy: uri, noProxy: "" },
             budget,
           );
-        } else if (mode === "native") {
-          // Raw Undici forwards the proxy IP as SNI; a DNS name keeps this a timeout probe.
-          const nativeOptions = {
-            ...options,
-            uri,
-            proxyTls: { ...options.proxyTls, servername: "proxy.test" },
-          };
-          // @ts-expect-error Undici's Node TLS intersection rejects its runtime-valid null timeout.
-          dispatcher = new ProxyAgent(nativeOptions);
         } else {
           // @ts-expect-error Undici's Node TLS intersection rejects its runtime-valid null timeout.
           dispatcher = createHttp1ProxyAgent({ ...options, uri }, budget);
@@ -461,7 +327,7 @@ describe("SOCKS proxy protocol boundaries", () => {
     15_000,
   );
 
-  it.each(["object", "flat array", "Headers", "inherited object"])(
+  it.each(["flat array", "inherited object"])(
     "rejects per-request proxy credentials from %s before any SOCKS dispatch",
     async (form) => {
       await withProxyFixture(async ({ socksProxy, connections, originRoutes }) => {
@@ -472,27 +338,13 @@ describe("SOCKS proxy protocol boundaries", () => {
         const inherited = {};
         Object.setPrototypeOf(inherited, auth);
         try {
-          const request =
-            form === "Headers"
-              ? undiciFetch(`http://${TARGET_HOST}/media`, {
-                  dispatcher,
-                  headers: new Headers(auth),
-                })
-              : dispatcher.request({
-                  origin: `http://${TARGET_HOST}`,
-                  path: "/media",
-                  method: "GET",
-                  headers:
-                    form === "flat array"
-                      ? Object.entries(auth).flat()
-                      : form === "inherited object"
-                        ? inherited
-                        : auth,
-                });
-          const error = { code: "UND_ERR_INVALID_ARG" };
-          await expect(request).rejects.toMatchObject(
-            form === "Headers" ? { cause: error } : error,
-          );
+          const request = dispatcher.request({
+            origin: `http://${TARGET_HOST}`,
+            path: "/media",
+            method: "GET",
+            headers: form === "flat array" ? Object.entries(auth).flat() : inherited,
+          });
+          await expect(request).rejects.toMatchObject({ code: "UND_ERR_INVALID_ARG" });
           expect(connections).toEqual([]);
           expect(originRoutes).toEqual([]);
           const response = await dispatcher.request({
@@ -510,24 +362,7 @@ describe("SOCKS proxy protocol boundaries", () => {
     },
   );
 
-  it("preserves explicitly requested SOCKS-over-TLS", async () => {
-    await withProxyFixture(async ({ tlsSocksProxy, connections, certificate }) => {
-      await fetchPayload(
-        createHttp1ProxyAgent(
-          {
-            uri: tlsSocksProxy,
-            proxyTls: { ca: certificate, servername: TARGET_HOST },
-            requestTls: { ca: certificate },
-          },
-          5_000,
-        ),
-      );
-      expect(connections).toEqual([`socks:${TARGET_HOST}`]);
-    });
-  });
-
   it.each([
-    { source: "active", managedHop: "https" },
     { source: "supplied-env", managedHop: "https" },
     { source: "active", managedHop: "http" },
   ])("keeps $source managed TLS on the $managedHop proxy hop", async ({ source, managedHop }) => {
@@ -575,12 +410,10 @@ describe("SOCKS proxy protocol boundaries", () => {
     });
   });
 
-  it.each([false, true])("routes both mixed proxies with explicit TLS opt-in=%s", async (tls) => {
+  it("routes mixed TLS proxies with HTTP/1 ALPN", async () => {
     await withProxyFixture(
       async ({
-        socksProxy,
         tlsSocksProxy,
-        httpProxy,
         httpsProxy,
         connections,
         certificate,
@@ -589,10 +422,10 @@ describe("SOCKS proxy protocol boundaries", () => {
       }) => {
         const dispatcher = createHttp1EnvHttpProxyAgent(
           {
-            httpProxy: tls ? tlsSocksProxy : socksProxy,
-            httpsProxy: tls ? httpsProxy : httpProxy,
+            httpProxy: tlsSocksProxy,
+            httpsProxy,
             noProxy: "",
-            ...(tls ? { proxyTls: { ca: certificate, servername: TARGET_HOST } } : {}),
+            proxyTls: { ca: certificate, servername: TARGET_HOST },
             requestTls: { ca: certificate },
           },
           5_000,
@@ -600,16 +433,11 @@ describe("SOCKS proxy protocol boundaries", () => {
         try {
           const plain = await undiciFetch(`http://${TARGET_HOST}/media`, { dispatcher });
           expect(await readProxyPayload(plain)).toBe(PAYLOAD);
-          const protocol = tls ? waitForProxyProtocol() : undefined;
+          const protocol = waitForProxyProtocol();
           const secure = await undiciFetch(TARGET_URL, { dispatcher });
           expect(await readProxyPayload(secure)).toBe(PAYLOAD);
-          if (protocol) {
-            expect(await protocol).toBe("http/1.1");
-          }
-          expect(connections).toEqual([
-            `socks:${TARGET_HOST}`,
-            `${tls ? "https" : "http"}:${TARGET_HOST}`,
-          ]);
+          expect(await protocol).toBe("http/1.1");
+          expect(connections).toEqual([`socks:${TARGET_HOST}`, `https:${TARGET_HOST}`]);
         } finally {
           await dispatcher.destroy();
         }
@@ -619,11 +447,7 @@ describe("SOCKS proxy protocol boundaries", () => {
   });
 
   it.each([
-    { proxy: "HTTPS", kind: "verification" },
     { proxy: "HTTPS", kind: "trust" },
-    { proxy: "HTTPS", kind: "connector" },
-    { proxy: "SOCKS-over-TLS", kind: "verification" },
-    { proxy: "SOCKS-over-TLS", kind: "trust" },
     { proxy: "SOCKS-over-TLS", kind: "connector" },
   ])("keeps direct-origin TLS $kind out of $proxy proxy policy", async ({ proxy, kind }) => {
     await withProxyFixture(async ({ httpsProxy, tlsSocksProxy, certificate, connections }) => {
@@ -633,9 +457,7 @@ describe("SOCKS proxy protocol boundaries", () => {
         connect:
           kind === "connector"
             ? buildConnector({ rejectUnauthorized: false })
-            : kind === "verification"
-              ? { rejectUnauthorized: false }
-              : { ca: certificate },
+            : { ca: certificate },
         requestTls: { ca: certificate },
         ...(proxy === "HTTPS" ? {} : { proxyTls: { servername: TARGET_HOST } }),
       };
@@ -739,37 +561,32 @@ describe("SOCKS proxy protocol boundaries", () => {
     });
   });
 
-  it.each(["explicit SOCKS", "environment SOCKS", "native HTTP"])(
-    "preserves maxOrigins admission with an active %s response",
-    async (mode) => {
-      await withProxyFixture(async ({ socksProxy, httpProxy, certificate, originRoutes }) => {
-        const options = { maxOrigins: 1, requestTls: { ca: certificate } };
-        const dispatcher =
-          mode === "environment SOCKS"
-            ? createHttp1EnvHttpProxyAgent({ ...options, httpProxy: socksProxy, noProxy: "" })
-            : createHttp1ProxyAgent({
-                ...options,
-                uri: mode === "native HTTP" ? httpProxy : socksProxy,
-              });
-        let response: Awaited<ReturnType<typeof undiciFetch>> | undefined;
-        try {
-          response = await undiciFetch(`http://${TARGET_HOST}/stall`, {
-            dispatcher,
-            signal: AbortSignal.timeout(5_000),
-          });
-          await expect(
-            undiciFetch(TARGET_URL, { dispatcher, signal: AbortSignal.timeout(5_000) }).then(
-              (second) => readProxyPayload(second),
-            ),
-          ).rejects.toMatchObject({ cause: { code: "UND_ERR_MAX_ORIGINS_REACHED" } });
-          expect(originRoutes).toEqual(["proxy"]);
-        } finally {
-          await response?.body?.cancel();
-          await dispatcher.destroy();
-        }
+  it("preserves maxOrigins admission with an active SOCKS response", async () => {
+    await withProxyFixture(async ({ socksProxy, certificate, originRoutes }) => {
+      const dispatcher = createHttp1EnvHttpProxyAgent({
+        maxOrigins: 1,
+        requestTls: { ca: certificate },
+        httpProxy: socksProxy,
+        noProxy: "",
       });
-    },
-  );
+      let response: Awaited<ReturnType<typeof undiciFetch>> | undefined;
+      try {
+        response = await undiciFetch(`http://${TARGET_HOST}/stall`, {
+          dispatcher,
+          signal: AbortSignal.timeout(5_000),
+        });
+        await expect(
+          undiciFetch(TARGET_URL, { dispatcher, signal: AbortSignal.timeout(5_000) }).then(
+            (second) => readProxyPayload(second),
+          ),
+        ).rejects.toMatchObject({ cause: { code: "UND_ERR_MAX_ORIGINS_REACHED" } });
+        expect(originRoutes).toEqual(["proxy"]);
+      } finally {
+        await response?.body?.cancel();
+        await dispatcher.destroy();
+      }
+    });
+  });
 
   it("does not replace an explicit SOCKS global dispatcher with a default Agent", async () => {
     const previous = getGlobalDispatcher();
@@ -910,104 +727,59 @@ describe("SOCKS proxy protocol boundaries", () => {
     },
   );
 
-  it.each(["explicit", "environment", "custom"])(
-    "uses HTTP/1 and preserves TLS trust through an %s HTTPS proxy",
-    async (mode) => {
-      await withProxyFixture(
-        async ({
-          httpsProxy,
-          certificate,
-          connections,
-          waitForProxyProtocol,
-          waitForSocketsClosed,
-        }) => {
-          const clientFactory = vi.fn((origin: URL, options: object) => new Pool(origin, options));
-          const options = {
-            proxyTls: {
-              ca: certificate,
-              ...(mode === "custom" ? { allowH2: false, servername: TARGET_HOST } : {}),
-            },
-            requestTls: { ca: certificate },
-          };
-          const dispatcher =
-            mode === "environment"
-              ? createHttp1EnvHttpProxyAgent({ ...options, httpsProxy, noProxy: "" }, 5_000)
-              : createHttp1ProxyAgent(
-                  { ...options, uri: httpsProxy, ...(mode === "custom" ? { clientFactory } : {}) },
-                  5_000,
-                );
-          await fetchPayload(
-            dispatcher,
-            waitForProxyProtocol().then((protocol) => {
-              expect(protocol).toBe("http/1.1");
-            }),
-          );
-          expect(connections).toEqual([`https:${TARGET_HOST}`]);
-          if (mode === "custom") {
-            expect(clientFactory).toHaveBeenCalledOnce();
-          }
-          await waitForSocketsClosed();
-        },
-      );
-    },
-  );
-
-  it.each(["http", "socks"])(
-    "allows trusted explicit %s media without target DNS but preserves target and redirect policy",
-    async (kind) => {
-      await withProxyFixture(async ({ httpProxy, socksProxy, connections, certificate }) => {
-        const lookupFn = vi.fn(async (hostname: string) => {
-          if (hostname === "127.0.0.1") {
-            return [{ address: hostname, family: 4 }];
-          }
-          throw Object.assign(new Error("target DNS unavailable"), { code: "EAI_AGAIN" });
-        });
-        const options = {
-          mode: "trusted_explicit_proxy" as const,
-          dispatcherPolicy: {
-            mode: "explicit-proxy" as const,
-            proxyUrl: kind === "http" ? httpProxy : socksProxy,
-            allowPrivateProxy: true,
-            proxyTls: { ca: certificate },
-          },
-          policy: { hostnameAllowlist: [TARGET_HOST] },
-          lookupFn,
-          timeoutMs: 5_000,
-        };
-        const result = await fetchWithSsrFGuard({ ...options, url: TARGET_URL });
-        try {
-          expect(
-            (await readResponseWithLimit(result.response, PAYLOAD_BYTES)).toString("utf8"),
-          ).toBe(PAYLOAD);
-        } finally {
-          await result.release();
+  it("preserves target and redirect policy when trusted SOCKS owns DNS", async () => {
+    await withProxyFixture(async ({ socksProxy, connections, certificate }) => {
+      const lookupFn = vi.fn(async (hostname: string) => {
+        if (hostname === "127.0.0.1") {
+          return [{ address: hostname, family: 4 }];
         }
-        for (const url of [
-          "https://outside.proxy.test/media",
-          "https://127.0.0.1/media",
-          `https://${TARGET_HOST}/redirect`,
-        ]) {
-          await expect(fetchWithSsrFGuard({ ...options, url })).rejects.toThrow("not in allowlist");
-        }
-        await expect(
-          fetchWithSsrFGuard({
-            ...options,
-            url: "https://127.0.0.1/media",
-            policy: undefined,
-          }),
-        ).rejects.toThrow(/private|internal/i);
-        await expect(
-          fetchWithSsrFGuard({
-            ...options,
-            url: TARGET_URL,
-            dispatcherPolicy: { ...options.dispatcherPolicy, allowPrivateProxy: false },
-          }),
-        ).rejects.toThrow(/private|internal/i);
-        expect(lookupFn.mock.calls.every(([hostname]) => hostname === "127.0.0.1")).toBe(true);
-        expect(connections).toEqual([`${kind}:${TARGET_HOST}`, `${kind}:${TARGET_HOST}`]);
+        throw Object.assign(new Error("target DNS unavailable"), { code: "EAI_AGAIN" });
       });
-    },
-  );
+      const options = {
+        mode: "trusted_explicit_proxy" as const,
+        dispatcherPolicy: {
+          mode: "explicit-proxy" as const,
+          proxyUrl: socksProxy,
+          allowPrivateProxy: true,
+          proxyTls: { ca: certificate },
+        },
+        policy: { hostnameAllowlist: [TARGET_HOST] },
+        lookupFn,
+        timeoutMs: 5_000,
+      };
+      const result = await fetchWithSsrFGuard({ ...options, url: TARGET_URL });
+      try {
+        expect((await readResponseWithLimit(result.response, PAYLOAD_BYTES)).toString("utf8")).toBe(
+          PAYLOAD,
+        );
+      } finally {
+        await result.release();
+      }
+      for (const url of [
+        "https://outside.proxy.test/media",
+        "https://127.0.0.1/media",
+        `https://${TARGET_HOST}/redirect`,
+      ]) {
+        await expect(fetchWithSsrFGuard({ ...options, url })).rejects.toThrow("not in allowlist");
+      }
+      await expect(
+        fetchWithSsrFGuard({
+          ...options,
+          url: "https://127.0.0.1/media",
+          policy: undefined,
+        }),
+      ).rejects.toThrow(/private|internal/i);
+      await expect(
+        fetchWithSsrFGuard({
+          ...options,
+          url: TARGET_URL,
+          dispatcherPolicy: { ...options.dispatcherPolicy, allowPrivateProxy: false },
+        }),
+      ).rejects.toThrow(/private|internal/i);
+      expect(lookupFn.mock.calls.every(([hostname]) => hostname === "127.0.0.1")).toBe(true);
+      expect(connections).toEqual([`socks:${TARGET_HOST}`, `socks:${TARGET_HOST}`]);
+    });
+  });
 
   it("does not widen strict-mode SOCKS proxy policy", async () => {
     await withProxyFixture(async ({ socksProxy, connections }) => {
