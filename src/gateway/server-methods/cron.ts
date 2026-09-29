@@ -46,7 +46,6 @@ import {
 } from "../../sessions/agent-harness-session-key.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import {
-  getCronFailureRepairAuthority,
   getCronManagementAuthority,
   withCronManagementGrant,
 } from "../cron-creator-authority-grant.js";
@@ -148,7 +147,6 @@ function requiresExplicitAgentRuntimeToolsAllow(params: {
   return (
     params.callerScope !== undefined &&
     !params.callerScope.manageAll &&
-    !params.callerScope.failureRepair &&
     cronJobUsesToolRuntime(params.job) &&
     params.job.payload.toolsAllow === undefined
   );
@@ -156,42 +154,6 @@ function requiresExplicitAgentRuntimeToolsAllow(params: {
 
 function cronPatchTouchesToolRuntime(patch: CronJobPatch): boolean {
   return patch.payload !== undefined || Object.hasOwn(patch, "trigger");
-}
-
-/**
- * A failure repair edits only the text the job runs: payload.message (agentTurn),
- * payload.script (script payload), or trigger.script. It never touches identity,
- * routing, schedule, or the tool cap, so captured runtime authority survives the edit.
- */
-function assertCronFailureRepairPatch(job: CronJob, patch: CronJobPatch): void {
-  const textField = job.payload.kind === "script" ? "script" : "message";
-  const payloadKeys = patch.payload ? Object.keys(patch.payload) : [];
-  const outside = [
-    ...Object.keys(patch).filter((key) => key !== "payload" && key !== "trigger"),
-    ...payloadKeys
-      .filter((key) => key !== "kind" && key !== textField)
-      .map((key) => `payload.${key}`),
-    ...(patch.trigger === undefined
-      ? []
-      : patch.trigger === null
-        ? ["trigger"]
-        : Object.keys(patch.trigger)
-            .filter((key) => key !== "script")
-            .map((key) => `trigger.${key}`)),
-  ];
-  if (
-    outside.length > 0 ||
-    (job.payload.kind !== "agentTurn" && job.payload.kind !== "script" && payloadKeys.length > 0)
-  ) {
-    throw new TypeError(
-      `automation repair can only change payload.message, payload.script, or trigger.script${
-        outside.length > 0 ? `, not ${outside.join(", ")}` : ""
-      }`,
-    );
-  }
-  if (patch.payload?.kind !== undefined && patch.payload.kind !== job.payload.kind) {
-    throw new TypeError("automation repair cannot change the payload kind");
-  }
 }
 
 export const cronHandlers: GatewayRequestHandlers = {
@@ -786,11 +748,7 @@ export const cronHandlers: GatewayRequestHandlers = {
       }
     }
     const touchesToolRuntime = cronPatchTouchesToolRuntime(patch);
-    const failureRepair = callerScope?.failureRepair;
     const validateUpdate = async (jobToUpdate: CronJob) => {
-      if (failureRepair) {
-        assertCronFailureRepairPatch(jobToUpdate, patch);
-      }
       const nextJob = await assertValidCronUpdatePatch({
         cfg,
         defaultAgentId: context.cron.getDefaultAgentId(),
@@ -817,16 +775,14 @@ export const cronHandlers: GatewayRequestHandlers = {
       captureRuntimeAuthority ||
       callerScope?.toolsAllowProvenance
         ? {
-            // Management and failure repair preserve the job's existing execution ceiling.
+            // Management access preserves the job's existing execution ceiling.
             ...(touchesToolRuntime
-              ? failureRepair
-                ? { scheduledToolPolicy: null }
-                : {
-                    scheduledToolPolicy: callerScope?.manageAll
-                      ? null
-                      : resolveCronScheduledToolPolicyForCaller(callerScope),
-                    toolsAllowExecTarget: callerScope?.toolsAllowExecTarget,
-                  }
+              ? {
+                  scheduledToolPolicy: callerScope?.manageAll
+                    ? null
+                    : resolveCronScheduledToolPolicyForCaller(callerScope),
+                  toolsAllowExecTarget: callerScope?.toolsAllowExecTarget,
+                }
               : {}),
             ...(commitGuard ? { commitGuard } : {}),
             ...(captureRuntimeAuthority ? { captureRuntimeAuthority } : {}),
@@ -857,7 +813,7 @@ export const cronHandlers: GatewayRequestHandlers = {
             }
           }
           await validateUpdate(lockedJob);
-          if (updateOptions && !failureRepair) {
+          if (updateOptions) {
             updateOptions.toolsAllowProvenance = resolveCronRequesterProvenanceForJob(
               lockedJob,
               readCronCallerScope(client),
@@ -1021,10 +977,8 @@ for (const [method, handler] of Object.entries(cronHandlers)) {
     }
     const grant = identity.cronManagementGrant;
     let succeeded = false;
-    let failureRepair = false;
     const run = async () => {
       assertActiveAgentRuntimeAuthority(args.client, args.context);
-      failureRepair = Boolean(getCronFailureRepairAuthority(identity));
       await handler({
         ...args,
         respond: (...response) => {
@@ -1038,7 +992,6 @@ for (const [method, handler] of Object.entries(cronHandlers)) {
           ) {
             assertActiveAgentRuntimeAuthority(args.client, args.context);
             getCronManagementAuthority(identity)?.();
-            getCronFailureRepairAuthority(identity)?.assertActive();
           }
           succeeded = response[0];
           args.respond(...response);
@@ -1054,15 +1007,12 @@ for (const [method, handler] of Object.entries(cronHandlers)) {
       respondInvalidCronParams(args.respond, method, error.message);
     } finally {
       if (grant) {
-        args.context.logGateway.info(
-          failureRepair ? "cron: failure repair management" : "cron: admin management",
-          {
-            method,
-            runId: identity.operationalRunInstance.runId,
-            instanceId: identity.operationalRunInstance.instanceId,
-            ok: succeeded,
-          },
-        );
+        args.context.logGateway.info("cron: admin management", {
+          method,
+          runId: identity.operationalRunInstance.runId,
+          instanceId: identity.operationalRunInstance.instanceId,
+          ok: succeeded,
+        });
       }
     }
   };

@@ -5,9 +5,8 @@ import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-wo
 import { noteCronJobsStoreCommit } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
 import type { CronFailureNotificationDelivery } from "../types.js";
-import { resolveFailureAlert } from "./failure-alerts.js";
 import { locked } from "./locked.js";
-import { cronNotificationJob, type CronNotificationIntent } from "./notification-intents.js";
+import type { CronNotificationIntent } from "./notification-intents.js";
 import { runCronRuntimeMutation } from "./runtime-mutation.js";
 import { applyCronRuntimeRowsToState } from "./runtime-store.js";
 import type { CronServiceState } from "./state.js";
@@ -20,7 +19,10 @@ export function dispatchCronNotification(
   if (notification.kind === "auto-disabled") {
     enqueueCronNotification(state, notification.job, notification.text, notification.kind);
   } else if (notification.kind === "failure-repair") {
-    transportFailureRepair(state, notification);
+    enqueueCronNotification(state, notification.job, notification.text, notification.kind, {
+      sessionKey: notification.ownerSessionKey,
+      agentId: notification.ownerAgentId,
+    });
   } else {
     transportFailureAlert(state, notification);
   }
@@ -141,70 +143,4 @@ function transportFailureAlert(
         "cron: failure alert delivery failed",
       );
     });
-}
-
-function transportFailureRepair(
-  state: CronServiceState,
-  params: Extract<CronNotificationIntent, { kind: "failure-repair" }>,
-): void {
-  const start = state.deps.startCronFailureRepair;
-  const { job } = params.fallback;
-  const findLiveJob = () => state.store?.jobs.find((candidate) => candidate.id === job.id);
-  const repairAtMs = job.state.lastFailureAlertAtMs;
-  const cycle: FailureAlertCycle = {
-    alertAtMs: repairAtMs,
-    jobId: job.id,
-    lifecycleGeneration: state.lifecycleGeneration,
-    notificationId: job.state.lastFailureNotificationId,
-    runAtMs: job.state.lastRunAtMs,
-  };
-  const fallBack = async (reason: string) => {
-    // A verification run can resolve the incident before a failing repair settles. A
-    // stopped or restarted service no longer owns it: startup reconciliation alerts once.
-    const live = findLiveJob();
-    if (
-      state.stopped ||
-      state.lifecycleGeneration !== cycle.lifecycleGeneration ||
-      !live ||
-      live.state.failureAlertIncident?.repair?.atMs !== repairAtMs ||
-      live.state.failureAlertIncident?.repair?.alerted
-    ) {
-      return;
-    }
-    // The fallback is the alert a failure would send now: for the live job, under its live
-    // policy and route, not the ones captured when the repair started.
-    const route = resolveFailureAlert({ deps: state.deps }, live);
-    if (
-      !live.enabled ||
-      live.state.autoDisabled ||
-      !route ||
-      (live.delivery?.bestEffort === true && !live.failureAlert)
-    ) {
-      // A job disabled meanwhile (by the user or the auto-disable notice), or whose alerts
-      // were turned off, needs no alert; settle the repair so a restart does not report
-      // it as interrupted.
-      await recordFailureAlertOutcome(state, cycle, { status: "not-requested" });
-      return;
-    }
-    state.deps.log.warn(
-      { jobId: job.id, reason },
-      "cron: failure repair did not complete; alerting",
-    );
-    transportFailureAlert(state, { ...params.fallback, job: cronNotificationJob(live), route });
-  };
-  const liveJob = findLiveJob();
-  if (!start || !liveJob) {
-    void fallBack("no repair host");
-    return;
-  }
-  void start({ ...params.request, job: structuredClone(liveJob) })
-    .then(async (outcome) => {
-      if (outcome !== "completed") {
-        await fallBack(outcome);
-        return;
-      }
-      // Close the repair's notification cycle: no alert was sent for it.
-      await recordFailureAlertOutcome(state, cycle, { status: "not-requested" });
-    })
-    .catch(async (err: unknown) => await fallBack(formatErrorMessage(err)));
 }

@@ -22,6 +22,7 @@ import type {
   CronJob,
   CronMessageChannel,
 } from "../types.js";
+import { buildCronFailureRepairBrief } from "./failure-repair-brief.js";
 import {
   cronNotificationJob,
   type CronNotificationJob,
@@ -31,10 +32,6 @@ import type { CronJobPolicyContext, DeferredCronNotifications } from "./state.js
 
 const DEFAULT_FAILURE_ALERT_AFTER = 2;
 const DEFAULT_FAILURE_ALERT_COOLDOWN_MS = 60 * 60_000; // 1 hour
-/** Budget for one owner-conversation repair turn; the host aborts the turn after it. */
-export const CRON_FAILURE_REPAIR_TIMEOUT_MS = 10 * 60_000;
-// An unsettled repair (still running, or lost to a crash) holds alerts at most this long.
-const FAILURE_REPAIR_SETTLE_WINDOW_MS = CRON_FAILURE_REPAIR_TIMEOUT_MS + 5 * 60_000;
 
 /** Returns the last failure-notification delivery trace persisted on a cron job. */
 export function failureNotificationDeliveryFromJobState(
@@ -209,7 +206,7 @@ function buildFailureAlertPayload(params: {
   consecutiveErrors: number;
   route: ResolvedFailureAlert;
   status: "error" | "skipped";
-  repairNote?: "attempted" | "interrupted";
+  repairRequested?: boolean;
 }) {
   const safeJobName = params.job.name || params.job.id;
   const errorReason = params.status === "error" ? params.errorReason : undefined;
@@ -226,11 +223,9 @@ function buildFailureAlertPayload(params: {
       : cronFailureDetailLines(errorReason, params.failureNotificationDetail);
   const text = [
     `Automation "${safeJobName}" ${statusVerb} ${params.consecutiveErrors} times`,
-    ...(params.repairNote === "attempted"
-      ? ["An automatic repair was attempted in its owner conversation; it is still failing."]
-      : params.repairNote === "interrupted"
-        ? ["An automatic repair in its owner conversation was interrupted by a Gateway restart."]
-        : []),
+    ...(params.repairRequested
+      ? ["An automatic repair was requested in its owner conversation; it is still failing."]
+      : []),
     ...detailLines,
   ].join("\n");
   const oauthRefreshFailure = params.error ? classifyOAuthRefreshFailure(params.error) : null;
@@ -257,14 +252,11 @@ function startFailureNotification(job: CronJob): void {
 }
 
 function startFailureAlertCycle(job: CronJob, incident: FailureAlertSignal, now: number): void {
-  const current = job.state.failureAlertIncident;
   startFailureNotification(job);
   job.state.lastFailureAlertAtMs = now;
   job.state.failureAlertIncident = {
     ...incident,
-    scope: current?.scope === "run" ? "run" : incident.scope,
-    // Any alert after a repair tells the user; one failure streak never repairs twice.
-    ...(current?.repair ? { repair: { atMs: current.repair.atMs, alerted: true as const } } : {}),
+    scope: job.state.failureAlertIncident?.scope === "run" ? "run" : incident.scope,
   };
 }
 
@@ -334,26 +326,21 @@ function failureIncident(params: {
 }
 
 /**
- * Repair runs as an agent turn with the job's own tool cap. Only jobs that already run as an
- * agent turn (a capless agentTurn runs with the agent's full policy today) or as a script with
- * an explicit cap qualify; main-session events and command jobs never ran with agent tools, so
- * a repair would widen them. On-exit and stream schedules are operator-only: the repair grant
- * rejects them, so a silent turn could swallow the alert. They alert as before.
+ * Owner-conversation repair applies to jobs that conversation can manage. Command jobs and
+ * on-exit or stream schedules are operator-only, so they alert as before.
  */
 export function isCronFailureRepairEligible(job: Pick<CronJob, "payload" | "schedule">): boolean {
-  const { payload } = job;
   return (
+    job.payload.kind !== "command" &&
     job.schedule.kind !== "on-exit" &&
-    job.schedule.kind !== "stream" &&
-    (payload.kind === "agentTurn" ||
-      (payload.kind === "script" && payload.toolsAllow !== undefined))
+    job.schedule.kind !== "stream"
   );
 }
 
 /**
  * Emits one alert per incident when threshold, best-effort, and cooldown policy allow it.
- * The first chat alert of a failure streak becomes an owner-conversation repair when the
- * job has an owner session; a later failure of that streak alerts, naming the repair.
+ * For a job with an owner conversation, the first chat alert of a failure streak becomes a
+ * repair request in that conversation; a later failure of that streak alerts, naming it.
  */
 export function maybeEmitFailureAlert(
   state: CronJobPolicyContext,
@@ -380,30 +367,45 @@ export function maybeEmitFailureAlert(
     return;
   }
   const incident = failureIncident({ ...params, route: alertConfig });
-  const repair = params.job.state.failureAlertIncident?.repair;
   const now = state.deps.nowMs();
-  // A repair whose fallback alert was sent is `alerted` (recorded with the alert outcome).
-  const repairFailed = repair !== undefined && !repair.alerted;
-  if (
-    repairFailed &&
-    !repair.settled &&
-    now >= repair.atMs &&
-    now - repair.atMs < FAILURE_REPAIR_SETTLE_WINDOW_MS
-  ) {
-    // While the turn may still be running, failures (including its own verification runs)
-    // belong to it. Once it settles, the next failure alerts immediately.
-    return;
-  }
-  if (repairFailed) {
-    // The silent repair consumed this incident's alert and cooldown slot.
+  // The repair request took this incident's alert and cooldown slot; if the job still
+  // fails, the user gets the alert once, and the streak is never repaired twice.
+  const repairRequested = params.job.state.failureAlertIncident?.repair !== undefined;
+  if (repairRequested) {
     startFailureAlertCycle(params.job, incident, now);
   } else if (!requestFailureNotification(state, params.job, alertConfig, incident)) {
     return;
   }
-
   const job = cronNotificationJob(params.job);
-  const alert = {
-    kind: "failure-alert" as const,
+  const ownerSessionKey = params.job.owner?.sessionKey?.trim();
+  if (
+    !repairRequested &&
+    alertConfig.repair &&
+    alertConfig.mode === "announce" &&
+    params.status === "error" &&
+    ownerSessionKey &&
+    isCronFailureRepairEligible(params.job)
+  ) {
+    const opened = params.job.state.failureAlertIncident ?? incident;
+    params.job.state.failureAlertIncident = { ...opened, repair: { atMs: now } };
+    // No alert is sent for this cycle; the repair conversation owns any messaging.
+    params.job.state.lastFailureNotificationDeliveryStatus = "not-requested";
+    params.deferredNotifications.push({
+      kind: "failure-repair",
+      job,
+      ownerSessionKey,
+      ...(params.job.owner?.agentId ? { ownerAgentId: params.job.owner.agentId } : {}),
+      text: buildCronFailureRepairBrief({
+        job: params.job,
+        consecutiveErrors: params.consecutiveCount,
+        error: params.error,
+        errorReason: params.errorReason,
+      }),
+    });
+    return;
+  }
+  params.deferredNotifications.push({
+    kind: "failure-alert",
     job,
     payload: buildFailureAlertPayload({
       job,
@@ -413,85 +415,11 @@ export function maybeEmitFailureAlert(
       consecutiveErrors: params.consecutiveCount,
       route: alertConfig,
       status: params.status,
-      ...(repairFailed ? { repairNote: "attempted" as const } : {}),
+      repairRequested,
     }),
     runAtMs: params.runAtMs,
     route: alertConfig,
-  };
-  const ownerSessionKey = params.job.owner?.sessionKey?.trim();
-  const repairIncident = params.job.state.failureAlertIncident;
-  const repairAtMs = params.job.state.lastFailureAlertAtMs;
-  const repairable = isCronFailureRepairEligible(params.job);
-  if (
-    !repair &&
-    repairable &&
-    alertConfig.repair &&
-    alertConfig.mode === "announce" &&
-    params.status === "error" &&
-    ownerSessionKey &&
-    repairIncident &&
-    repairIncident.signature !== undefined &&
-    repairAtMs !== undefined
-  ) {
-    repairIncident.repair = { atMs: repairAtMs };
-    params.deferredNotifications.push({
-      kind: "failure-repair",
-      request: {
-        jobId: params.job.id,
-        ownerSessionKey,
-        consecutiveErrors: params.consecutiveCount,
-        runAtMs: params.runAtMs,
-        incidentSignature: repairIncident.signature,
-        repairAtMs,
-      },
-      fallback: alert,
-    });
-    return;
-  }
-  params.deferredNotifications.push(alert);
-}
-
-/**
- * Startup owner for repairs whose turn and fallback died with the previous process: an
- * enabled job's unsettled, unalerted repair becomes the normal alert, naming the interruption.
- */
-export function reconcileInterruptedFailureRepair(
-  state: CronJobPolicyContext,
-  job: CronJob,
-  deferredNotifications: DeferredCronNotifications,
-): boolean {
-  const incident = job.state.failureAlertIncident;
-  const repair = incident?.repair;
-  if (!incident?.signature || !repair || repair.alerted || repair.settled) {
-    return false;
-  }
-  const alertConfig = resolveFailureAlert(state, job);
-  if (!alertConfig || !job.enabled || job.state.autoDisabled) {
-    repair.settled = true;
-    return true;
-  }
-  startFailureAlertCycle(
-    job,
-    { signature: incident.signature, scope: incident.scope },
-    state.deps.nowMs(),
-  );
-  const notificationJob = cronNotificationJob(job);
-  deferredNotifications.push({
-    kind: "failure-alert",
-    job: notificationJob,
-    payload: buildFailureAlertPayload({
-      job: notificationJob,
-      error: job.state.lastError,
-      errorReason: job.state.lastErrorReason,
-      consecutiveErrors: job.state.consecutiveErrors ?? 0,
-      route: alertConfig,
-      status: "error",
-      repairNote: "interrupted",
-    }),
-    runAtMs: job.state.lastRunAtMs,
-    route: alertConfig,
   });
-  return true;
 }
 
 /**

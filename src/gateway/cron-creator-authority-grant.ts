@@ -22,8 +22,6 @@ export const CRON_MANAGEMENT_METHODS = [
   "cron.run",
   "cron.remove",
 ] as const;
-/** A failure repair may inspect, fix, and verify its one job; it never lists or removes. */
-export const CRON_FAILURE_REPAIR_METHODS = ["cron.get", "cron.update", "cron.run"] as const;
 type CronManagementBinding = { method: string; authority: AgentRunDelegatedAuthority };
 type CronManagementCaller = {
   operationalRunInstance: AgentRunDelegatedAuthority["operationalRunInstance"];
@@ -34,20 +32,12 @@ const activeManagement = new AsyncLocalStorage<{
   assertActive: () => void;
   callerOrigin?: CronScheduledToolCallerOrigin;
   channelRequester?: CronAuthenticatedChannelRequester;
-  /** Set when the grant came from a failure-repair entitlement: that job only, never manage-all. */
-  failureRepairJobId?: string;
 }>();
 
 /** Admission fact, independent of a run lifetime so an authorized yield can transfer it. */
 export type CronManagementEntitlement =
   | Readonly<{ source: "control-ui-admin" }>
-  | Readonly<{ source: "channel-owner"; isCurrent: () => boolean }>
-  /**
-   * Host-minted for one owner-conversation repair run: live only while the incident that
-   * started the repair is open. Never transferred to requester continuations. Its liveness
-   * gates automation management only, not the rest of the repair run.
-   */
-  | Readonly<{ source: "failure-repair"; jobId: string; isCurrent: () => boolean }>;
+  | Readonly<{ source: "channel-owner"; isCurrent: () => boolean }>;
 
 export type CronCreatorAuthorityRunScope = {
   readonly runId: string;
@@ -155,15 +145,10 @@ export function mintCronCreatorAuthorityGrant(
     operationSignal?.aborted ||
     scope.isCurrent?.() === false ||
     isCurrent?.() === false ||
-    (scope.managementEntitlement !== undefined &&
-      scope.managementEntitlement.source !== "control-ui-admin" &&
+    (scope.managementEntitlement?.source === "channel-owner" &&
       !scope.managementEntitlement.isCurrent())
   ) {
-    throw management
-      ? scope.managementEntitlement?.source === "failure-repair"
-        ? inactiveFailureRepairError()
-        : expiredManagementError()
-      : expiredAuthorityError();
+    throw management ? expiredManagementError() : expiredAuthorityError();
   }
   // Remote admission can prove the requester, never materialize fresh runtime authority.
   if (
@@ -190,15 +175,6 @@ export function mintCronCreatorAuthorityGrant(
       !validateAgentRunDelegatedAuthority(management.authority))
   ) {
     throw expiredManagementError();
-  }
-  if (
-    management &&
-    scope.managementEntitlement?.source === "failure-repair" &&
-    !CRON_FAILURE_REPAIR_METHODS.some((method) => method === management.method)
-  ) {
-    throw new TypeError(
-      "This automation repair turn can only get, update, or run the automation it is repairing.",
-    );
   }
   const token = randomBytes(32).toString("base64url");
   const normalizedRuntimeAuthority = runtimeAuthority
@@ -345,12 +321,6 @@ export function consumeCronCreatorAuthorityGrant(
   return entry.runtimeAuthority ? cloneCronRuntimeAuthority(entry.runtimeAuthority) : undefined;
 }
 
-function inactiveFailureRepairError(): TypeError {
-  return new TypeError(
-    "This automation repair is no longer active: its failure was resolved, replaced by a new failure, or escalated to the user. Do not change the automation further.",
-  );
-}
-
 function expiredManagementError(): TypeError {
   return new TypeError(
     "Automation admin grant is missing, expired, or already used. Retry from a fresh authenticated configured channel owner or Control UI administrator turn, or use the Automations page.",
@@ -412,22 +382,15 @@ export async function withCronManagementGrant<T>(
       entry.scope.signal.aborted ||
       entry.operationSignal?.aborted ||
       entry.scope.isCurrent?.() === false ||
-      (entry.scope.managementEntitlement !== undefined &&
-        entry.scope.managementEntitlement.source !== "control-ui-admin" &&
+      (entry.scope.managementEntitlement?.source === "channel-owner" &&
         !entry.scope.managementEntitlement.isCurrent()) ||
       Date.now() >= management.expiresAtMs ||
       !validateAgentRunDelegatedAuthority(management.authority)
     ) {
-      throw entry.scope.managementEntitlement?.source === "failure-repair"
-        ? inactiveFailureRepairError()
-        : expiredManagementError();
+      throw expiredManagementError();
     }
   };
   assertActive();
-  const failureRepairJobId =
-    entry.scope.managementEntitlement?.source === "failure-repair"
-      ? entry.scope.managementEntitlement.jobId
-      : undefined;
   // Queue acknowledgement precedes reservation. Its retained guard still
   // belongs to this exact live run, signal, and expiry after the RPC returns.
   return await activeManagement.run(
@@ -438,7 +401,6 @@ export async function withCronManagementGrant<T>(
         ? { callerOrigin: { kind: "local" as const } }
         : {}),
       channelRequester: channelRequestersByScope.get(entry.scope),
-      ...(failureRepairJobId ? { failureRepairJobId } : {}),
     },
     run,
   );
@@ -448,19 +410,7 @@ export function getCronManagementAuthority(
   identity: CronManagementCaller,
 ): (() => void) | undefined {
   const management = activeManagement.getStore();
-  return management?.identity === identity && !management.failureRepairJobId
-    ? management.assertActive
-    : undefined;
-}
-
-/** The redeemed failure-repair grant for this request: one job, owner-level rules. */
-export function getCronFailureRepairAuthority(
-  identity: CronManagementCaller,
-): { jobId: string; assertActive: () => void } | undefined {
-  const management = activeManagement.getStore();
-  return management?.identity === identity && management.failureRepairJobId
-    ? { jobId: management.failureRepairJobId, assertActive: management.assertActive }
-    : undefined;
+  return management?.identity === identity ? management.assertActive : undefined;
 }
 
 export function getCronManagementChannelRequester(

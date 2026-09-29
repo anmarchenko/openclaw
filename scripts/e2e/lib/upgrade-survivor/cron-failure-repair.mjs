@@ -17,7 +17,7 @@ const BROKEN_MODEL = "cron-broken-step";
 const OWNER_SESSION_KEY = "agent:main:cron-repair-owner";
 const OWNER_READY = "CRON_REPAIR_OWNER_READY";
 const BROKEN_ERROR = "cron repair survivor: broken step rejected";
-const REPAIR_BRIEF = "Automation repair: private background turn started by the scheduler";
+const REPAIR_BRIEF = "Automation repair request from the scheduler";
 const FAILURE_ROUTE = { after: 2, channel: "telegram", to: "123456789" };
 const JOBS = {
   owned: { name: "Survivor owned sync", owner: true },
@@ -312,13 +312,18 @@ async function exercise() {
       ownedDelivery: owned?.lastFailureNotificationDeliveryStatus,
       unownedIncident: unowned?.failureAlertIncident,
       unownedDelivery: unowned?.lastFailureNotificationDeliveryStatus,
+      // The owner conversation's woken turn carries the repair request to the model.
+      ownedBriefSeen: readRequests()
+        .slice(requestsBefore)
+        .some((entry) => entry.model === MODEL && entry.text.includes(REPAIR_BRIEF)),
       // An undeliverable chat alert falls back to the main session, where the model sees it.
       unownedAlertSeen: readRequests()
         .slice(requestsBefore)
         .some((entry) => entry.text.includes(alertNeedle(JOBS.unowned.name))),
     };
     const done =
-      value.ownedIncident?.repair?.settled === true &&
+      value.ownedIncident?.repair !== undefined &&
+      value.ownedBriefSeen &&
       value.unownedDelivery !== undefined &&
       value.unownedDelivery !== "unknown" &&
       value.unownedAlertSeen;
@@ -341,17 +346,15 @@ function alertNeedle(jobName) {
   return JSON.stringify(`Automation "${jobName}" failed 2 times`).slice(1, -1);
 }
 
-function assertRuntime(ids, settled, requests, gatewayLog) {
+function assertRuntime(ids, settled, requests) {
   const owned = settled.rows[ids.owned];
   const unowned = settled.rows[ids.unowned];
-  // Owned: the threshold failure started exactly one repair turn in the owner conversation.
+  // Owned: the threshold failure asked the owner conversation to repair it, once.
   assert.equal(owned.enabled, true, "Owned job was disabled");
   assert.equal(owned.state.consecutiveErrors, 2);
   const repair = owned.state.failureAlertIncident?.repair;
   assert(repair, "Owned incident has no persisted repair marker");
   assert.equal(repair.atMs, owned.state.lastFailureAlertAtMs, "Repair marker lost its cycle");
-  assert.equal(repair.settled, true, "Repair marker did not settle");
-  assert.equal(repair.alerted, undefined, "Owned job fell back to the chat alert");
   assert.equal(owned.state.lastFailureNotificationDeliveryStatus, "not-requested");
   const briefs = requests.filter(
     (entry) => entry.model === MODEL && entry.text.includes(REPAIR_BRIEF),
@@ -359,7 +362,7 @@ function assertRuntime(ids, settled, requests, gatewayLog) {
   assert.equal(briefs.length, 1, "Mock did not see exactly one repair brief");
   const brief = briefs[0].text;
   assert(
-    brief.includes(`(id ${ids.owned}) failed 2 consecutive runs`),
+    brief.includes(`(id ${ids.owned}), created in this conversation, failed 2 consecutive runs`),
     "Repair brief named another job or streak",
   );
   // The brief carries the recorded run error (bounded), JSON-escaped in the logged body.
@@ -375,9 +378,6 @@ function assertRuntime(ids, settled, requests, gatewayLog) {
   assert.notEqual(unowned.state.lastFailureNotificationDeliveryStatus, "not-requested");
   const ownedAlerts = requests.filter((entry) => entry.text.includes(alertNeedle(JOBS.owned.name)));
   assert.equal(ownedAlerts.length, 0, "The owned job's failure alert reached the agent");
-  const log = fs.readFileSync(gatewayLog, "utf8");
-  assert.doesNotMatch(log, /failure repair (turn )?did not complete/u);
-  assert.doesNotMatch(log, /cron: failure repair turn failed/u);
   const proof = {
     status: "passed",
     ownedJobId: ids.owned,
@@ -404,5 +404,5 @@ if (command === "configure") {
 } else {
   assert.equal(command, "exercise", `unknown cron-failure-repair command: ${command}`);
   const { ids, settled, requests } = await exercise();
-  assertRuntime(ids, settled, requests, requiredEnv("OPENCLAW_UPGRADE_SURVIVOR_GATEWAY_LOG"));
+  assertRuntime(ids, settled, requests);
 }

@@ -6,7 +6,6 @@ import {
   releaseLocalCronRunReceiptOwnership,
 } from "../store/run-receipt-store.js";
 import type { CronJob } from "../types.js";
-import { reconcileInterruptedFailureRepair } from "./failure-alerts.js";
 import {
   DEFAULT_ERROR_BACKOFF_SCHEDULE_MS,
   hasActiveCronRun,
@@ -60,14 +59,6 @@ function collectStartupCatchupJobs(
     mutate: ({ database, jobs }) => {
       const committed: CronJob[] = [];
       for (const job of jobs.values()) {
-        const repairReconciled = reconcileInterruptedFailureRepair(
-          state,
-          job,
-          postPersistNotifications,
-        );
-        if (repairReconciled) {
-          committed.push(job);
-        }
         if (
           !isJobEnabled(job) ||
           opts?.skipJobIds?.has(job.id) ||
@@ -91,9 +82,7 @@ function collectStartupCatchupJobs(
           job.state.nextRunAtMs !== backoffUntilMs
         ) {
           job.state.nextRunAtMs = backoffUntilMs;
-          if (!repairReconciled) {
-            committed.push(job);
-          }
+          committed.push(job);
           continue;
         }
         if (
@@ -120,9 +109,7 @@ function collectStartupCatchupJobs(
               deferredNotifications: postPersistNotifications,
             })
           ) {
-            if (!repairReconciled) {
-              committed.push(job);
-            }
+            committed.push(job);
           }
           skippedJobIds.push(job.id);
         } else {

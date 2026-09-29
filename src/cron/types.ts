@@ -281,14 +281,13 @@ export type CronJobState = Omit<
   runningScheduleChangeId?: string;
   /**
    * Unresolved recovery scope and last notified signature, when an alert was requested.
-   * `repair` records the one owner-conversation repair attempt of this failure streak;
-   * `alerted` means the user has since received a failure alert for it, and `settled`
-   * means the repair turn finished; an unsettled, unalerted repair at startup was interrupted.
+   * `repair` records the owner-conversation repair request that replaced this incident's
+   * first alert; the next alert of the incident names it and clears it.
    */
   failureAlertIncident?: {
     signature?: string;
     scope: "run" | "trigger";
-    repair?: { atMs: number; alerted?: true; settled?: true };
+    repair?: { atMs: number };
   };
   /** Fences notification settlement when multiple cycles share a timestamp. */
   lastFailureNotificationId?: string;

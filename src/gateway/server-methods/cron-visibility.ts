@@ -1,10 +1,7 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveCronSessionTargetSessionKey } from "../../cron/session-target.js";
 import type { CronJob } from "../../cron/types.js";
-import {
-  getCronFailureRepairAuthority,
-  getCronManagementAuthority,
-} from "../cron-creator-authority-grant.js";
+import { getCronManagementAuthority } from "../cron-creator-authority-grant.js";
 import type { PreparedSessionMutationFacts } from "../session-sharing-policy.js";
 import {
   prepareSessionMutationFacts,
@@ -18,11 +15,7 @@ type CronSessionVisibility = (sessionKey: string, agentId?: string) => boolean;
 
 function resolveCronEntryFilter(client: GatewayClient | null, cfg: OpenClawConfig) {
   const identity = client?.internal?.agentRuntimeIdentity;
-  // A repair grant is host-bound to one job; caller scope already restricts it to that job.
-  if (
-    identity &&
-    (getCronManagementAuthority(identity) || getCronFailureRepairAuthority(identity))
-  ) {
+  if (identity && getCronManagementAuthority(identity)) {
     return undefined;
   }
   const sharing = prepareProjectedSessionSharing({ client, cfg, isMember: () => false });

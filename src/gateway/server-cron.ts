@@ -125,7 +125,6 @@ import {
 } from "./scheduled-run-gateway-context.js";
 import type { GatewayCronServiceContract } from "./server-cron-contract.js";
 import { drainGatewayCron } from "./server-cron-drain.js";
-import { runGatewayCronFailureRepair } from "./server-cron-failure-repair.js";
 import {
   dispatchGatewayCronFinishedNotifications,
   sendGatewayCronWebhook,
@@ -396,8 +395,6 @@ export function buildGatewayCronService(params: {
     params.resolveGatewayContext,
   );
   const runSchedulerOwned = createScheduledGatewayRunner(scheduledGatewayContextResolver);
-  // Failure-repair turns bind to their job's authority through its change events.
-  const cronJobChangeListeners = new Map<string, Set<() => void>>();
   const env = params.env ?? process.env;
   const storePath = resolveCronJobsStorePathFromConfig(params.cfg, env);
   const cronEnabled =
@@ -998,27 +995,6 @@ export function buildGatewayCronService(params: {
         webhookToken: params.cfg.cron?.webhookToken,
         ssrfPolicy: webhookSsrfPolicy,
       }),
-    startCronFailureRepair: async (request) =>
-      await runGatewayCronFailureRepair({
-        request,
-        getJob: (jobId) => cron.getJob(jobId),
-        onJobChange: (jobId, listener) => {
-          const listeners = cronJobChangeListeners.get(jobId) ?? new Set<() => void>();
-          listeners.add(listener);
-          cronJobChangeListeners.set(jobId, listeners);
-          return () => {
-            listeners.delete(listener);
-            if (listeners.size === 0 && cronJobChangeListeners.get(jobId) === listeners) {
-              cronJobChangeListeners.delete(jobId);
-            }
-          };
-        },
-        storePath,
-        deps: params.deps,
-        resolveCronAgent,
-        runSchedulerOwned,
-        log: cronServiceLogger,
-      }),
     log: toPinoLikeLogger(
       getChildLogger({ module: "cron", storeKey: storePath }),
       getResolvedLoggerSettings().level,
@@ -1027,9 +1003,6 @@ export function buildGatewayCronService(params: {
       // Any job/store change can alter session automation bindings, including
       // in-place enable flips during runs; the index publishes only binding deltas.
       invalidateSessionAutomationIndex();
-      for (const listener of cronJobChangeListeners.get(evt.jobId) ?? []) {
-        listener();
-      }
       const jobSnapshot = evt.job ?? cron.getJob(evt.jobId);
       const scopedSessionKey =
         jobSnapshot?.owner?.sessionKey ??

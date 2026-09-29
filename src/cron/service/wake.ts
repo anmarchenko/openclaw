@@ -8,15 +8,22 @@ import { resolveCronDeliverySessionKey } from "../session-target.js";
 import type { CronNotificationJob } from "./notification-intents.js";
 import type { CronServiceState } from "./state.js";
 
-/** Keeps safety notices with their creator and limits failure routes to explicit origins. */
+/**
+ * Keeps safety notices with their creator and limits failure routes to explicit origins; a
+ * failure repair request goes to the conversation that owns the job.
+ */
 export function enqueueCronNotification(
   state: CronServiceState,
   job: CronNotificationJob,
   text: string,
-  kind: "auto-disabled" | "failure-alert",
+  kind: "auto-disabled" | "failure-alert" | "failure-repair",
+  owner?: { sessionKey: string; agentId?: string },
 ): void {
-  const sessionKey = kind === "failure-alert" ? resolveCronDeliverySessionKey(job) : job.sessionKey;
+  const sessionKey =
+    owner?.sessionKey ??
+    (kind === "failure-alert" ? resolveCronDeliverySessionKey(job) : job.sessionKey);
   const agentId =
+    normalizeOptionalAgentId(owner?.agentId ?? parseAgentSessionKey(owner?.sessionKey)?.agentId) ??
     normalizeOptionalAgentId(job.agentId) ??
     normalizeOptionalAgentId(parseAgentSessionKey(sessionKey)?.agentId) ??
     normalizeOptionalAgentId(state.deps.resolveDefaultAgentId?.()) ??

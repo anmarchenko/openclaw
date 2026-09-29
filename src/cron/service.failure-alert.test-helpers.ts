@@ -1,15 +1,13 @@
 import { expect, vi } from "vitest";
 import { CronService } from "./service.js";
 import { setupCronServiceSuite } from "./service.test-harness.js";
-import { saveCronStore } from "./store.js";
-import type { CronJobCreate, CronStoredJob } from "./types.js";
+import type { CronJobCreate } from "./types.js";
 
 type CronServiceParams = ConstructorParameters<typeof CronService>[0];
 type RunIsolatedAgentJob = NonNullable<CronServiceParams["runIsolatedAgentJob"]>;
 type IsolatedAgentRunResult = Awaited<ReturnType<RunIsolatedAgentJob>>;
 type FailureAlertConfig = NonNullable<CronServiceParams["cronConfig"]>["failureAlert"];
 type SendCronFailureAlert = NonNullable<CronServiceParams["sendCronFailureAlert"]>;
-type StartCronFailureRepair = NonNullable<CronServiceParams["startCronFailureRepair"]>;
 
 export function createTelegramDelivery(): NonNullable<CronJobCreate["delivery"]> {
   return { mode: "announce", channel: "telegram", to: "19098680" };
@@ -42,13 +40,9 @@ export function setupFailureAlertSuite() {
       failureAlert?: FailureAlertConfig;
       runResult?: IsolatedAgentRunResult;
       useFallback?: boolean;
-      startCronFailureRepair?: StartCronFailureRepair;
-      /** Rows written before the service starts, e.g. as an older release left them. */
-      seedJobs?: CronStoredJob[];
     },
     run: (context: {
       cron: CronService;
-      storePath: string;
       enqueueSystemEvent: ReturnType<typeof vi.fn>;
       requestHeartbeat: ReturnType<typeof vi.fn>;
       sendCronFailureAlert: ReturnType<typeof vi.fn<SendCronFailureAlert>>;
@@ -57,9 +51,6 @@ export function setupFailureAlertSuite() {
     }) => Promise<void>,
   ): Promise<void> {
     const store = await makeStorePath();
-    if (params.seedJobs) {
-      await saveCronStore(store.storePath, { version: 1, jobs: params.seedJobs });
-    }
     const sendCronFailureAlert = vi.fn<SendCronFailureAlert>(async () => undefined);
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeat = vi.fn();
@@ -81,16 +72,12 @@ export function setupFailureAlertSuite() {
       requestHeartbeat,
       runIsolatedAgentJob,
       ...(params.useFallback ? {} : { sendCronFailureAlert }),
-      ...(params.startCronFailureRepair
-        ? { startCronFailureRepair: params.startCronFailureRepair }
-        : {}),
     });
 
     await cron.start();
     try {
       await run({
         cron,
-        storePath: store.storePath,
         enqueueSystemEvent,
         requestHeartbeat,
         sendCronFailureAlert,
