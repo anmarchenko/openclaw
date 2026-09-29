@@ -3,6 +3,7 @@ import { prepareOperatorModelPresentation } from "./operator-model-presentation.
 import { gatewayClientSessionCreator } from "./server-methods/gateway-client-identity.js";
 import type { createVisibleActiveSessionRunProjector } from "./server-methods/session-active-runs.js";
 import type { GatewayClient } from "./server-methods/types.js";
+import { prepareSessionFastModePresentation } from "./session-fast-mode-presentation.js";
 import {
   projectSessionParticipant,
   projectSessionProfileInvolvement,
@@ -75,6 +76,7 @@ export function prepareProjectedSessionPresentation(
   publication?: PublicationView,
 ) {
   const { cfg, policyConfig, rowContext } = projection.state;
+  const presentFastMode = prepareSessionFastModePresentation(client);
   const models =
     client === undefined
       ? undefined
@@ -173,6 +175,7 @@ export function prepareProjectedSessionPresentation(
     const signature =
       publicationRows &&
       JSON.stringify([
+        presentFastMode("ultrafast"),
         options.includeDerivedTitles,
         options.includeLastMessage,
         options.includeActivitySummary,
@@ -222,6 +225,8 @@ export function prepareProjectedSessionPresentation(
       excludedChildKeys,
       preparedFacts,
     });
+    row.fastMode = presentFastMode(row.fastMode);
+    row.effectiveFastMode = presentFastMode(row.effectiveFastMode);
     if (swarm) {
       row.swarm = swarm;
     }

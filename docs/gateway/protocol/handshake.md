@@ -252,6 +252,12 @@ Operator clients may advertise optional capabilities in `connect.params.caps`:
 
 - `tool-events`: accepts structured tool lifecycle events.
 - `inline-widgets`: can render hosted inline widget tool results.
+- `ultrafast`: accepts the explicit `"ultrafast"` fast-mode value in session metadata.
+  Without it, session responses and events present that value as Fast (`true`)
+  for released native decoders that only accept booleans and `"auto"`. This is a
+  per-connection presentation: stored selection and execution stay `"ultrafast"`.
+  Upgraded clients advertise this capability to retain the explicit selection;
+  remove the legacy projection only when those released clients are no longer supported.
 
 Client capabilities describe the connected client, not authorization. Agent tools may declare required capabilities; the Gateway omits those tools unless every requirement appears in the originating client's `caps`. Channel-originated runs have no Gateway client capabilities, so capability-gated tools are unavailable even when tool policy explicitly allows them.
 

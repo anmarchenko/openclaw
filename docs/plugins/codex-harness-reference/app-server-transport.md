@@ -148,10 +148,13 @@ and preference state, not observed provider routing.
 Select Ultrafast in the Control UI, or set the shared `fastMode` preference to
 `"ultrafast"`, to request Ultrafast independently of `appServer.enableUltrafast`.
 Before every turn, OpenClaw checks the selected native model's `serviceTiers`
-through that turn's authenticated Codex app-server connection. Models without
-access, custom model providers, and unavailable catalogs fall back to Fast
-(`priority`); support from another model or account is never reused. The saved
-preference is not a guarantee of the upstream tier honored for the request.
+through that turn's authenticated Codex app-server connection. Models whose
+catalog does not advertise the tier, custom model providers, and unavailable
+catalogs fall back to Fast (`priority`). The native catalog can contain offline
+fallback metadata, so this turn-time check does not establish account entitlement.
+The Control UI requires separate authenticated account-discovery evidence before
+showing Ultrafast. The saved preference is not a guarantee of the upstream tier
+honored for the request.
 
 The legacy `appServer.enableUltrafast: true` setting applies only when no shared
 Fast-mode run control is supplied. Explicit Fast (`true`) and active auto stay

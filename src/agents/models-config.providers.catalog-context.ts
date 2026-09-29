@@ -3,6 +3,7 @@ import {
   normalizeProviderId,
 } from "@openclaw/model-catalog-core/provider-id";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { withGuardedFetchRequestAuthority } from "../infra/net/fetch-request-authority.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import type {
   ProviderCatalogOutcome,
@@ -19,6 +20,7 @@ import { resolveRegisteredAgentIdForDir } from "./agent-dir-registry.js";
 import { buildOAuthRefreshFailureLoginCommand } from "./auth-profiles/oauth-refresh-failure.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
 import type { ProviderConfig } from "./models-config.providers.secret-helpers.js";
+import { PreparedModelRuntimePublicationSupersededError } from "./prepared-model-runtime.errors.js";
 import { resolveProviderIdForAuth } from "./provider-auth-aliases.js";
 
 const log = createSubsystemLogger("agents/model-providers");
@@ -203,7 +205,13 @@ export async function loadSelectedProviderAccountCatalog(params: {
   isCurrent: () => boolean;
   assertCurrent: () => void;
 }): Promise<readonly ProviderCatalogOutcome[]> {
-  const { providerId, profileId, authStore, assertCurrent } = params;
+  const { providerId, profileId, authStore } = params;
+  const assertCurrent = () => {
+    params.assertCurrent();
+    if (!params.isCurrent()) {
+      throw new PreparedModelRuntimePublicationSupersededError("Selected account catalog changed");
+    }
+  };
   const credential = authStore.profiles[profileId];
   if (!credential) {
     return [];
@@ -230,30 +238,38 @@ export async function loadSelectedProviderAccountCatalog(params: {
       : { apiKey: undefined, mode: "none", source: "none", preparationFailed: true };
   };
   const acquired: ProviderCatalogOutcome[] = [];
-  await runProviderCatalogWithTimeout({
-    provider: params.provider,
-    providerIds: [providerId],
-    config: params.config,
-    agentDir: params.agentDir,
-    workspaceDir: params.workspaceDir,
-    env: process.env,
-    authStore: selectedStore,
-    timeoutMs: 5_000,
-    resolveProviderAuth: (requested, options) => lockedAuth(requested ?? providerId, options),
-    resolveProviderApiKey: (requested) => {
-      const { mode, ...auth } = lockedAuth(requested ?? providerId);
-      return {
-        ...auth,
-        ...(mode === "api_key" || mode === "oauth" || mode === "token" ? { mode } : {}),
-      };
-    },
-    isActive: params.isCurrent,
-    reportCatalogOutcome: (outcome) => {
-      if (normalizeProviderId(outcome.provider) === providerId && outcome.profileId === profileId) {
-        acquired.push(outcome);
-      }
-    },
-  });
+  // Reuse the HTTP owner's closure-bound fence: auth refresh, lazy imports,
+  // DNS/proxy preparation, and every redirect retain this exact selected scope.
+  // Closing the bounded run also denies late/detached guarded requests.
+  await withGuardedFetchRequestAuthority(assertCurrent, async () =>
+    runProviderCatalogWithTimeout({
+      provider: params.provider,
+      providerIds: [providerId],
+      config: params.config,
+      agentDir: params.agentDir,
+      workspaceDir: params.workspaceDir,
+      env: process.env,
+      authStore: selectedStore,
+      timeoutMs: 5_000,
+      resolveProviderAuth: (requested, options) => lockedAuth(requested ?? providerId, options),
+      resolveProviderApiKey: (requested) => {
+        const { mode, ...auth } = lockedAuth(requested ?? providerId);
+        return {
+          ...auth,
+          ...(mode === "api_key" || mode === "oauth" || mode === "token" ? { mode } : {}),
+        };
+      },
+      isActive: params.isCurrent,
+      reportCatalogOutcome: (outcome) => {
+        if (
+          normalizeProviderId(outcome.provider) === providerId &&
+          outcome.profileId === profileId
+        ) {
+          acquired.push(outcome);
+        }
+      },
+    }),
+  );
   assertCurrent();
   return acquired;
 }

@@ -1387,10 +1387,10 @@ describe("callGateway url resolution", () => {
     setLocalLoopbackGatewayConfig();
     const caps = [GATEWAY_CLIENT_CAPS.SKILL_CURATOR_LIVE_INVENTORY];
     await callGateway({ method: "skills.curator.status", params: {}, caps });
-    expect(lastClientOptions?.caps).toEqual(caps);
+    expect(lastClientOptions?.caps).toEqual([GATEWAY_CLIENT_CAPS.ULTRAFAST, ...caps]);
     expect(lastRequestOptions).toMatchObject({ method: "skills.curator.status", params: {} });
     await callGateway({ method: "skills.curator.status", params: {} });
-    expect(lastClientOptions?.caps).toBeUndefined();
+    expect(lastClientOptions?.caps).toEqual([GATEWAY_CLIENT_CAPS.ULTRAFAST]);
   });
 });
 

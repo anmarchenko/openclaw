@@ -5054,6 +5054,7 @@ extension NodeAppModel {
                 OpenClawGatewayClientCapability.agentKind,
                 OpenClawGatewayClientCapability.inlineWidgets,
                 OpenClawGatewayClientCapability.modelSelectionPolicy,
+                OpenClawGatewayClientCapability.ultrafast,
             ],
             commands: [],
             permissions: [:],

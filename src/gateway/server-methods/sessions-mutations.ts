@@ -24,6 +24,7 @@ import { runExclusiveSessionLifecycleMutation } from "../../sessions/session-lif
 import { resolveCurrentUserProfileDisplay } from "../current-user-profile-display.js";
 import { captureGatewayOperatorRunAuthority } from "../operator-run-authority.js";
 import { ADMIN_SCOPE } from "../operator-scopes.js";
+import { prepareSessionFastModePresentation } from "../session-fast-mode-presentation.js";
 import {
   projectAssignableSessionOwner,
   projectSessionActor,
@@ -182,7 +183,10 @@ function createSessionPatchHandler(
         projectSessionPatchResult({
           ...prepared,
           cfg: executed.cfg,
-          entry: outcome.entry,
+          entry: {
+            ...outcome.entry,
+            fastMode: prepareSessionFastModePresentation(client)(outcome.entry.fastMode),
+          },
           modelCatalog: catalog?.entries,
           modelCatalogRouteVariants: catalog?.routeVariants,
         }),
@@ -585,7 +589,15 @@ export const sessionMutationHandlers: GatewayRequestHandlers = {
     }
     respond(
       true,
-      { ok: true, key: result.key, entry: result.entry, resolved: result.resolved },
+      {
+        ok: true,
+        key: result.key,
+        entry: {
+          ...result.entry,
+          fastMode: prepareSessionFastModePresentation(client)(result.entry.fastMode),
+        },
+        resolved: result.resolved,
+      },
       undefined,
     );
     emitSessionsChanged(context, {

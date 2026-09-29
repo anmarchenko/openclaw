@@ -237,6 +237,8 @@ export function createGatewayConnectionState(params: {
         const projected: Record<string, unknown> = {
           ...base,
           session: row,
+          fastMode: row.fastMode,
+          effectiveFastMode: row.effectiveFastMode,
           ancestorSessions: ancestorDelivery?.ancestorSessions,
           ancestorSessionRefs: ancestorDelivery?.ancestorSessionRefs,
           visibility: row.visibility,

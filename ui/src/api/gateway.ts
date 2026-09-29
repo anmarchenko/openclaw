@@ -485,6 +485,7 @@ export class GatewayBrowserClient {
             "inline-widgets",
             "model-selection-policy",
             "ui-commands",
+            "ultrafast",
             "usage-refreshing",
           ],
         }),

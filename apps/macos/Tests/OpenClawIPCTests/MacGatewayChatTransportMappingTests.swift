@@ -285,6 +285,7 @@ struct MacGatewayChatTransportMappingTests {
             OpenClawGatewayClientCapability.agentKind,
             OpenClawGatewayClientCapability.inlineWidgets,
             OpenClawGatewayClientCapability.modelSelectionPolicy,
+            OpenClawGatewayClientCapability.ultrafast,
             OpenClawGatewayClientCapability.usageRefreshing,
         ])
     }
