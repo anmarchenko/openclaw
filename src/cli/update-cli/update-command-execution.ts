@@ -10,7 +10,7 @@ import {
 } from "../../infra/update-doctor-config.js";
 import { resolveUpdateFinalizationTimeoutMs } from "../../infra/update-finalization-budget.js";
 import { canResolveRegistryVersionForPackageTarget } from "../../infra/update-global.js";
-import { recordUpdateRunPhase } from "../../infra/update-run-ledger.js";
+import { recordUpdateRunPhaseAsync } from "../../infra/update-run-write.async.js";
 import type { UpdateRunResult } from "../../infra/update-runner-types.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -25,7 +25,10 @@ import {
   resolveGitInstallDir,
   UpdatePreMutationError,
 } from "./shared.js";
-import { validateUpdateCandidateWithProgress } from "./update-command-candidate-validation.js";
+import {
+  checkUpdateCandidateNativeReceiver,
+  validateUpdateCandidateWithProgress,
+} from "./update-command-candidate-validation.js";
 import {
   captureUpdateDatabases,
   restoreFailedUpdateDatabases,
@@ -70,8 +73,6 @@ import {
   type MutableUpdateExecutionResult,
 } from "./update-command-result.js";
 import { captureUpdateActivationSchemas } from "./update-command-schema.js";
-import { isUpdatedInstallGatewayExecutorSupported } from "./update-command-service-command.js";
-import { resolveUpdatedInstallCommandEnv } from "./update-command-service-env.js";
 import { GatewayServiceUpdateOwnershipError } from "./update-command-service-plan.js";
 import { assertManagedGatewayArtifactPublication } from "./update-command-service-revalidation.js";
 import {
@@ -375,8 +376,14 @@ export async function executeMutableUpdate(
   const validateCandidate = async (root: string) => {
     assertUpdateCommandRecovery(opts);
     const env = ownedManagedUpdateContext?.env ?? opts.run?.env ?? process.env;
-    if (opts.run) {
-      recordUpdateRunPhase(opts.run.runId, "validating", undefined, { env: opts.run.env });
+    if (originalRun) {
+      await recordUpdateRunPhaseAsync(
+        originalRun.runId,
+        "validating",
+        undefined,
+        captureWriteOptions(),
+      );
+      assertExecutionCurrent();
     }
     try {
       if (params.updateInstallKind === "package") {
@@ -404,26 +411,11 @@ export async function executeMutableUpdate(
     }
     if (
       params.shouldRestart &&
-      opts.run &&
+      originalRun &&
       preManagedServiceStop?.serviceUpdateVerdict?.kind === "owned"
     ) {
-      const executor = opts.run.executorFence;
-      if (!executor) {
-        throw new UpdatePreMutationError(
-          "target-native-unsupported",
-          "Starting the update requires its original update process.",
-        );
-      }
-      const supported = await isUpdatedInstallGatewayExecutorSupported({
-        root,
-        env: resolveUpdatedInstallCommandEnv({
-          processEnv: env,
-          invocationCwd: params.invocationCwd,
-        }),
-        executor,
-        timeoutMs: updateStepTimeoutMs,
-        nodeRunner: params.packageUpdateNodeRunner,
-      });
+      assertExecutionCurrent();
+      const supported = await checkUpdateCandidateNativeReceiver(root, env, params, originalRun);
       assertExecutionCurrent();
       if (!supported) {
         candidateFailureReason = "target-native-unsupported";
@@ -540,8 +532,14 @@ export async function executeMutableUpdate(
     await parkForegroundUpdateForActivation(params, assertExecutionCurrent);
     await prepareMutableUpdate(env, activationTimeoutMs);
     assertExecutionCurrent();
-    if (opts.run) {
-      recordUpdateRunPhase(opts.run.runId, "activating", undefined, { env: opts.run.env });
+    if (originalRun) {
+      await recordUpdateRunPhaseAsync(
+        originalRun.runId,
+        "activating",
+        undefined,
+        captureWriteOptions(),
+      );
+      assertExecutionCurrent();
     }
     const publication = {
       roots,
@@ -637,7 +635,13 @@ export async function executeMutableUpdate(
         devTarget: params.devTarget,
         inspectGitTarget: async (target, installTarget) => {
           retentionInstallTarget = installTarget;
-          recordInspectedGitTarget(opts.run, target, assertExecutionCurrent);
+          await recordInspectedGitTarget(
+            originalRun,
+            target,
+            assertExecutionCurrent,
+            captureWriteOptions,
+          );
+          assertExecutionCurrent();
           await recheckSchemas(target.schemaVersions);
           if (!gitContextPrepared) {
             await stopManagedServiceBeforeMutableUpdate(gitMutationRoots ?? undefined, "inspect");

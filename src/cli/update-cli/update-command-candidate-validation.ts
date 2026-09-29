@@ -4,8 +4,39 @@ import { recordUpdateRunStepAsync } from "../../infra/update-run-write.async.js"
 import { defaultRuntime } from "../../runtime.js";
 import { prepareOpenClawStateReadSource } from "../../state/openclaw-state-worker-context.js";
 import type { UpdateDisplayProgress } from "./progress.js";
-import type { UpdateCommandOptions } from "./shared.js";
+import { UpdatePreMutationError, type UpdateCommandOptions } from "./shared.js";
 import type { createUpdateCommandExecutionGuards } from "./update-command-execution-guards.js";
+import { isUpdatedInstallGatewayExecutorSupported } from "./update-command-service-command.js";
+import { resolveUpdatedInstallCommandEnv } from "./update-command-service-env.js";
+
+export function checkUpdateCandidateNativeReceiver(
+  root: string,
+  env: NodeJS.ProcessEnv,
+  execution: {
+    invocationCwd?: string;
+    updateStepTimeoutMs: number;
+    packageUpdateNodeRunner?: string;
+  },
+  run: NonNullable<UpdateCommandOptions["run"]>,
+) {
+  const executor = run.executorFence;
+  if (!executor) {
+    throw new UpdatePreMutationError(
+      "target-native-unsupported",
+      "Starting the update requires its original update process.",
+    );
+  }
+  return isUpdatedInstallGatewayExecutorSupported({
+    root,
+    env: resolveUpdatedInstallCommandEnv({
+      processEnv: env,
+      invocationCwd: execution.invocationCwd,
+    }),
+    executor,
+    timeoutMs: execution.updateStepTimeoutMs,
+    nodeRunner: execution.packageUpdateNodeRunner,
+  });
+}
 
 export function validateUpdateCandidateWithProgress(
   params: Pick<Parameters<typeof validateUpdateCandidateCanary>[0], "root" | "config"> & {

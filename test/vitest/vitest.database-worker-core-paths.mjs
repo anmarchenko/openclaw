@@ -1,6 +1,16 @@
 // These consumers need the host-owned SQLite broker, which runs in forked processes.
 export const databaseWorkerCoreTestFiles = [
   "src/infra/update-candidate-canary.test.ts",
+  "src/cli/update-cli/update-command-admission.test.ts",
+  "src/cli/update-cli/update-command-database-rollback.test.ts",
+  "src/cli/update-cli/update-command-doctor-canonical-delegation.test.ts",
+  "src/cli/update-cli/update-command-doctor-requester.test.ts",
+  "src/cli/update-cli/update-command-execution.test.ts",
+  "src/cli/update-cli/update-command-execution-validation.test.ts",
+  "src/cli/update-cli/update-command-foreground.test.ts",
+  "src/cli/update-cli/update-command-initial-admission.test.ts",
+  "src/cli/update-cli/update-command-original-service.test.ts",
+  "src/cli/update-cli/update-command-service-maintenance-native.test.ts",
   "src/state/session-repository-workspaces.test.ts",
   "src/infra/update-run-reconciliation.worker.test.ts",
   "src/infra/update-run-interruption.worker.test.ts",
