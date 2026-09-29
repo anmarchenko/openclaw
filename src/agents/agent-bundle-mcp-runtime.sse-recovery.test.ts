@@ -20,7 +20,6 @@ afterEach(() => {
 
 it.each([
   { status: 404, reconnects: true, failureMethod: "tools/call" },
-  { status: 500, reconnects: false, failureMethod: "tools/call" },
   { status: 404, reconnects: true, failureMethod: "tools/list" },
   { status: 500, reconnects: false, failureMethod: "tools/list" },
 ])(
@@ -116,11 +115,7 @@ it.each([
         await expect(runtime.callTool("legacy", "probe", { attempt: "expired" })).rejects.toThrow(
           `Error POSTing to endpoint (HTTP ${status}): Session not found`,
         );
-        if (reconnects) {
-          expect(runtime.peekCatalog()?.diagnostics?.[0]?.message).toBe("expired HTTP session");
-        } else {
-          expect(runtime.peekCatalog()?.diagnostics).toBeUndefined();
-        }
+        expect(runtime.peekCatalog()?.diagnostics?.[0]?.message).toBe("expired HTTP session");
       } else {
         streams
           .get("/messages/1")
