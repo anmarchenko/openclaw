@@ -557,8 +557,9 @@ export function createWorkerGatewayTools(
     ...(params.skillWorkshop ? [params.skillWorkshop] : []),
   ];
   const retainWorkshopCall = createWorkerWorkshopCallRetention();
-  return tools.map((tool): AnyAgentTool => {
-    const bound: AnyAgentTool = {
+  const boundTools: AnyAgentTool[] = [];
+  for (const tool of tools) {
+    const bound = copyAgentToolMetadata<AnyAgentTool>(tool, {
       ...tool,
       execute: async (toolCallId, raw, signal, onUpdate) => {
         const assertAuthorized = () => {
@@ -583,8 +584,7 @@ export function createWorkerGatewayTools(
         assertAuthorized();
         return value;
       },
-    };
-    copyAgentToolMetadata(tool, bound);
+    });
     bindAgentToolExecutionLocation(bound, {
       kind: "gateway",
       replay: tool.name === "sessions_spawn" || tool.name === "sessions_send",
@@ -596,6 +596,7 @@ export function createWorkerGatewayTools(
             ? { timeout: { argument: "timeoutSeconds", defaultSeconds: 30, paddingMs: 60_000 } }
             : {}),
     });
-    return bound;
-  });
+    boundTools.push(bound);
+  }
+  return boundTools;
 }
