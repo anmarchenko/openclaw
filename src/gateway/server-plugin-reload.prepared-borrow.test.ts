@@ -311,7 +311,11 @@ it.each(["plugins.reload", "auth refresh"] as const)(
             nextConfig: config,
             sourceConfig: config,
             changedPaths: [],
-            pluginLifecycle: { pluginIds: [toolPluginId], operationId: "borrow-reload" },
+            pluginLifecycle: {
+              pluginIds: [toolPluginId],
+              reason: "reload",
+              operationId: "borrow-reload",
+            },
             prepareConfigEffects: () => {
               markPreparedModelRuntimeSnapshotsStale("plugin reload", { waitForReplacement: true });
               return async () => {};
