@@ -561,7 +561,6 @@ run_live_models
       "projects-doctor",
       "projects-startup-migration",
       "dreaming-cron-doctor",
-      "cron-failure-repair",
     ].map((scenario) => ({ scenario, liveEnv: {}, expectedModels: [] })),
   ])(
     "clears provider and channel credentials for $scenario while preserving live snapshots",

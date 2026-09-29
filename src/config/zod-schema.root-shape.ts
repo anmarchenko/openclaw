@@ -411,7 +411,7 @@ export const OpenClawSchemaShape = {
           accountId: z.string().optional(),
           channel: z.string().optional(),
           to: z.string().optional(),
-          /** Start an owner-conversation repair turn instead of the first chat alert. Default: true. */
+          /** Post a repair request into the owner conversation instead of the first chat alert. Default: true. */
           repair: z.boolean().optional(),
         })
         .optional(),

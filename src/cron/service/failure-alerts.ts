@@ -326,18 +326,6 @@ function failureIncident(params: {
 }
 
 /**
- * Owner-conversation repair applies to jobs that conversation can manage. Command jobs and
- * on-exit or stream schedules are operator-only, so they alert as before.
- */
-export function isCronFailureRepairEligible(job: Pick<CronJob, "payload" | "schedule">): boolean {
-  return (
-    job.payload.kind !== "command" &&
-    job.schedule.kind !== "on-exit" &&
-    job.schedule.kind !== "stream"
-  );
-}
-
-/**
  * Emits one alert per incident when threshold, best-effort, and cooldown policy allow it.
  * For a job with an owner conversation, the first chat alert of a failure streak becomes a
  * repair request in that conversation; a later failure of that streak alerts, naming it.
@@ -383,7 +371,10 @@ export function maybeEmitFailureAlert(
     alertConfig.mode === "announce" &&
     params.status === "error" &&
     params.job.owner?.sessionKey?.trim() &&
-    isCronFailureRepairEligible(params.job)
+    // Command jobs and on-exit or stream schedules are operator-only, so they alert as before.
+    params.job.payload.kind !== "command" &&
+    params.job.schedule.kind !== "on-exit" &&
+    params.job.schedule.kind !== "stream"
   ) {
     const opened = params.job.state.failureAlertIncident ?? incident;
     params.job.state.failureAlertIncident = { ...opened, repair: { atMs: now } };
