@@ -96,26 +96,15 @@ async function handleSystemScopeSystemdGateway(
   if (installed?.scope !== "system") {
     return null;
   }
-  const stdout = createNullWriter();
-  if (action === "stop") {
-    await stopSystemdService({
-      stdout,
-      env: process.env,
-      onMutation: createGatewayLifecycleMutationAudit({ action: "stop" }),
-    });
-    return {
-      result: "stopped",
-      message: `Gateway stopped via system-scope systemd unit ${installed.unitName}.`,
-    };
-  }
-  await restartSystemdService({
-    stdout,
+  await (action === "stop" ? stopSystemdService : restartSystemdService)({
+    stdout: createNullWriter(),
     env: process.env,
-    onMutation: createGatewayLifecycleMutationAudit({ action: "restart" }),
+    onMutation: createGatewayLifecycleMutationAudit({ action }),
   });
+  const result = action === "stop" ? "stopped" : "restarted";
   return {
-    result: "restarted",
-    message: `Gateway restarted via system-scope systemd unit ${installed.unitName}.`,
+    result,
+    message: `Gateway ${result} via system-scope systemd unit ${installed.unitName}.`,
   };
 }
 
