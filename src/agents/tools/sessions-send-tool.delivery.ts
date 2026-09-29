@@ -32,7 +32,10 @@ import {
   queueGuardedEmbeddedAgentMessageWithOutcomeAsync,
 } from "../embedded-agent-runner/runs.js";
 import { jsonResult } from "./common.js";
-import { resolveGatewayToolOperatorSelection } from "./gateway-caller-context.js";
+import {
+  captureGatewayToolCallerAssertion,
+  resolveGatewayToolOperatorSelection,
+} from "./gateway-caller-context.js";
 import {
   callInProcessGatewayToolWithCreation,
   hasInProcessGatewayToolContext,
@@ -147,6 +150,7 @@ export async function trySessionsSendActiveRunDelivery(
   params: SessionsSendDeliveryParams,
   ownChild: boolean,
 ): Promise<SessionsSendStart | { fallbackSessionKey?: string }> {
+  const assertCaller = captureGatewayToolCallerAssertion();
   try {
     const selection = resolveGatewayToolOperatorSelection();
     selection.assertCurrent();
@@ -209,13 +213,16 @@ export async function trySessionsSendActiveRunDelivery(
           }),
         };
         const dispatchQueue = (options: EmbeddedAgentQueueMessageOptions) =>
-          selection.operatorAuthority
+          selection.operatorAuthority || assertCaller
             ? queueGuardedEmbeddedAgentMessageWithOutcomeAsync(
                 activeRunSessionId,
                 messageText,
                 options,
                 () => {
                   assertCurrent();
+                  if (!selection.operatorAuthority) {
+                    assertCaller?.("agent");
+                  }
                   return true;
                 },
               )
