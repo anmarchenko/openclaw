@@ -10,6 +10,7 @@ import {
 } from "./service.failure-alert.test-helpers.js";
 import { CronService } from "./service.js";
 import { createNoopLogger } from "./service.test-harness.js";
+import { dispatchCronNotification } from "./service/notification-dispatch.js";
 import { loadCronStore } from "./store.js";
 import type { CronStoredJob } from "./types.js";
 
@@ -174,7 +175,7 @@ describe("CronService failure repair", () => {
     });
   });
 
-  it("sends the fallback alert to the route configured when the repair fails", async () => {
+  it("sends the fallback alert for the live job and route when the repair fails", async () => {
     const pending = createDeferred<"failed">();
     const startRepair = vi.fn<StartRepair>(() => pending.promise);
     await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {
@@ -183,7 +184,9 @@ describe("CronService failure repair", () => {
       await cron.run(job.id, "force");
       expect(startRepair).toHaveBeenCalledOnce();
 
+      const sessionKey = "agent:main:telegram:direct:rerouted";
       await cron.update(job.id, {
+        sessionKey,
         failureAlert: { after: 2, cooldownMs: 0, channel: "telegram", to: "424242" },
       });
       pending.resolve("failed");
@@ -191,9 +194,40 @@ describe("CronService failure repair", () => {
       expect(sendCronFailureAlert.mock.calls[0]?.[0]).toMatchObject({
         channel: "telegram",
         to: "424242",
+        job: { id: job.id, sessionKey },
       });
       expectAlertTextContaining(sendCronFailureAlert, 'Automation "rerouted mid-repair" failed 2');
     });
+  });
+
+  it("sends nothing when the job is gone before its repair is dispatched", async () => {
+    const startCronFailureRepair = vi.fn<StartRepair>();
+    const sendCronFailureAlert = vi.fn(async () => undefined);
+    const state = {
+      store: { version: 1, jobs: [] },
+      stopped: false,
+      lifecycleGeneration: 1,
+      deps: { startCronFailureRepair, sendCronFailureAlert, log: createNoopLogger() },
+    } as unknown as Parameters<typeof dispatchCronNotification>[0];
+    dispatchCronNotification(state, {
+      kind: "failure-repair",
+      request: {
+        jobId: "gone",
+        ownerSessionKey,
+        consecutiveErrors: 2,
+        incidentSignature: "incident",
+        repairAtMs: 1,
+      },
+      fallback: {
+        kind: "failure-alert",
+        job: { id: "gone", name: "gone", state: { lastFailureAlertAtMs: 1 } } as never,
+        payload: { text: 'Automation "gone" failed 2 times' },
+        route: { mode: "announce", channel: "telegram", to: "19098680" },
+      },
+    });
+    await setImmediate();
+    expect(startCronFailureRepair).not.toHaveBeenCalled();
+    expect(sendCronFailureAlert).not.toHaveBeenCalled();
   });
 
   it.each([

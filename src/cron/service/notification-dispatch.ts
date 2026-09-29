@@ -7,7 +7,7 @@ import { cronStoreKey } from "../store/key.js";
 import type { CronFailureNotificationDelivery } from "../types.js";
 import { resolveFailureAlert } from "./failure-alerts.js";
 import { locked } from "./locked.js";
-import type { CronNotificationIntent } from "./notification-intents.js";
+import { cronNotificationJob, type CronNotificationIntent } from "./notification-intents.js";
 import { runCronRuntimeMutation } from "./runtime-mutation.js";
 import { applyCronRuntimeRowsToState } from "./runtime-store.js";
 import type { CronServiceState } from "./state.js";
@@ -150,11 +150,6 @@ function transportFailureRepair(
   const start = state.deps.startCronFailureRepair;
   const { job } = params.fallback;
   const findLiveJob = () => state.store?.jobs.find((candidate) => candidate.id === job.id);
-  const liveJob = findLiveJob();
-  if (!start || !liveJob) {
-    transportFailureAlert(state, params.fallback);
-    return;
-  }
   const repairAtMs = job.state.lastFailureAlertAtMs;
   const cycle: FailureAlertCycle = {
     alertAtMs: repairAtMs,
@@ -176,8 +171,8 @@ function transportFailureRepair(
     ) {
       return;
     }
-    // The fallback is the alert a failure would send now: under the live policy and route,
-    // not the ones captured when the repair started.
+    // The fallback is the alert a failure would send now: for the live job, under its live
+    // policy and route, not the ones captured when the repair started.
     const route = resolveFailureAlert({ deps: state.deps }, live);
     if (
       !live.enabled ||
@@ -195,8 +190,13 @@ function transportFailureRepair(
       { jobId: job.id, reason },
       "cron: failure repair did not complete; alerting",
     );
-    transportFailureAlert(state, { ...params.fallback, route });
+    transportFailureAlert(state, { ...params.fallback, job: cronNotificationJob(live), route });
   };
+  const liveJob = findLiveJob();
+  if (!start || !liveJob) {
+    void fallBack("no repair host");
+    return;
+  }
   void start({ ...params.request, job: structuredClone(liveJob) })
     .then(async (outcome) => {
       if (outcome !== "completed") {
