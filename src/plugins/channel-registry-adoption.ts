@@ -101,6 +101,8 @@ export function adoptRuntimeChannelRegistrations(
     if (
       !record?.enabled ||
       !donorRecord ||
+      // A borrowed record already is the donor's registration.
+      record === donorRecord ||
       !local?.acceptingCalls ||
       !runtime?.acceptingCalls ||
       !registration ||

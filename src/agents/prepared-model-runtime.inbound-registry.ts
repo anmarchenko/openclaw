@@ -59,6 +59,21 @@ export function preparedModelRuntimeWorkspaceFactsKey(input: PreparedModelRuntim
   });
 }
 
+/** Gateway-hosted prepared loads borrow unchanged instances from the live Gateway registry. */
+function resolveLendingGatewayRegistry(
+  input: PreparedInboundRegistryInput,
+  metadataSnapshot: PluginMetadataSnapshot,
+): PluginRegistry | undefined {
+  const activeRegistry = getActivePluginRegistry();
+  return input.allowGatewaySubagentBinding === true &&
+    input.env === undefined &&
+    getActivePluginRuntimeSubagentMode() === "gateway-bindable" &&
+    activeRegistry &&
+    getActivePluginRegistryWorkspaceDir() === metadataSnapshot.workspaceDir
+    ? activeRegistry
+    : undefined;
+}
+
 /** Loads generic plugin facts without acquiring model, catalog, or credential state. */
 export function loadPreparedInboundPluginRegistry(
   input: PreparedInboundRegistryInput,
@@ -66,25 +81,21 @@ export function loadPreparedInboundPluginRegistry(
   configuredHarnessRuntimes?: readonly string[],
   onPrimaryRegistry?: (registry: PluginRegistry) => void,
 ): PluginRegistry {
-  const activeRegistry = getActivePluginRegistry();
+  const gatewayRegistry = resolveLendingGatewayRegistry(input, metadataSnapshot);
   // Registry-owned facts survive an outer reload cache without allowing stale
   // metadata or changed activation inputs to reuse already-registered callbacks.
   const reusableGatewayRegistry =
-    input.allowGatewaySubagentBinding === true &&
-    input.env === undefined &&
-    getActivePluginRuntimeSubagentMode() === "gateway-bindable" &&
-    activeRegistry &&
-    getActivePluginRegistryWorkspaceDir() === metadataSnapshot.workspaceDir &&
-    getReusablePluginRuntimeActivation(activeRegistry, {
+    gatewayRegistry &&
+    getReusablePluginRuntimeActivation(gatewayRegistry, {
       config: input.config,
       env: process.env,
       workspaceDir: metadataSnapshot.workspaceDir,
       metadataSnapshot,
     }) &&
-    listRuntimePluginIdsFromRegistry(activeRegistry).every(
-      createRuntimePluginManifestLookup(activeRegistry, metadataSnapshot.manifestRegistry.plugins),
+    listRuntimePluginIdsFromRegistry(gatewayRegistry).every(
+      createRuntimePluginManifestLookup(gatewayRegistry, metadataSnapshot.manifestRegistry.plugins),
     )
-      ? activeRegistry
+      ? gatewayRegistry
       : undefined;
   const registry =
     reusableGatewayRegistry ??
@@ -97,6 +108,7 @@ export function loadPreparedInboundPluginRegistry(
         metadataSnapshot,
         preferBuiltPluginArtifacts: true,
         configuredHarnessRuntimes,
+        borrowRegistry: gatewayRegistry,
       },
       onPrimaryRegistry,
     );
@@ -217,6 +229,9 @@ export function prepareWorkspacePluginRegistries(
             selections: input.runtimePluginSelections,
             configuredHarnessRuntimes: getConfiguredHarnessRuntimes?.(),
             ...(purpose ? { purpose } : {}),
+            ...(purpose === "model-catalog"
+              ? {}
+              : { borrowRegistry: resolveLendingGatewayRegistry(input, metadataSnapshot) }),
           },
           (source) => {
             loadedPrimaryRegistry =
