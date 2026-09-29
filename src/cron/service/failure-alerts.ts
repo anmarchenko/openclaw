@@ -377,35 +377,8 @@ export function maybeEmitFailureAlert(
     return;
   }
   const job = cronNotificationJob(params.job);
-  const ownerSessionKey = params.job.owner?.sessionKey?.trim();
-  if (
-    !repairRequested &&
-    alertConfig.repair &&
-    alertConfig.mode === "announce" &&
-    params.status === "error" &&
-    ownerSessionKey &&
-    isCronFailureRepairEligible(params.job)
-  ) {
-    const opened = params.job.state.failureAlertIncident ?? incident;
-    params.job.state.failureAlertIncident = { ...opened, repair: { atMs: now } };
-    // No alert is sent for this cycle; the repair conversation owns any messaging.
-    params.job.state.lastFailureNotificationDeliveryStatus = "not-requested";
-    params.deferredNotifications.push({
-      kind: "failure-repair",
-      job,
-      ownerSessionKey,
-      ...(params.job.owner?.agentId ? { ownerAgentId: params.job.owner.agentId } : {}),
-      text: buildCronFailureRepairBrief({
-        job: params.job,
-        consecutiveErrors: params.consecutiveCount,
-        error: params.error,
-        errorReason: params.errorReason,
-      }),
-    });
-    return;
-  }
-  params.deferredNotifications.push({
-    kind: "failure-alert",
+  const alert = {
+    kind: "failure-alert" as const,
     job,
     payload: buildFailureAlertPayload({
       job,
@@ -419,7 +392,33 @@ export function maybeEmitFailureAlert(
     }),
     runAtMs: params.runAtMs,
     route: alertConfig,
-  });
+  };
+  if (
+    !repairRequested &&
+    alertConfig.repair &&
+    alertConfig.mode === "announce" &&
+    params.status === "error" &&
+    params.job.owner?.sessionKey?.trim() &&
+    isCronFailureRepairEligible(params.job)
+  ) {
+    const opened = params.job.state.failureAlertIncident ?? incident;
+    params.job.state.failureAlertIncident = { ...opened, repair: { atMs: now } };
+    // No alert is sent for this cycle; the repair conversation owns any messaging.
+    params.job.state.lastFailureNotificationDeliveryStatus = "not-requested";
+    params.deferredNotifications.push({
+      kind: "failure-repair",
+      job,
+      text: buildCronFailureRepairBrief({
+        job: params.job,
+        consecutiveErrors: params.consecutiveCount,
+        error: params.error,
+        errorReason: params.errorReason,
+      }),
+      fallback: alert,
+    });
+    return;
+  }
+  params.deferredNotifications.push(alert);
 }
 
 /**

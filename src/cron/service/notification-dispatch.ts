@@ -19,10 +19,22 @@ export function dispatchCronNotification(
   if (notification.kind === "auto-disabled") {
     enqueueCronNotification(state, notification.job, notification.text, notification.kind);
   } else if (notification.kind === "failure-repair") {
-    enqueueCronNotification(state, notification.job, notification.text, notification.kind, {
-      sessionKey: notification.ownerSessionKey,
-      agentId: notification.ownerAgentId,
-    });
+    // Wake the job's owner conversation as it is now; without one, or if the session
+    // rejects the request, the first alert goes out as before. A removed job gets neither.
+    const live = state.store?.jobs.find((job) => job.id === notification.job.id);
+    const owner = live?.owner?.sessionKey?.trim();
+    if (
+      live &&
+      !(
+        owner &&
+        enqueueCronNotification(state, notification.job, notification.text, notification.kind, {
+          sessionKey: owner,
+          agentId: live.owner?.agentId,
+        })
+      )
+    ) {
+      transportFailureAlert(state, notification.fallback);
+    }
   } else {
     transportFailureAlert(state, notification);
   }

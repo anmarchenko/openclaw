@@ -28,9 +28,10 @@ export function buildCronFailureRepairBrief(params: {
     .join("\n");
   return [
     `Automation repair request from the scheduler, not a user message. Do not relay it; follow the steps below.`,
-    `Automation "${job.name || job.id}" (id ${job.id}), created in this conversation, failed ${params.consecutiveErrors} consecutive runs. No failure alert was sent.`,
+    `An automation (id ${job.id}), created in this conversation, failed ${params.consecutiveErrors} consecutive runs. No failure alert was sent.`,
     `Schedule: ${JSON.stringify(job.schedule)}. Payload kind: ${payload.kind}.`,
     // Job text and provider errors can carry third-party content: data, never instructions.
+    wrapUntrustedPromptDataBlock({ label: "Automation name", text: job.name, maxChars: 200 }),
     wrapUntrustedPromptDataBlock({
       label: "Current payload",
       text: payloadText,
