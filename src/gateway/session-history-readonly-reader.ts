@@ -1,5 +1,5 @@
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
-import { resolveConversation } from "../config/sessions/conversation-registry.js";
+import { resolveConversationInDatabase } from "../config/sessions/session-accessor.sqlite-conversation-read.js";
 import { readSessionEntryRow } from "../config/sessions/session-accessor.sqlite-entry-read.js";
 import { readSessionTranscriptRunInputVisibilityFromProjection } from "../config/sessions/session-accessor.sqlite-history-input-visibility.js";
 import { readTranscriptDisplayDeltaFromProjection } from "../config/sessions/session-accessor.sqlite-history-query.js";
@@ -11,7 +11,7 @@ import { readSessionTranscriptBindingFromProjection } from "../config/sessions/s
 import type { SessionTranscriptRawDeltaLimits } from "../config/sessions/session-accessor.types.js";
 import { readWithCanonicalSessionAdmission } from "../config/sessions/session-canonical-key.js";
 import type { SessionConversationBinding } from "../config/sessions/session-history-types.js";
-import { listSessionReactionsInDatabase } from "../config/sessions/session-reaction-store.kernel.js";
+import { listSessionReactionsInDatabase } from "../config/sessions/session-reaction-store.read.js";
 import {
   SessionTranscriptProjectionUnavailableError,
   SessionTranscriptStorageUnavailableError,
@@ -138,15 +138,8 @@ export function createReadonlySessionHistoryReader(
         });
       }),
     readConversationBinding: (conversationRef: string): SessionConversationBinding | null =>
-      readDatabase(() => {
-        const conversation = resolveConversation(
-          {
-            agentId: target.database.agentId,
-            databaseAgentId: target.database.agentId,
-            storePath: target.database.path,
-          },
-          conversationRef,
-        );
+      readDatabase((database) => {
+        const conversation = resolveConversationInDatabase(database, conversationRef);
         if (!conversation) {
           return null;
         }

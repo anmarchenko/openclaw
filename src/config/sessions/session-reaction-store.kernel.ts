@@ -1,15 +1,11 @@
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
-  getNodeSqliteKysely,
 } from "../../infra/kysely-sync.js";
-import type {
-  DB as OpenClawAgentKyselyDatabase,
-  SessionReactions,
-} from "../../state/openclaw-agent-db.generated.js";
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { SessionWorkStartInvalidatedError } from "./lifecycle.js";
 import { readSessionEntryInstanceId } from "./session-accessor.sqlite-entry-identity.js";
+import { reactionDb, reactionRows, summarizeReactions } from "./session-reaction-store.read.js";
 import type { StoredMessageReactionSummary } from "./session-reaction-store.types.js";
 
 export type SetSessionReactionParams = {
@@ -36,49 +32,11 @@ export class SessionReactionMessageMissingError extends Error {
   }
 }
 
-function reactionDb(database: Pick<OpenClawAgentDatabase, "db">) {
-  return getNodeSqliteKysely<
-    Pick<OpenClawAgentKyselyDatabase, "session_reactions" | "transcript_event_identities">
-  >(database.db);
-}
-
-function summarizeReactions(rows: SessionReactions[]): StoredMessageReactionSummary[] {
-  const summaries = new Map<string, StoredMessageReactionSummary>();
-  for (const row of rows) {
-    let summary = summaries.get(row.emoji);
-    if (!summary) {
-      summary = { emoji: row.emoji, count: 0, identities: [] };
-      summaries.set(row.emoji, summary);
-    }
-    summary.count += 1;
-    summary.identities.push({
-      id: row.identity_id,
-      ...(row.identity_label ? { label: row.identity_label } : {}),
-    });
-  }
-  return [...summaries.values()];
-}
-
 /** `changed` is false for an add that already exists or a remove with nothing to remove. */
 export type SessionReactionWrite = {
   reactions: StoredMessageReactionSummary[];
   changed: boolean;
 };
-
-function reactionRows(
-  database: Pick<OpenClawAgentDatabase, "db">,
-  sessionKey: string,
-  sessionId: string,
-) {
-  return reactionDb(database)
-    .selectFrom("session_reactions")
-    .selectAll()
-    .where("session_key", "=", sessionKey)
-    .where("session_id", "=", sessionId)
-    .orderBy("created_at")
-    .orderBy("emoji")
-    .orderBy("identity_id");
-}
 
 export function setSessionReactionInDatabase(
   database: OpenClawAgentDatabase,
@@ -173,26 +131,4 @@ export function setSessionReactionInDatabase(
     ),
     changed: true,
   };
-}
-
-export function listSessionReactionsInDatabase(
-  database: Pick<OpenClawAgentDatabase, "db">,
-  sessionKey: string,
-  params: { sessionId: string },
-): Record<string, StoredMessageReactionSummary[]> {
-  const messages = new Map<string, SessionReactions[]>();
-  for (const row of executeSqliteQuerySync(
-    database.db,
-    reactionRows(database, sessionKey, params.sessionId),
-  ).rows) {
-    const rows = messages.get(row.message_id);
-    if (rows) {
-      rows.push(row);
-    } else {
-      messages.set(row.message_id, [row]);
-    }
-  }
-  return Object.fromEntries(
-    [...messages].map(([messageId, rows]) => [messageId, summarizeReactions(rows)]),
-  );
 }

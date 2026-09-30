@@ -5,11 +5,11 @@ import {
 import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
 import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
 import {
-  listSessionReactionsInDatabase,
   setSessionReactionInDatabase,
   type SessionReactionWrite,
   type SetSessionReactionParams,
 } from "./session-reaction-store.kernel.js";
+import { listSessionReactionsInDatabase } from "./session-reaction-store.read.js";
 import type { StoredMessageReactionSummary } from "./session-reaction-store.types.js";
 
 export {
