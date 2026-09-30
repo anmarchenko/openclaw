@@ -111,7 +111,7 @@ describe("resolveFastModeState", () => {
     expect(formatFastModeStatusValue({ mode: true })).toBe("on");
     expect(formatFastModeStatusValue({ mode: "ultrafast" })).toBe("ultrafast");
     expect(formatFastModeCommandOptions({ fastAutoOnSeconds: 30 })).toBe(
-      "on, off, auto (30 sec), default, status",
+      "on, off, ultrafast, auto (30 sec), default, status",
     );
     expect(
       formatFastModeCurrentStatus({

@@ -107,6 +107,13 @@ export function formatFastModeValue(
   return mode === "auto" || mode === "ultrafast" ? mode : mode === true ? "on" : "off";
 }
 
+export function formatFastModeConfirmation(mode: FastMode | undefined): string {
+  if (mode === "ultrafast") {
+    return "Ultrafast mode enabled.";
+  }
+  return mode === "auto" ? "Fast mode set to auto." : `Fast mode ${mode ? "enabled" : "disabled"}.`;
+}
+
 export function formatFastModeAutoLabel(params?: { fastAutoOnSeconds?: number }): string {
   const fastAutoOnSeconds =
     normalizeFastModeAutoOnSeconds(params?.fastAutoOnSeconds) ?? DEFAULT_FAST_MODE_AUTO_ON_SECONDS;
@@ -124,7 +131,7 @@ export function formatFastModeStatusValue(params: {
 }
 
 export function formatFastModeCommandOptions(params?: { fastAutoOnSeconds?: number }): string {
-  return `on, off, ${formatFastModeAutoLabel({
+  return `on, off, ultrafast, ${formatFastModeAutoLabel({
     fastAutoOnSeconds: params?.fastAutoOnSeconds,
   })}, default, status`;
 }
