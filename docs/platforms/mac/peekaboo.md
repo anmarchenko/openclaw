@@ -92,8 +92,9 @@ and contained relative symlinks while omitting native images that cannot run on 
 Matching universal binaries remain intact. Within retained packages, Windows-named source, scripts, and README
 files remain; directory names alone do not select files for omission. Unclassifiable native images and links that
 would escape, cycle, or become dangling stop packaging. Both paths use the same runtime verification and publication
-flow. Build metadata remains unchanged by materialization. The elevation variant always retains library validation
-and rejects `DISABLE_LIBRARY_VALIDATION=1`.
+flow. Build metadata remains unchanged by materialization. The elevation app retains library validation
+and rejects `DISABLE_LIBRARY_VALIDATION=1`. Its private Bun executable has the
+[plugin native-addon exception](/platforms/mac/signing); other helpers retain library validation.
 
 The managed elevation workflow upgrades an already paired Mac. Its selected state and config must define an
 app-readable direct remote Gateway route with string token or password auth, and the selected macOS node identity must

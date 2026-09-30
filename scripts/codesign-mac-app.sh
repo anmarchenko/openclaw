@@ -152,6 +152,7 @@ trap cleanup EXIT
 ENT_TMP_DIR="$(cd -P -- "$ENT_TMP_DIR" && pwd -P)"
 ENT_TMP_APP="$ENT_TMP_DIR/app.plist"
 ENT_TMP_JIT="$ENT_TMP_DIR/jit.plist"
+ENT_TMP_BUN="$ENT_TMP_DIR/bun.plist"
 CODESIGN_OUTPUT="$ENT_TMP_DIR/codesign-output"
 NATIVE_INVENTORY="$ENT_TMP_DIR/native-inventory"
 INVENTORY_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/mac-native-inventory.py"
@@ -198,14 +199,25 @@ fi
 
 APP_ENTITLEMENTS="$ENT_TMP_APP"
 
-# Bun and bundled standalone JS executables need JIT memory under hardened
-# runtime. All native libraries are re-signed below; library validation stays on.
+# The Claude SDK's standalone CLI needs JIT memory but retains library validation.
 cat > "$ENT_TMP_JIT" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>com.apple.security.cs.allow-jit</key><true/>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+</dict></plist>
+PLIST
+
+# Bun executes arbitrary plugin JS and must load its non-Team-signed native addons.
+# Keep this exception on the private runtime; bundled natives are still Team-signed.
+cat > "$ENT_TMP_BUN" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
 </dict></plist>
 PLIST
 
@@ -405,10 +417,10 @@ while IFS= read -r -d '' runtime_kind && IFS= read -r -d '' runtime_file; do
   [[ "$runtime_kind" == "executable" || "$runtime_kind" == "library" ]] || continue
   [[ "$runtime_file" == "$RUNTIME_ROOT/"* ]] || continue
   runtime_relative="${runtime_file#"$RUNTIME_ROOT"/}"
-  # Bun and the SDK's standalone Bun CLI own JS execution. Other native
-  # helpers must not inherit JIT permissions merely because they execute.
-  if [[ "$runtime_kind" == "executable" && (
-    "$runtime_relative" == bin/bun ||
+  # Only the private Bun runtime hosts arbitrary installed plugin native addons.
+  if [[ "$runtime_kind" == "executable" && "$runtime_relative" == bin/bun ]]; then
+    sign_item "$runtime_file" "$ENT_TMP_BUN"
+  elif [[ "$runtime_kind" == "executable" && (
     "$runtime_relative" == */node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude ||
     "$runtime_relative" == */node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/claude
   ) ]]; then

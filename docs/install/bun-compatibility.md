@@ -27,8 +27,9 @@ the full matching OpenClaw package, and a signed SQLite library that meets the
 WAL safety floor and supports extension loading. Its private `node worker` and
 Chrome-extension setup run on that Bun executable with
 `OPENCLAW_SQLITE_LIBRARY` pointing to the bundled library. These helpers need no
-Node or Homebrew SQLite installation, and their native libraries retain macOS
-library validation.
+Node or Homebrew SQLite installation. Bundled native libraries remain Team-signed;
+only the Bun executable disables library validation to load runtime-installed
+plugin addons. See the [signing tradeoff](/platforms/mac/signing).
 
 The package includes the CLI, Gateway, Control UI, npm, and `sqlite-vec`, but the
 app's Gateway still runs externally. Bundled Gateway hosting is a separate

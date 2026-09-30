@@ -489,37 +489,40 @@ describe.runIf(process.platform === "darwin")("Mac native inventory", () => {
   const runtimePath = "Contents/Resources/runtime/";
 
   it.concurrent.for([
-    { arch: "arm64", sdkArch: "arm64", cpuType: 0x0100000c },
-    { arch: "x86_64", sdkArch: "x64", cpuType: 0x01000007 },
+    { arch: "arm64", sdkArch: "arm64", cpuType: 0x0100000c, elevation: false },
+    { arch: "x86_64", sdkArch: "x64", cpuType: 0x01000007, elevation: false },
+    { arch: "arm64", sdkArch: "arm64", cpuType: 0x0100000c, elevation: true },
+    { arch: "x86_64", sdkArch: "x64", cpuType: 0x01000007, elevation: true },
   ])(
-    "limits private runtime JIT entitlements to known JS runtime executables on $arch",
-    ({ sdkArch, cpuType }, { mac, expect }) =>
+    "limits plugin library loading to bundled Bun on $arch (elevation: $elevation)",
+    ({ sdkArch, cpuType, elevation }, { mac, expect }) =>
       mac.lifetime.run(async () => {
         const fixture = await makeSigningFixture(mac, mac.createTempDir("openclaw-inventory-jit-"));
         const modules = "lib/node_modules/openclaw/node_modules";
         const sdkRuntime = `node_modules/@anthropic-ai/claude-agent-sdk-darwin-${sdkArch}/claude`;
-        const expected = new Map<string, boolean>();
-        for (const [relative, fileType, jit] of [
-          ["bin/bun", 2, true],
-          [`lib/node_modules/openclaw/${sdkRuntime}`, 2, true],
-          [`${modules}/nested/${sdkRuntime}`, 2, true],
+        const expected = new Map<string, "plugins" | "jit" | "plain">();
+        for (const [relative, fileType, policy] of [
+          ["bin/bun", 2, "plugins"],
+          [`lib/node_modules/openclaw/${sdkRuntime}`, 2, "jit"],
+          [`${modules}/nested/${sdkRuntime}`, 2, "jit"],
           [
             `${modules}/@lydell/node-pty-darwin-${sdkArch}/prebuilds/darwin-${sdkArch}/spawn-helper`,
             2,
-            false,
+            "plain",
           ],
-          [`${modules}/other/bin/bun`, 2, false],
-          [`${modules}/other/claude`, 2, false],
-          [`${modules}/library/${sdkRuntime}`, 6, false],
-          ["lib/addon.node", 6, false],
-          ["lib/libsqlite3.dylib", 6, false],
+          [`${modules}/other/bin/bun`, 2, "plain"],
+          [`${modules}/other/claude`, 2, "plain"],
+          [`${modules}/library/${sdkRuntime}`, 6, "plain"],
+          ["lib/addon.node", 6, "plain"],
+          ["lib/libsqlite3.dylib", 6, "plain"],
         ] as const) {
           const bytes = machoFixture(64, true, false, fileType);
           bytes.writeUInt32LE(cpuType, 4);
           const filename = await fixture.put(`${runtimePath}${relative}`, bytes);
-          expected.set(filename, jit);
+          expected.set(filename, policy);
         }
-        const result = await fixture.run();
+        await fixture.put("Contents/MacOS/OpenClaw");
+        const result = await fixture.run({}, elevation);
         expect(result.status, result.stderr).toBe(0);
         expect(
           existsSync(path.join(path.dirname(fixture.app), "Library/Caches/com.apple.python")),
@@ -529,7 +532,9 @@ describe.runIf(process.platform === "darwin")("Mac native inventory", () => {
         const signs = events.filter(({ args }) => args.includes("--sign"));
         expect(signs).toHaveLength(expected.size + 1);
         expect(signs.at(-1)?.args.at(-1)).toBe(fixture.app);
-        for (const [filename, jit] of expected) {
+        expect(signs.at(-1)?.entitlements).not.toContain("disable-library-validation");
+        expect(signs.at(-1)?.entitlements).not.toContain("allow-jit");
+        for (const [filename, policy] of expected) {
           const signed = expectDefined(
             signs.find(({ args }) => args.at(-1) === filename),
             filename,
@@ -538,18 +543,21 @@ describe.runIf(process.platform === "darwin")("Mac native inventory", () => {
             signed.entitlements.matchAll(/<key>([^<]+)<\/key>/g),
             (match) => match[1],
           );
-          expect(keys, filename).toEqual(
-            jit
-              ? [
+          const expectedKeys =
+            policy === "plain"
+              ? []
+              : [
                   "com.apple.security.cs.allow-jit",
                   "com.apple.security.cs.allow-unsigned-executable-memory",
-                ]
-              : [],
-          );
+                  ...(policy === "plugins"
+                    ? ["com.apple.security.cs.disable-library-validation"]
+                    : []),
+                ];
+          expect(keys.toSorted(), filename).toEqual(expectedKeys.toSorted());
           expect(signed.args).toEqual(
             expect.arrayContaining(["--force", "--options", "runtime", "--timestamp", "--sign"]),
           );
-          expect(signed.args.includes("--entitlements"), filename).toBe(jit);
+          expect(signed.args.includes("--entitlements"), filename).toBe(policy !== "plain");
           expect(
             events.some(
               ({ args }) =>
