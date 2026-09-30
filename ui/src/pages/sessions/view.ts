@@ -5,6 +5,7 @@ import {
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
 import { html, nothing } from "lit";
+import { formatAgentRuntimeLabel } from "../../../../src/shared/agent-runtime-display.js";
 import { formatFastModeValue } from "../../../../src/shared/fast-mode.js";
 import type {
   AgentIdentityResult,
@@ -24,7 +25,6 @@ import {
 import { t } from "../../i18n/index.ts";
 import "../../components/tooltip.ts";
 import "../../components/web-awesome.ts";
-import { formatAgentRuntimeLabel } from "../../lib/agents/display.ts";
 import {
   formatThinkingOverrideLabel,
   normalizeThinkingOptionValue,
