@@ -133,6 +133,7 @@ describe("scripts/test-report-utils runVitestJsonReport", () => {
           ],
           { includeDynamicImports: true },
         ),
+        "scripts/lib/datadog-test-register.mjs",
         "package.json",
         "pnpm-workspace.yaml",
         "tsconfig.json",

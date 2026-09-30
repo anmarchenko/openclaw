@@ -2253,7 +2253,6 @@ jobs:
     # Runtime-budget Chromium projects stay serial.
     timeout-minutes: 25
     env:
-      OPENCLAW_DD_TEST_KIND: e2e
       OPENCLAW_UI_E2E_SKIP_REAL_GATEWAY: "1"
     strategy:
       fail-fast: false
@@ -2354,8 +2353,6 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix: ${{ fromJson(needs.preflight.outputs.ui_real_gateway_matrix) }}
-    env:
-      OPENCLAW_DD_TEST_KIND: e2e
     steps:
       - *linux_node_checkout_step
       - name: Setup Node environment
