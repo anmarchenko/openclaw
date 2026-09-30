@@ -3,7 +3,6 @@ import type {
   ProviderRuntimeModel,
 } from "openclaw/plugin-sdk/plugin-entry";
 import type { LiveModelCatalogFetchGuard } from "openclaw/plugin-sdk/provider-catalog-live-runtime";
-import type { ProviderCatalogOutcome } from "openclaw/plugin-sdk/provider-catalog-shared";
 import { createProviderApiKeyAuthMethod } from "openclaw/plugin-sdk/provider-entry";
 import {
   buildFamilyForwardCompatModel,
@@ -55,7 +54,11 @@ import {
   normalizeOpenAIModelRouteId,
   resolveOpenAICodexReasoningEfforts,
 } from "./model-route-contract.js";
-import { readOpenAICodexServiceTiers } from "./model-service-tiers.js";
+import {
+  type OpenAILiveProviderCatalog,
+  projectOpenAICatalog,
+  readOpenAICodexServiceTiers,
+} from "./model-service-tiers.js";
 import {
   buildOpenAIChatGPTAuthMethodRuns,
   buildOpenAICodexProviderHooks,
@@ -163,11 +166,6 @@ function buildOpenAIManifestModelsForBaseUrl(baseUrl: string): ModelDefinitionCo
   );
 }
 
-type OpenAILiveProviderCatalog = {
-  provider: ModelProviderConfig;
-  outcome?: ProviderCatalogOutcome;
-};
-
 function buildOpenAIStaticPlatformProviderConfig(
   apiKey?: string,
   baseUrl = resolveOpenAIDefaultBaseUrl(),
@@ -177,20 +175,6 @@ function buildOpenAIStaticPlatformProviderConfig(
     api: "openai-responses",
     ...(apiKey ? { apiKey } : {}),
     models: buildOpenAIManifestModelsForBaseUrl(baseUrl),
-  };
-}
-
-function projectOpenAICatalog(catalog: OpenAILiveProviderCatalog, profileId?: string) {
-  const scopedProfileId = profileId?.trim();
-  return {
-    providers: { [PROVIDER_ID]: catalog.provider },
-    ...(catalog.outcome
-      ? {
-          outcomes: [
-            scopedProfileId ? { ...catalog.outcome, profileId: scopedProfileId } : catalog.outcome,
-          ],
-        }
-      : {}),
   };
 }
 

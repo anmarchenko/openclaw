@@ -1,4 +1,5 @@
 import type { ProviderCatalogOutcome } from "openclaw/plugin-sdk/provider-catalog-shared";
+import type { ModelProviderConfig } from "openclaw/plugin-sdk/provider-model-shared";
 import {
   asOptionalRecord,
   normalizeOptionalString,
@@ -34,4 +35,23 @@ export function readOpenAICodexServiceTiers(
       },
     ];
   });
+}
+
+export type OpenAILiveProviderCatalog = {
+  provider: ModelProviderConfig;
+  outcome?: ProviderCatalogOutcome;
+};
+
+export function projectOpenAICatalog(catalog: OpenAILiveProviderCatalog, profileId?: string) {
+  const scopedProfileId = profileId?.trim();
+  return {
+    providers: { openai: catalog.provider },
+    ...(catalog.outcome
+      ? {
+          outcomes: [
+            scopedProfileId ? { ...catalog.outcome, profileId: scopedProfileId } : catalog.outcome,
+          ],
+        }
+      : {}),
+  };
 }
