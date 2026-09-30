@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { formatErrorMessage } from "../infra/errors.js";
 import { ensureMeetingAudioBackend, resolveMeetingAudioRuntimeForFormat } from "./audio-backend.js";
+import { createMeetingBrowserAdapterOptions } from "./browser-adapter-options.js";
 import {
   createMeetingChromeTransport,
   createMeetingChromeTransportWithExternalAudio,
@@ -8,6 +9,7 @@ import {
 import { createMeetingConfiguredNodeHost } from "./configured-node-host.js";
 import { isMeetingRealtimeRouteReady, isMeetingTalkBackMode } from "./meeting-modes.js";
 import { normalizeMeetingObservationProvenance } from "./observation-provenance.js";
+import { createMeetingPageScripts } from "./page-script-source.js";
 import type {
   MeetingBrowserAdapter,
   MeetingBrowserLeaveStep,
@@ -68,7 +70,7 @@ export interface MeetingPlatformAdapter<
   DialInPlan
 > {}
 
-type MeetingPlatformAdapterOptions<
+export type MeetingPlatformAdapterOptions<
   Session,
   Mode extends string,
   Health extends MeetingBrowserHealth,
@@ -436,6 +438,8 @@ function createMeetingPlatformAdapter<
 
 export const MeetingPlatformAdapter = {
   create: createMeetingPlatformAdapter,
+  createBrowserAdapterOptions: createMeetingBrowserAdapterOptions,
+  createPageScripts: createMeetingPageScripts,
   createChromeTransport: createMeetingChromeTransport,
   createChromeTransportWithExternalAudio: createMeetingChromeTransportWithExternalAudio,
   createChromeRuntimeBindings: createMeetingChromeRuntimeBindings,
