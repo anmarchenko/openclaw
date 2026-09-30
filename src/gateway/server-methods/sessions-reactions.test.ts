@@ -9,6 +9,7 @@ import { addSessionMember } from "../../config/sessions/session-sharing-store.na
 import { publishSystemEventStoreConfig } from "../../config/sessions/session-store-path.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { executeSqliteQuerySync, getNodeSqliteKysely } from "../../infra/kysely-sync.js";
 import type { MessageActionInput } from "../../infra/outbound/message-action-contracts.js";
 import { publishSystemEventStoreResolver } from "../../infra/system-event-ownership.js";
 import {
@@ -18,11 +19,14 @@ import {
 } from "../../infra/system-events.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createDeferredCore } from "../../shared/deferred.js";
+import type { DB } from "../../state/openclaw-agent-db.generated.js";
+import { runOpenClawAgentWriteTransaction } from "../../state/openclaw-agent-db.js";
 import {
   createChannelTestPluginBase,
   createTestRegistry,
 } from "../../test-utils/channel-plugins.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { readSessionConversationBindingAsync } from "../session-transcript-readers.js";
 import { sessionReactionHandlers } from "./sessions-reactions.js";
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 
@@ -152,7 +156,11 @@ async function seedChannelMessage() {
       },
     },
   });
-  return { messageId, config: { channels: { testchat: { enabled: true } } } as OpenClawConfig };
+  return {
+    conversationRef: identity.conversationRef,
+    messageId,
+    config: { channels: { testchat: { enabled: true } } } as OpenClawConfig,
+  };
 }
 
 beforeEach(() => {
@@ -666,6 +674,91 @@ describe("session reaction handlers", () => {
       });
     },
   );
+
+  it("refuses queued mirrors when their captured source conversation changes", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      registerReactionChannel();
+      for (const change of ["removed", "channel", "account", "target", "thread"] as const) {
+        runMessageAction.mockClear();
+        const { messageId, config, conversationRef } = await seedChannelMessage();
+        const requestContext = context(config);
+        const firstEntered = createDeferredCore();
+        const releaseFirst = createDeferredCore();
+        const removalCommitted = createDeferredCore();
+        vi.mocked(requestContext.broadcast).mockImplementation((_event, payload) => {
+          if ((payload as { action: string }).action === "removed") {
+            removalCommitted.resolve();
+          }
+        });
+        runMessageAction.mockImplementationOnce(async () => {
+          firstEntered.resolve();
+          await releaseFirst.promise;
+          return { kind: "action", payload: { ok: true } };
+        });
+        const first = call(
+          "session.reactions.set",
+          { sessionKey, messageId, emoji: "👍" },
+          client("alice"),
+          requestContext,
+        );
+        await firstEntered.promise;
+        const pending = call(
+          "session.reactions.set",
+          { sessionKey, messageId, emoji: "👍", remove: true },
+          client("alice"),
+          requestContext,
+        );
+        try {
+          await removalCommitted.promise;
+          // Join a read behind the queued mirror's capture on the same history worker.
+          expect(
+            await readSessionConversationBindingAsync(transcriptScope, conversationRef),
+          ).toMatchObject({ target: "channel:room-42" });
+          runOpenClawAgentWriteTransaction(
+            (database) => {
+              const db = getNodeSqliteKysely<Pick<DB, "conversations">>(database.db);
+              if (change === "removed") {
+                executeSqliteQuerySync(
+                  database.db,
+                  db.deleteFrom("conversations").where("conversation_id", "=", conversationRef),
+                );
+              } else {
+                const next = {
+                  channel: { channel: "otherchat" },
+                  account: { account_id: "other-account" },
+                  target: { delivery_target: "channel:other-room" },
+                  thread: { thread_id: "other-thread" },
+                }[change];
+                executeSqliteQuerySync(
+                  database.db,
+                  db
+                    .updateTable("conversations")
+                    .set(next)
+                    .where("conversation_id", "=", conversationRef),
+                );
+              }
+            },
+            { agentId: "main" },
+          );
+          expect(runMessageAction).toHaveBeenCalledTimes(1);
+        } finally {
+          releaseFirst.resolve();
+        }
+        expect((await first)[1]).toMatchObject({ mirror: { status: "delivered" } });
+        expect(await pending).toMatchObject([
+          true,
+          {
+            reactions: [],
+            mirror: {
+              status: "failed",
+              reason: "source conversation changed before delivery",
+            },
+          },
+        ]);
+        expect(runMessageAction).toHaveBeenCalledTimes(1);
+      }
+    });
+  });
 
   it("keeps one bot reaction per emoji while any reactor remains, in commit order", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {

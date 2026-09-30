@@ -31,6 +31,7 @@ import { prepareSessionTranscriptReadTargetCore } from "./session-accessor.trans
 import { readRestoredSessionTranscript } from "./session-cold-storage-read.js";
 import type {
   ChatHistoryPage,
+  SessionConversationBinding,
   SessionHistoryDelta,
   SessionHistoryTranscriptBinding,
   SessionHistorySnapshot,
@@ -38,6 +39,7 @@ import type {
   SessionHistoryWorkerResult,
 } from "./session-history-types.js";
 import { SessionHistoryDeltaPreparationError } from "./session-history-worker-errors.js";
+import type { StoredMessageReactionSummary } from "./session-reaction-store.kernel.js";
 import { isSessionTranscriptProjectionUnavailableError } from "./session-transcript-projection-error.js";
 import { resolveSessionTranscriptReadFence } from "./session-transcript-read-fence.js";
 import {
@@ -178,7 +180,13 @@ function captureHistoryRequest(request: SessionHistoryWorkerRequest): SessionHis
         },
       };
     }
-    if (request.kind === "message-count") {
+    if (request.kind === "conversation-binding") {
+      return {
+        kind: request.kind,
+        params: { target: capturedTarget, conversationRef: request.params.conversationRef },
+      };
+    }
+    if (request.kind === "message-count" || request.kind === "reactions") {
       return { kind: request.kind, params: { target: capturedTarget } };
     }
     if (request.kind === "message-by-id") {
@@ -259,6 +267,14 @@ function captureHistoryRequest(request: SessionHistoryWorkerRequest): SessionHis
   };
 }
 
+export function readSessionHistoryPageInWorker(
+  request: Extract<SessionHistoryWorkerRequest, { kind: "reactions" }>,
+  signal?: AbortSignal,
+): Promise<Record<string, StoredMessageReactionSummary[]>>;
+export function readSessionHistoryPageInWorker(
+  request: Extract<SessionHistoryWorkerRequest, { kind: "conversation-binding" }>,
+  signal?: AbortSignal,
+): Promise<SessionConversationBinding | null>;
 export function readSessionHistoryPageInWorker(
   request: Extract<SessionHistoryWorkerRequest, { kind: "artifacts" }>,
   signal?: AbortSignal,

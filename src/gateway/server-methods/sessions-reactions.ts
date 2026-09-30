@@ -16,12 +16,9 @@ import {
   resolveMessageActionDiscoveryForPlugin,
 } from "../../channels/plugins/message-action-discovery.js";
 import {
-  listSessionReactions,
   setSessionReaction,
   SessionReactionLimitError,
-} from "../../config/sessions.js";
-import { resolveConversation } from "../../config/sessions/conversation-registry.js";
-import { readSessionTranscriptMessageByEventId } from "../../config/sessions/session-accessor.js";
+} from "../../config/sessions/session-reaction-store.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { isConfiguredChannel } from "../../infra/outbound/channel-selection.js";
 import { resolveMessageActionOutcome } from "../../infra/outbound/message-action-contracts.js";
@@ -37,6 +34,11 @@ import {
   resolveSessionSharingTarget,
   resolveSessionVisibility,
 } from "../session-sharing.js";
+import {
+  readSessionReactionsAsync,
+  readSessionMessageByIdAsync,
+  readSessionConversationBindingAsync,
+} from "../session-transcript-readers.js";
 import { gatewayClientSessionCreator } from "./gateway-client-identity.js";
 import {
   requireSuggestionTarget,
@@ -139,101 +141,141 @@ async function mirrorReaction(params: {
   assertCurrent: () => void;
 }): Promise<SessionReactionMirror> {
   const { transport } = params;
-  try {
-    const cfg = params.context.getRuntimeConfig();
-    const conversation = resolveConversation(
-      reactionScope(params.target),
+  const scope = { ...reactionScope(params.target), sessionId: params.target.entry.sessionId };
+  const cfg = params.context.getRuntimeConfig();
+  // Start capture now and reserve commit order before yielding to another mutation.
+  const captured = readSessionConversationBindingAsync(scope, transport.conversationRef).then(
+    (conversation) => ({ ok: true as const, conversation }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  return enqueueMirror(
+    [
+      params.target.agentId,
+      params.target.storeKey,
+      params.target.entry.sessionId,
       transport.conversationRef,
-    );
-    if (!conversation || conversation.channel !== transport.channel) {
-      return { status: "skipped", reason: "source conversation is unavailable" };
-    }
-    const channel = conversation.channel;
-    if (!isConfiguredChannel(cfg, channel)) {
-      return { status: "skipped", reason: "source channel is not configured or enabled" };
-    }
-    // The mirror reacts inside the message's own conversation, so it uses the
-    // current-channel discovery; the cross-channel schema-safe list excludes
-    // every channel whose react params are current-channel-only.
-    const discovery = resolveCurrentChannelMessageToolDiscoveryAdapter(channel);
-    if (
-      !discovery ||
-      !resolveMessageActionDiscoveryForPlugin({
-        pluginId: discovery.pluginId,
-        actions: discovery.actions,
-        context: createMessageActionDiscoveryContext({
+      transport.messageId,
+      params.emoji,
+    ].join("\0"),
+    async () => {
+      try {
+        const resolved = await captured;
+        if (!resolved.ok) {
+          throw resolved.error;
+        }
+        params.assertCurrent();
+        const conversation = resolved.conversation;
+        if (!conversation || conversation.channel !== transport.channel) {
+          return { status: "skipped", reason: "source conversation is unavailable" };
+        }
+        const channel = conversation.channel;
+        if (!isConfiguredChannel(cfg, channel)) {
+          return { status: "skipped", reason: "source channel is not configured or enabled" };
+        }
+        // The mirror reacts inside the message's own conversation, so it uses the
+        // current-channel discovery; the cross-channel schema-safe list excludes
+        // every channel whose react params are current-channel-only.
+        const discovery = resolveCurrentChannelMessageToolDiscoveryAdapter(channel);
+        if (
+          !discovery ||
+          !resolveMessageActionDiscoveryForPlugin({
+            pluginId: discovery.pluginId,
+            actions: discovery.actions,
+            context: createMessageActionDiscoveryContext({
+              cfg,
+              channel,
+              accountId: conversation.accountId,
+              agentId: params.target.agentId,
+              sessionKey: params.target.canonicalKey,
+              sessionId: params.target.entry.sessionId,
+              currentChannelId: conversation.nativeChannelId,
+              currentMessageId: transport.messageId,
+              currentThreadTs: conversation.threadId,
+            }),
+            includeActions: true,
+          }).actions.includes("react")
+        ) {
+          return { status: "skipped", reason: "source channel does not support reactions" };
+        }
+        const plugin = getRuntimeVisibleChannelPlugin(channel);
+        if (!plugin) {
+          return { status: "skipped", reason: "source channel is unavailable" };
+        }
+        const account = await resolveChannelAccount({
+          plugin,
           cfg,
-          channel,
           accountId: conversation.accountId,
-          agentId: params.target.agentId,
-          sessionKey: params.target.canonicalKey,
-          sessionId: params.target.entry.sessionId,
-          currentChannelId: conversation.nativeChannelId,
-          currentMessageId: transport.messageId,
-          currentThreadTs: conversation.threadId,
-        }),
-        includeActions: true,
-      }).actions.includes("react")
-    ) {
-      return { status: "skipped", reason: "source channel does not support reactions" };
-    }
-    const plugin = getRuntimeVisibleChannelPlugin(channel);
-    if (!plugin) {
-      return { status: "skipped", reason: "source channel is unavailable" };
-    }
-    const account = await resolveChannelAccount({ plugin, cfg, accountId: conversation.accountId });
-    if (
-      !(plugin.config.isEnabled?.(account, cfg) ?? isAccountEnabled(account)) ||
-      !((await plugin.config.isConfigured?.(account, cfg)) ?? true)
-    ) {
-      return { status: "skipped", reason: "source channel account is not configured or enabled" };
-    }
-    const { runMessageAction } = await import("../../infra/outbound/message-action-runner.js");
-    const assertCurrent = () => {
-      params.assertCurrent();
-      if (params.context.getRuntimeConfig() !== cfg) {
-        throw new Error("channel configuration changed before reaction delivery");
+        });
+        if (
+          !(plugin.config.isEnabled?.(account, cfg) ?? isAccountEnabled(account)) ||
+          !((await plugin.config.isConfigured?.(account, cfg)) ?? true)
+        ) {
+          return {
+            status: "skipped",
+            reason: "source channel account is not configured or enabled",
+          };
+        }
+        const { runMessageAction } = await import("../../infra/outbound/message-action-runner.js");
+        const assertCurrent = () => {
+          params.assertCurrent();
+          if (params.context.getRuntimeConfig() !== cfg) {
+            throw new Error("channel configuration changed before reaction delivery");
+          }
+        };
+        const current = await readSessionConversationBindingAsync(scope, transport.conversationRef);
+        if (
+          !current ||
+          current.channel !== conversation.channel ||
+          current.accountId !== conversation.accountId ||
+          current.target !== conversation.target ||
+          current.threadId !== conversation.threadId ||
+          current.nativeChannelId !== conversation.nativeChannelId
+        ) {
+          return { status: "failed", reason: "source conversation changed before delivery" };
+        }
+        // The registry has no synchronous worker read: binding is the last awaited
+        // check before handoff; the adapter guard retains live reactor/session/config checks.
+        assertCurrent();
+        const outcome = resolveMessageActionOutcome(
+          await runMessageAction({
+            cfg,
+            action: "react",
+            agentId: params.target.agentId,
+            sessionKey: params.target.canonicalKey,
+            sessionId: params.target.entry.sessionId,
+            // A person asked for this reaction from the Control UI; like the CLI it
+            // is an operator action, not a model-delegated conversation read.
+            conversationReadOrigin: "direct-operator",
+            assertDirectAdapterHandoff: assertCurrent,
+            params: {
+              channel,
+              to: conversation.target,
+              accountId: conversation.accountId,
+              ...(conversation.threadId ? { threadId: conversation.threadId } : {}),
+              messageId: transport.messageId,
+              emoji: params.emoji,
+              remove: params.remove,
+            },
+          }),
+        );
+        if (!outcome.ok) {
+          throw new Error(outcome.error);
+        }
+        return { status: "delivered" };
+      } catch (error) {
+        const reason = formatErrorMessage(error);
+        params.context.logGateway.warn(`Control UI reaction mirror failed: ${reason}`);
+        return { status: "failed", reason };
       }
-    };
-    assertCurrent();
-    const outcome = resolveMessageActionOutcome(
-      await runMessageAction({
-        cfg,
-        action: "react",
-        agentId: params.target.agentId,
-        sessionKey: params.target.canonicalKey,
-        sessionId: params.target.entry.sessionId,
-        // A person asked for this reaction from the Control UI; like the CLI it
-        // is an operator action, not a model-delegated conversation read.
-        conversationReadOrigin: "direct-operator",
-        assertDirectAdapterHandoff: assertCurrent,
-        params: {
-          channel,
-          to: conversation.target,
-          accountId: conversation.accountId,
-          ...(conversation.threadId ? { threadId: conversation.threadId } : {}),
-          messageId: transport.messageId,
-          emoji: params.emoji,
-          remove: params.remove,
-        },
-      }),
-    );
-    if (!outcome.ok) {
-      throw new Error(outcome.error);
-    }
-    return { status: "delivered" };
-  } catch (error) {
-    const reason = formatErrorMessage(error);
-    params.context.logGateway.warn(`Control UI reaction mirror failed: ${reason}`);
-    return { status: "failed", reason };
-  }
+    },
+  );
 }
 
 export const sessionReactionHandlers: GatewayRequestHandlers = {
   "session.reactions.list": defineValidatedGatewayHandler(
     "session.reactions.list",
     validateSessionReactionsListParams,
-    ({ params, respond, client, context }) => {
+    async ({ params, respond, client, context, hasCurrentClientAuthority }) => {
       const target = requireSuggestionTarget({ client, context, ...params, respond });
       if (!target) {
         return;
@@ -250,12 +292,51 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
       ) {
         return;
       }
-      respond(true, {
+      const reactions = await readSessionReactionsAsync({
+        ...reactionScope(target),
         sessionId: target.entry.sessionId,
-        reactions: listSessionReactions(reactionScope(target), {
-          sessionId: target.entry.sessionId,
-        }),
       });
+      if (
+        hasCurrentClientAuthority?.() === false ||
+        client?.invalidated ||
+        client?.connectionSignal?.aborted
+      ) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.FORBIDDEN, "reaction reader authority changed"),
+        );
+        return;
+      }
+      const current = requireSuggestionTarget({ client, context, ...params, respond });
+      if (!current) {
+        return;
+      }
+      if (
+        current.storePath !== target.storePath ||
+        current.storeKey !== target.storeKey ||
+        current.agentId !== target.agentId ||
+        current.entry.sessionId !== target.entry.sessionId
+      ) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "session changed during reaction read"),
+        );
+        return;
+      }
+      if (
+        requireVisibleSuggestionRole({
+          client,
+          cfg: (context.getCommittedRuntimeConfig ?? context.getRuntimeConfig)(),
+          sessionKey: params.sessionKey,
+          target: current,
+          respond,
+        }) === null
+      ) {
+        return;
+      }
+      respond(true, { sessionId: target.entry.sessionId, reactions });
     },
   ),
   "session.reactions.set": defineValidatedGatewayHandler(
@@ -302,13 +383,20 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
       }
       const scope = reactionScope(target);
       const message = asOptionalRecord(
-        readSessionTranscriptMessageByEventId(
-          {
-            ...scope,
-            sessionId: target.entry.sessionId,
-          },
-          params.messageId,
-        )?.message,
+        (
+          await readSessionMessageByIdAsync(
+            {
+              ...scope,
+              sessionId: target.entry.sessionId,
+            },
+            params.messageId,
+            {
+              currentOnly: true,
+              maxBytes: Number.MAX_SAFE_INTEGER,
+              allowResetArchiveFallback: false,
+            },
+          )
+        ).message,
       );
       if (!message || (message.role !== "user" && message.role !== "assistant")) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown message"));
@@ -350,6 +438,7 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
           remove: params.remove,
           expectedSessionId: target.entry.sessionId,
         });
+        assertCurrent();
       } catch (error) {
         respond(
           false,
@@ -422,24 +511,14 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
       const mirror =
         "skipped" in decision
           ? decision.skipped
-          : await enqueueMirror(
-              [
-                target.agentId,
-                target.storeKey,
-                target.entry.sessionId,
-                params.messageId,
-                params.emoji,
-              ].join("\0"),
-              () =>
-                mirrorReaction({
-                  context,
-                  target,
-                  transport: decision.transport,
-                  emoji: params.emoji,
-                  remove: params.remove === true,
-                  assertCurrent,
-                }),
-            );
+          : await mirrorReaction({
+              context,
+              target,
+              transport: decision.transport,
+              emoji: params.emoji,
+              remove: params.remove === true,
+              assertCurrent,
+            });
       respond(true, { messageId: params.messageId, reactions, mirror });
     },
   ),

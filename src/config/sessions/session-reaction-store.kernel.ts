@@ -33,7 +33,7 @@ export class SessionReactionLimitError extends Error {
   }
 }
 
-function reactionDb(database: OpenClawAgentDatabase) {
+function reactionDb(database: Pick<OpenClawAgentDatabase, "db">) {
   return getNodeSqliteKysely<Pick<OpenClawAgentKyselyDatabase, "session_reactions">>(database.db);
 }
 
@@ -60,7 +60,11 @@ export type SessionReactionWrite = {
   changed: boolean;
 };
 
-function reactionRows(database: OpenClawAgentDatabase, sessionKey: string, sessionId: string) {
+function reactionRows(
+  database: Pick<OpenClawAgentDatabase, "db">,
+  sessionKey: string,
+  sessionId: string,
+) {
   return reactionDb(database)
     .selectFrom("session_reactions")
     .selectAll()
@@ -153,7 +157,7 @@ export function setSessionReactionInDatabase(
 }
 
 export function listSessionReactionsInDatabase(
-  database: OpenClawAgentDatabase,
+  database: Pick<OpenClawAgentDatabase, "db">,
   sessionKey: string,
   params: { sessionId: string },
 ): Record<string, StoredMessageReactionSummary[]> {
