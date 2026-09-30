@@ -33,7 +33,10 @@ import {
   listSubagentRunsForRequester,
 } from "../registry/subagent-registry-read.js";
 import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
-import { buildRequesterSettleWakeIdentity } from "../registry/subagent-requester-settle-identity.js";
+import {
+  buildRequesterSettleWakeIdentity,
+  isRequesterCompletionCohortCurrent,
+} from "../registry/subagent-requester-settle-identity.js";
 import { hasSubagentRunEnded } from "../registry/subagent-run-liveness.js";
 import { withRequesterCronAuthority } from "../requester-cron-authority.js";
 import {
@@ -380,13 +383,23 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
     sessionId: requesterSessionId,
     lifecycleRevision: requesterLifecycleRevision,
   };
-  const completionRows = dedupeLatestChildCompletionRows(
-    filterCurrentDirectChildCompletionRows(settledBatch, {
-      requesterSessionKey,
-      requesterAgentId,
-      getLatestSubagentRunByChildSessionKey,
-    }),
-  );
+  const currentCompletionRows = (rows: SubagentRunRecord[]) =>
+    frozenBatchRunIds?.length
+      ? rows.filter((entry) =>
+          isRequesterCompletionCohortCurrent(
+            entry,
+            settledBatch,
+            getLatestLiveSubagentRunByChildSessionKey,
+          ),
+        )
+      : dedupeLatestChildCompletionRows(
+          filterCurrentDirectChildCompletionRows(rows, {
+            requesterSessionKey,
+            requesterAgentId,
+            getLatestSubagentRunByChildSessionKey,
+          }),
+        );
+  const completionRows = currentCompletionRows(settledBatch);
   // Delivered children remain in yield cohorts. One private result makes the
   // aggregate private; public siblings keep their individual completion route.
   const privateRows = completionRows.filter((entry) => entry.completionTarget === "parent");
@@ -533,13 +546,8 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(
       return true;
     };
     const isBatchCurrent = () => {
-      const currentRuns = filterCurrentDirectChildCompletionRows(
+      const currentRuns = currentCompletionRows(
         listSubagentRunsForRequester(requesterSessionKey, { requesterAgentId, requesterStorePath }),
-        {
-          requesterSessionKey,
-          requesterAgentId,
-          getLatestSubagentRunByChildSessionKey,
-        },
       );
       return settledBatch.every(
         (entry) =>

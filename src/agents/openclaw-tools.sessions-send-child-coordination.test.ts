@@ -107,6 +107,7 @@ import {
 import { observeSessionSendContinuations } from "./openclaw-tools.sessions-timeout.test-support.js";
 import { announceTesting } from "./subagents/announce/subagent-announce-overrides.test-support.js";
 import { onSubagentRegistryPersisted } from "./subagents/registry/subagent-registry-state.js";
+import { observeRootWork } from "./subagents/registry/subagent-registry.browser-cleanup.test-support.js";
 import {
   addSubagentRunForTests,
   getSubagentRunByRunId,
@@ -121,10 +122,12 @@ import { createSessionsYieldTool } from "./tools/sessions-yield-tool.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const continuations = observeSessionSendContinuations({ trackAllWork: true });
+let settleRootWork: ReturnType<typeof observeRootWork>;
 
 async function settleSessionWork() {
   await continuations.settle();
-  await vi.waitFor(() => expect(getActiveGatewayRootWorkCount()).toBe(0));
+  await settleRootWork(true);
+  expect(getActiveGatewayRootWorkCount()).toBe(0);
 }
 
 afterAll(() => {
@@ -203,6 +206,7 @@ async function writeEntry(sessionKey: string, entry: SessionEntry, storePath?: s
 describe("sessions_send child coordination", () => {
   let state: OpenClawTestState;
   beforeEach(async () => {
+    settleRootWork = observeRootWork();
     state = await createOpenClawTestState({ scenario: "minimal" });
     config.session = {
       mainKey: "main",
@@ -501,6 +505,7 @@ describe("sessions_send child coordination", () => {
     calls,
     writeEntry,
     settleSessionWork,
+    drainRootWork: () => settleRootWork(true),
   });
 
   it.each([

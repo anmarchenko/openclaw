@@ -1,15 +1,23 @@
 import { expect, it, vi, type MockInstance } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import type { SessionEntry } from "../config/sessions/types.js";
-import { createContext } from "../gateway/server-plugin-in-process-dispatch.test-support.js";
+import { captureGatewayOperatorRunAuthority } from "../gateway/operator-run-authority.js";
+import {
+  createContext,
+  createOperatorClient,
+} from "../gateway/server-plugin-in-process-dispatch.test-support.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
 import { withPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import * as stateWorker from "../state/openclaw-state-worker-store.js";
 import { mergeAcceptedSessionSpawnsForRun } from "./accepted-session-spawn.js";
-import { prepareSystemAgentRunAdmission } from "./admitted-run-context.js";
+import {
+  getAdmittedRunDelegatedAuthority,
+  prepareSystemAgentRunAdmission,
+} from "./admitted-run-context.js";
 import { clearActiveEmbeddedRun, setActiveEmbeddedRun } from "./embedded-agent-runner/runs.js";
 import { createEmbeddedRunHandle } from "./embedded-agent-runner/runs.test-support.js";
+import { createRequesterYieldCallback } from "./openclaw-tools.requester-yield.js";
 import { announceTesting } from "./subagents/announce/subagent-announce-overrides.test-support.js";
 import * as registryPersistence from "./subagents/registry/subagent-registry-persistence.js";
 import { onSubagentRegistryPersisted } from "./subagents/registry/subagent-registry-state.js";
@@ -18,6 +26,7 @@ import {
   getSubagentRunByRunId,
   registerSubagentRun,
   resetSubagentRegistryForTests,
+  settleRequesterAfterSessionSpawns,
 } from "./subagents/registry/subagent-registry.test-helpers.js";
 import {
   createAdmittedGatewayToolCallerIdentity,
@@ -25,6 +34,7 @@ import {
 } from "./tools/gateway-caller-context.js";
 import type { AgentToolGatewayRequestCaller } from "./tools/in-process-gateway.js";
 import { createSessionsSendTool } from "./tools/sessions-send-tool.js";
+import { createSessionsYieldTool } from "./tools/sessions-yield-tool.js";
 
 export type GatewayCall = {
   method?: string;
@@ -39,6 +49,7 @@ export function registerSessionsSendRequesterRetirementTests({
   calls,
   writeEntry,
   settleSessionWork,
+  drainRootWork,
 }: {
   config: OpenClawConfig;
   callGatewayMock: AgentToolGatewayRequestCaller &
@@ -46,8 +57,10 @@ export function registerSessionsSendRequesterRetirementTests({
   calls: GatewayCall[];
   writeEntry: (sessionKey: string, entry: SessionEntry, storePath?: string) => Promise<void>;
   settleSessionWork: () => Promise<void>;
+  drainRootWork: () => Promise<void>;
 }) {
   it.each([
+    { mode: "followup", retirement: "after Gateway acceptance" },
     { mode: "followup", retirement: "before publication" },
     { mode: "followup", retirement: "after publication" },
     { mode: "steer", retirement: "before publication" },
@@ -73,7 +86,12 @@ export function registerSessionsSendRequesterRetirementTests({
       callGatewayMock.mockImplementation(async (request: GatewayCall) => {
         calls.push(request);
         if (request.method === "agent" && request.params?.sessionKey === childSessionKey) {
-          return { runId, status: "accepted", targetDisposition: "queued" };
+          const receipt = { runId, status: "accepted", targetDisposition: "queued" };
+          if (retirement === "after Gateway acceptance") {
+            retireRequester();
+            request.onAccepted?.(receipt);
+          }
+          return receipt;
         }
         if (request.method === "agent.wait" && request.params?.runId === runId) {
           await childPending.promise;
@@ -130,10 +148,10 @@ export function registerSessionsSendRequesterRetirementTests({
       context.localEmbedded = true;
       context.getRuntimeConfig = () => config;
       context.resolveGatewayContext = () => context;
-      let retiredAfterCommit = false;
+      let requesterRetired = false;
       const retireRequester = () => {
         expect(mergeAcceptedSessionSpawnsForRun(admission.operationalRunInstance)).toEqual([]);
-        retiredAfterCommit = true;
+        requesterRetired = true;
         admission.close();
       };
       const publish = registryPersistence.publishSubagentRunPostimages;
@@ -150,7 +168,7 @@ export function registerSessionsSendRequesterRetirementTests({
                   onCommitted: () => {
                     if (
                       retirement === "before publication" &&
-                      !retiredAfterCommit &&
+                      !requesterRetired &&
                       runIds.includes(runId)
                     ) {
                       retireRequester();
@@ -169,7 +187,7 @@ export function registerSessionsSendRequesterRetirementTests({
           const result = await execute(owner, run, options);
           if (
             retirement === "after publication" &&
-            !retiredAfterCommit &&
+            !requesterRetired &&
             getSubagentRunByRunId(runId)?.requesterTurnRunId === requesterTurnRunId
           ) {
             retireRequester();
@@ -203,7 +221,7 @@ export function registerSessionsSendRequesterRetirementTests({
                 }),
             ),
         );
-        expect(retiredAfterCommit).toBe(true);
+        expect(requesterRetired).toBe(true);
         expect(result.details).toMatchObject({ status: "error", sentBeforeError: true });
         expect(getSubagentRunByRunId(runId)?.requesterTurnRunId).toBeUndefined();
         if (mode === "steer") {
@@ -251,4 +269,224 @@ export function registerSessionsSendRequesterRetirementTests({
       }
     },
   );
+
+  it.each([
+    { scenario: "only a watched tool's authority retires", sameChild: false, revokeTool: true },
+    { scenario: "two watched runs target the same child", sameChild: true, revokeTool: false },
+  ])("keeps earlier child claims when $scenario", async ({ sameChild, revokeTool }) => {
+    const requesterSessionKey = "agent:main:dashboard:active-requester";
+    const requesterTurnRunId = "active-requester-turn";
+    const firstChildKey = "agent:main:dashboard:first-watched-child";
+    const secondChildKey = sameChild ? firstChildKey : "agent:main:dashboard:second-watched-child";
+    const children = [
+      { childSessionKey: firstChildKey, runId: "first-watched-run" },
+      { childSessionKey: secondChildKey, runId: "second-watched-run" },
+    ];
+    await writeEntry(requesterSessionKey, { sessionId: "active-requester", updatedAt: 1 });
+    for (const childSessionKey of new Set(children.map((child) => child.childSessionKey))) {
+      await writeEntry(childSessionKey, {
+        sessionId: childSessionKey,
+        updatedAt: 1,
+        spawnedBy: requesterSessionKey,
+        spawnDepth: 1,
+      });
+    }
+    resetSubagentRegistryForTests();
+    const childrenPending = children.map(() => createDeferredCore());
+    let acceptedMessages = 0;
+    callGatewayMock.mockImplementation(async (request: GatewayCall) => {
+      calls.push(request);
+      const sessionKey = request.params?.sessionKey;
+      if (
+        request.method === "agent" &&
+        children.some((child) => child.childSessionKey === sessionKey)
+      ) {
+        const child = children[acceptedMessages++];
+        if (!child) {
+          throw new Error("Unexpected additional child admission");
+        }
+        expect(sessionKey).toBe(child.childSessionKey);
+        return { runId: child.runId, status: "accepted", targetDisposition: "queued" };
+      }
+      if (request.method === "agent.wait") {
+        const child = children.find((candidate) => candidate.runId === request.params?.runId);
+        if (!child) {
+          throw new Error("Unexpected child completion wait");
+        }
+        await childrenPending[children.indexOf(child)]!.promise;
+        return {
+          status: "ok",
+          startedAt: 1,
+          endedAt: Date.now(),
+          terminalReply: {
+            disposition: "visible",
+            text: `Watched child result ${child.runId}`,
+          },
+        };
+      }
+      if (request.method === "agent" && sessionKey === requesterSessionKey) {
+        return {
+          result: {
+            payloads: [{ text: "Both watched results reached the requester" }],
+            deliveryStatus: { status: "sent", resultCount: 1 },
+          },
+        };
+      }
+      return {};
+    });
+    const context = createContext();
+    context.localEmbedded = true;
+    context.getRuntimeConfig = () => config;
+    context.resolveGatewayContext = () => context;
+    const client = createOperatorClient({
+      profileName: "watched-cohort",
+      scopes: ["operator.admin"],
+    });
+    const operator = await captureGatewayOperatorRunAuthority({ client, context });
+    if (!operator) {
+      throw new Error("Expected an operator-owned requester admission");
+    }
+    const admission = prepareSystemAgentRunAdmission(
+      config,
+      requesterTurnRunId,
+      "main",
+      "watched-tool-retirement",
+      undefined,
+      operator.authority,
+    );
+    const admittedRunContext = await admission.admit("embedded");
+    let toolCurrent = true;
+    const withCaller = <T>(run: () => T, receiptAuthority?: () => boolean) =>
+      withPluginRuntimeGatewayRequestScope(
+        { client, context, resolveGatewayContext: () => context, isWebchatConnect: () => false },
+        () =>
+          withGatewayToolCallerIdentity(
+            createAdmittedGatewayToolCallerIdentity({
+              admittedRunContext,
+              agentId: "main",
+              sessionKey: requesterSessionKey,
+              receiptAuthority,
+            }),
+            run,
+          ),
+      );
+    const send = (sessionKey: string) =>
+      withCaller(
+        () =>
+          createSessionsSendTool({
+            agentSessionKey: requesterSessionKey,
+            requesterTurnRunId,
+            config,
+            callGateway: callGatewayMock,
+          }).execute("watched-send", {
+            sessionKey,
+            mode: "followup",
+            watch: true,
+            timeoutSeconds: 0,
+            message: "Return the child result",
+          }),
+        () => toolCurrent,
+      );
+    const execute = stateWorker.runOpenClawStateWorkerOperation;
+    const retireTool = vi
+      .spyOn(stateWorker, "runOpenClawStateWorkerOperation")
+      .mockImplementation(async (owner, run, options) => {
+        const result = await execute(owner, run, options);
+        if (
+          revokeTool &&
+          getSubagentRunByRunId("second-watched-run")?.requesterTurnRunId === requesterTurnRunId
+        ) {
+          toolCurrent = false;
+        }
+        return result;
+      });
+    announceTesting.setDepsForTest({ callGateway: callGatewayMock });
+    let stopObserving = () => {};
+    try {
+      expect((await send(firstChildKey)).details).toMatchObject({ status: "accepted" });
+      expect((await send(secondChildKey)).details).toMatchObject(
+        revokeTool ? { status: "error", sentBeforeError: true } : { status: "accepted" },
+      );
+      expect(toolCurrent).toBe(!revokeTool);
+      expect(getAdmittedRunDelegatedAuthority(admittedRunContext)).toBeDefined();
+      for (const { runId } of children) {
+        expect(getSubagentRunByRunId(runId)?.requesterTurnRunId).toBe(requesterTurnRunId);
+      }
+      expect(mergeAcceptedSessionSpawnsForRun(admission.operationalRunInstance)).toEqual(
+        children.map(({ childSessionKey, runId }) => ({
+          runId,
+          childSessionKey,
+          expectsCompletionMessage: true,
+        })),
+      );
+      const yielded = await withCaller(() =>
+        createSessionsYieldTool({
+          sessionId: "active-requester",
+          claimYield: createRequesterYieldCallback({
+            requesterSessionKey,
+            requesterAgentId: "main",
+            requesterTurnRunId,
+          }),
+          onYield: vi.fn(),
+        }).execute("yield-existing-claims", {}),
+      );
+      expect(yielded.details).toEqual({ status: "yielded" });
+      for (const { runId } of children) {
+        expect(getSubagentRunByRunId(runId)?.requesterTurnYielded).toBe(true);
+      }
+      expect(
+        await withCaller(() =>
+          settleRequesterAfterSessionSpawns({
+            requesterSessionKey,
+            requesterAgentId: "main",
+            requesterTurnRunId,
+            requesterYielded: true,
+            acceptedSessionSpawns: mergeAcceptedSessionSpawnsForRun(
+              admission.operationalRunInstance,
+            ),
+          }),
+        ),
+      ).toBe(true);
+      for (const { runId } of children) {
+        expect(getSubagentRunByRunId(runId)?.requesterTurnRunId).toBeUndefined();
+      }
+      const firstSettled = createDeferredCore();
+      stopObserving = onSubagentRegistryPersisted(() => {
+        if (getSubagentRunByRunId(children[0]!.runId)?.cleanupCompletedAt !== undefined) {
+          firstSettled.resolve();
+        }
+      });
+      admission.close();
+      childrenPending[0]!.resolve();
+      await firstSettled.promise;
+      await drainRootWork();
+      childrenPending[1]!.resolve();
+      await settleSessionWork();
+      const requesterCalls = calls.filter(
+        (call) => call.method === "agent" && call.params?.sessionKey === requesterSessionKey,
+      );
+      expect(requesterCalls).toHaveLength(1);
+      for (const { runId } of children) {
+        expect(requesterCalls[0]?.params?.message).toContain(`Watched child result ${runId}`);
+        expect(getSubagentRunByRunId(runId)?.delivery?.status).toBe("delivered");
+        expect(getSubagentRunByRunId(runId)?.requesterSettleWake).toBeUndefined();
+        emitAgentEvent({ runId, stream: "lifecycle", data: { phase: "end", endedAt: Date.now() } });
+      }
+      await settleSessionWork();
+      expect(
+        calls.filter(
+          (call) => call.method === "agent" && call.params?.sessionKey === requesterSessionKey,
+        ),
+      ).toHaveLength(1);
+    } finally {
+      retireTool.mockRestore();
+      admission.close();
+      childrenPending.forEach((pending) => pending.resolve());
+      stopObserving();
+      resetSubagentRegistryForTests();
+      await settleSessionWork();
+      announceTesting.setDepsForTest();
+      operator.release();
+    }
+  });
 }

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getAgentEventLifecycleGeneration } from "../../../infra/agent-events.js";
+import { captureOpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -112,7 +113,7 @@ describe("adoptSubagentRunForRequesterTurnInRuns", () => {
     };
   }
 
-  it("keeps the pending batch and logical task while making the current turn yieldable", async () => {
+  it("retains the pending wake counter and logical task while claiming the current turn", async () => {
     const child = pendingChild();
     const before = structuredClone(child);
     const params = adoption(child);
@@ -126,6 +127,7 @@ describe("adoptSubagentRunForRequesterTurnInRuns", () => {
       ...before,
       requesterTurnRunId: REQUESTER_TURN,
       requesterTurnYielded: undefined,
+      requesterSettleWake: { status: "pending", attemptCount: 0, rearmGeneration: 1 },
     });
     expect(
       await markRequesterTurnYieldedInRuns({
@@ -138,6 +140,70 @@ describe("adoptSubagentRunForRequesterTurnInRuns", () => {
     ).toBe(1);
   });
 
+  it.each(["before", "after"] as const)(
+    "rearms an adopted wake with another child claimed %s adoption",
+    async (order) => {
+      const child = pendingChild();
+      child.runId = `adopted-${order}`;
+      child.childSessionKey = `agent:main:subagent:${child.runId}`;
+      child.taskRunId = `original-task-${order}`;
+      child.requesterSettleWake = {
+        status: "pending",
+        attemptCount: 0,
+        batchRunIds: [child.runId],
+        requesterYieldBatch: true,
+        rearmGeneration: 1,
+      };
+      const sibling: SubagentRunRecord = {
+        ...makeRun(`sibling-${order}`, false),
+        requesterAgentId: "main",
+        execution: { status: "running", startedAt: 1_000 },
+        completion: { required: true },
+        delivery: { status: "pending" },
+      };
+      const params = adoption(child);
+      const context = captureOpenClawStateWorkerContext();
+      if (order === "before") {
+        params.runs.set(sibling.runId, sibling);
+      }
+      await persistSubagentRunsToDiskAsyncOrThrow(params.runs, [...params.runs.keys()], {
+        context,
+      });
+      const receipt = await adoptSubagentRunForRequesterTurnInRuns(params);
+      if (!receipt) {
+        throw new Error("Expected the watched steer to claim its child");
+      }
+      if (order === "after") {
+        params.runs.set(sibling.runId, sibling);
+        await persistSubagentRunsToDiskAsyncOrThrow(params.runs, [sibling.runId], { context });
+      }
+      const requester = {
+        requesterSessionKey: REQUESTER,
+        requesterAgentId: "main",
+        requesterTurnRunId: REQUESTER_TURN,
+        runs: params.runs,
+        transfer: createRequesterInitialTransferFixture(params.runs),
+      };
+      expect(await markRequesterTurnYieldedInRuns(requester)).toBe(2);
+      await expect(
+        settleRequesterTurnAfterSessionSpawns({
+          ...requester,
+          requesterYielded: true,
+          acceptedSessionSpawns: [receipt, accepted(sibling)],
+          schedule: vi.fn(),
+        }),
+      ).resolves.toBe(true);
+      for (const entry of [child, sibling]) {
+        expect(entry.requesterTurnRunId).toBeUndefined();
+        expect(entry.requesterSettleWake).toMatchObject({
+          requesterYieldBatch: true,
+          batchRunIds: [child.runId, sibling.runId],
+          rearmGeneration: 2,
+        });
+      }
+    },
+  );
+
   it.each([
     "stale",
     "cancelled",
@@ -145,6 +211,7 @@ describe("adoptSubagentRunForRequesterTurnInRuns", () => {
     "different-turn",
     "different-cohort",
     "ordinary-cohort",
+    "missing-cohort",
     "retrying-cohort",
   ] as const)("does not take a %s child completion", async (reason) => {
     const child = pendingChild();
@@ -167,6 +234,13 @@ describe("adoptSubagentRunForRequesterTurnInRuns", () => {
         status: "pending",
         attemptCount: 1,
         batchRunIds: [child.runId],
+        requesterYieldBatch: true,
+        rearmGeneration: 1,
+      };
+    } else if (reason === "missing-cohort") {
+      child.requesterSettleWake = {
+        status: "pending",
+        attemptCount: 0,
         requesterYieldBatch: true,
         rearmGeneration: 1,
       };

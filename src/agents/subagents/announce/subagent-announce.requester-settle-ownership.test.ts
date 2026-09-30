@@ -125,8 +125,6 @@ it("holds an adopted child's old wake until its current requester turn yields", 
     requesterSettleWake: {
       status: "pending",
       attemptCount: 0,
-      batchRunIds: ["run-b"],
-      requesterYieldBatch: true,
       rearmGeneration: 1,
     },
   });
@@ -158,8 +156,8 @@ it("holds an adopted child's old wake until its current requester turn yields", 
       schedule: vi.fn(),
     }),
   ).toBe(true);
-  // The identical prepared cohort is reused; settlement releases its new turn owner.
-  expect(child.requesterSettleWake?.rearmGeneration).toBe(1);
+  // Settlement rearms the adopted wake for the new turn's complete child batch.
+  expect(child.requesterSettleWake?.rearmGeneration).toBe(2);
   expect(child.requesterTurnRunId).toBeUndefined();
   expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(true);
   expect(await maybeWakeRequesterAfterAllChildrenSettled(wakeParams())).toBe(false);

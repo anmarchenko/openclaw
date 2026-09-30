@@ -152,53 +152,60 @@ export async function dispatchSessionsSendFollowup(
     if (start.ok && watchedTurn) {
       const { registerSubagentRun, adoptSubagentRunForRequesterTurn } =
         await import("../subagents/registry/subagent-registry.js");
-      assertCurrent();
-      const childSessionKey = start.a2aSessionKey ?? params.sessionStoreTarget.canonicalKey;
-      let accepted: AcceptedSessionSpawn | undefined;
-      if (start.targetDisposition === "steered") {
-        const expected = start.steeredRunId
-          ? getLatestLiveSubagentRunByChildSessionKey(
+      // Acceptance already owns the input; retained custody owns recording its result obligation.
+      const assertCompletionCurrent = () =>
+        request ? request.custody.assertCurrent() : assertCurrent();
+      const claim = async () => {
+        assertCompletionCurrent();
+        const childSessionKey = start.a2aSessionKey ?? params.sessionStoreTarget.canonicalKey;
+        let accepted: AcceptedSessionSpawn | undefined;
+        if (start.targetDisposition === "steered") {
+          const expected = start.steeredRunId
+            ? getLatestLiveSubagentRunByChildSessionKey(
+                childSessionKey,
+                (entry) => entry.runId === start.steeredRunId,
+              )
+            : undefined;
+          if (expected) {
+            accepted = await adoptSubagentRunForRequesterTurn({
+              expected,
+              requesterSessionKey: options.requesterSessionKey,
+              requesterAgentId: options.requesterAgentId,
+              requesterTurnRunId: watchedTurn,
+              assertCurrent: assertCompletionCurrent,
+            });
+          }
+          if (!accepted) {
+            throw new Error(
+              "Steering was admitted, but its completion could not be claimed. Inspect the target before retrying.",
+            );
+          }
+        } else {
+          await registerSubagentRun(
+            {
+              runId: start.runId,
               childSessionKey,
-              (entry) => entry.runId === start.steeredRunId,
-            )
-          : undefined;
-        if (expected) {
-          accepted = await adoptSubagentRunForRequesterTurn({
-            expected,
-            requesterSessionKey: options.requesterSessionKey,
-            requesterAgentId: options.requesterAgentId,
-            requesterTurnRunId: watchedTurn,
-            assertCurrent,
-          });
-        }
-        if (!accepted) {
-          throw new Error(
-            "Steering was admitted, but its completion could not be claimed. Inspect the target before retrying.",
+              requesterSessionKey: options.requesterSessionKey,
+              requesterDisplayKey: options.requesterSessionKey,
+              requesterAgentId: options.requesterAgentId,
+              requesterTurnRunId: watchedTurn,
+              requesterOrigin: replyContext.requesterOrigin,
+              task: replyContext.message,
+              cleanup: "keep",
+              spawnMode: "session",
+              expectsCompletionMessage: true,
+            },
+            {
+              assertCurrent: assertCompletionCurrent,
+              assertPublicationCurrent: () => request?.custody.assertCurrent(),
+              persistence: "worker",
+            },
           );
+          accepted = { runId: start.runId, childSessionKey, expectsCompletionMessage: true };
         }
-      } else {
-        await registerSubagentRun(
-          {
-            runId: start.runId,
-            childSessionKey,
-            requesterSessionKey: options.requesterSessionKey,
-            requesterDisplayKey: options.requesterSessionKey,
-            requesterAgentId: options.requesterAgentId,
-            requesterTurnRunId: watchedTurn,
-            requesterOrigin: replyContext.requesterOrigin,
-            task: replyContext.message,
-            cleanup: "keep",
-            spawnMode: "session",
-            expectsCompletionMessage: true,
-          },
-          {
-            assertCurrent,
-            assertPublicationCurrent: () => request?.custody.assertCurrent(),
-            persistence: "worker",
-          },
-        );
-        accepted = { runId: start.runId, childSessionKey, expectsCompletionMessage: true };
-      }
+        return accepted;
+      };
+      const accepted = await (request ? request.custody.run(claim) : claim());
       assertCurrent();
       if (instance) {
         mergeAcceptedSessionSpawnsForRun(instance, [accepted]);
@@ -208,22 +215,22 @@ export async function dispatchSessionsSendFollowup(
     let failure = error;
     if (start.ok && watchedTurn) {
       const runId = start.targetDisposition === "steered" ? start.steeredRunId : start.runId;
-      if (runId) {
+      if (runId && instance) {
         try {
-          const { releaseRequesterTurnClaimForRun } =
+          const { reconcileRequesterTurnClaimForRun } =
             await import("../subagents/registry/subagent-registry-requester-claim.js");
           await runWithGatewayToolCleanupContext(() =>
-            releaseRequesterTurnClaimForRun({
+            reconcileRequesterTurnClaimForRun({
               runId,
               requesterSessionKey: options.requesterSessionKey,
               requesterAgentId: options.requesterAgentId,
-              requesterTurnRunId: watchedTurn,
+              requesterRunInstance: instance,
             }),
           );
-        } catch (releaseError) {
+        } catch (reconciliationError) {
           failure = new AggregateError(
-            [error, releaseError],
-            "Accepted child completion could not be released to its requester session.",
+            [error, reconciliationError],
+            "Accepted child completion could not be reconciled with its requester.",
           );
         }
       }

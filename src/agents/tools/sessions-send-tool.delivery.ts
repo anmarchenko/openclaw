@@ -302,7 +302,6 @@ export async function startSessionsSendAgentRun(
                 typeof receipt.runId === "string" &&
                 receipt.admissionPending !== true
               ) {
-                params.assertDispatchCurrent?.();
                 accepted.resolve({ runId: receipt.runId });
               }
             },

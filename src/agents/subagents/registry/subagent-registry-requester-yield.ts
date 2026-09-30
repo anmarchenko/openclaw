@@ -51,9 +51,10 @@ export async function adoptSubagentRunForRequesterTurnInRuns(params: {
     entry.suppressCompletionDelivery !== true &&
     entry.cleanupCompletedAt === undefined &&
     entry.requesterSettleWake?.status !== "dispatching" &&
-    (!entry.requesterSettleWake?.batchRunIds ||
-      (entry.requesterSettleWake.batchRunIds.length === 1 &&
-        entry.requesterSettleWake.batchRunIds[0] === entry.runId)) &&
+    (entry.requesterSettleWake?.batchRunIds === undefined
+      ? entry.requesterSettleWake?.requesterYieldBatch !== true
+      : entry.requesterSettleWake.batchRunIds.length === 1 &&
+        entry.requesterSettleWake.batchRunIds[0] === entry.runId) &&
     (entry.requesterSettleWake?.requesterYieldBatch !== true ||
       (entry.requesterSettleWake.status === "pending" &&
         entry.requesterSettleWake.attemptCount === 0 &&
@@ -85,6 +86,12 @@ export async function adoptSubagentRunForRequesterTurnInRuns(params: {
   const previous = captureSubagentRunMutationSnapshot(entry);
   entry.requesterTurnRunId = requesterTurnRunId;
   entry.requesterTurnYielded = undefined;
+  if (entry.requesterSettleWake?.requesterYieldBatch === true) {
+    // The new turn may add children; its settlement must build a fresh batch.
+    entry.requesterSettleWake = { ...entry.requesterSettleWake };
+    delete entry.requesterSettleWake.requesterYieldBatch;
+    delete entry.requesterSettleWake.batchRunIds;
+  }
   const result = await publishSubagentRunPostimages({
     runs: params.runs,
     previous: new Map([[entry, previous]]),
