@@ -419,13 +419,14 @@ export function resolveChatFastModeSelectState(
   const applicability = new Set(
     selectedEntries.map(({ entry, runtime }) => (runtime ?? entry).supportsFastMode),
   );
+  const selectedSupport = applicability.size === 1 ? [...applicability][0] : undefined;
+  const requestSupported = selectedSupport ?? isChatFastModeProviderSupported(effectiveProvider);
   const ultrafastSupported =
+    requestSupported &&
     selectedEntries.length > 0 &&
     selectedEntries.every(
       ({ runtime }) => runtime?.available === true && runtime.serviceTiers?.includes("ultrafast"),
     );
-  const selectedSupport = applicability.size === 1 ? [...applicability][0] : undefined;
-  const requestSupported = selectedSupport ?? isChatFastModeProviderSupported(effectiveProvider);
   const supported = requestSupported || Boolean(configuredOverride);
   // An unavailable Ultrafast preference falls back to Fast, never advertises access.
   const active =

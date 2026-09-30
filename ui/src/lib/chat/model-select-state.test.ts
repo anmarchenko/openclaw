@@ -105,6 +105,7 @@ describe("chat-model-select-state", () => {
     });
     for (const catalog of [
       [],
+      [{ ...model, supportsFastMode: false }],
       [{ ...model, serviceTiers: undefined }],
       [{ ...model, serviceTiers: ["priority"] }],
       [{ ...model, available: undefined }],

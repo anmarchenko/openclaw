@@ -77,7 +77,7 @@ function appearance(input: HTMLInputElement) {
 
 describe("effort bar colour and flow", () => {
   it("keeps Standard implicit in the chip and only exposes entitled speed choices", async () => {
-    const state = (mode: boolean | "ultrafast", tiers?: string[]) =>
+    const state = (mode: boolean | "ultrafast", tiers?: string[], supportsFastMode = true) =>
       resolveChatFastModeSelectState({
         activeRunId: null,
         connected: true,
@@ -94,7 +94,7 @@ describe("effort bar colour and flow", () => {
             name: "Model",
             provider: "openai",
             available: true,
-            supportsFastMode: true,
+            supportsFastMode,
             serviceTiers: tiers,
           },
         ],
@@ -110,6 +110,11 @@ describe("effort bar colour and flow", () => {
       state("ultrafast", ["priority", "ultrafast"]),
     );
     expect(host!.querySelector("summary")!.textContent).toContain("Ultrafast");
+    expect(
+      [...host!.querySelectorAll("[data-chat-speed-option]")].map((option) =>
+        option.textContent?.trim(),
+      ),
+    ).toEqual(["Standard", "Fast", "Ultrafast"]);
     const ultra = host!.querySelector<HTMLButtonElement>('[data-chat-speed-option="ultrafast"]')!;
     expect(ultra.getAttribute("aria-checked")).toBe("true");
     ultra.focus();
@@ -118,6 +123,14 @@ describe("effort bar colour and flow", () => {
     const standard = host!.querySelector<HTMLButtonElement>('[data-chat-speed-option="off"]')!;
     standard.click();
     expect(onFastModeSelect).toHaveBeenLastCalledWith("off", "effort-preview");
+    await fixture(
+      ["low", "medium", "high"],
+      "high",
+      false,
+      state("ultrafast", ["priority", "ultrafast"], false),
+    );
+    expect(host!.querySelector('[data-chat-speed-option="ultrafast"]')).toBeNull();
+    expect(host!.querySelector('[data-chat-speed-option="on"]')).toBeNull();
     await fixture(["low", "medium", "high"], "high", false, state("ultrafast"));
     expect(host!.querySelector('[data-chat-speed-option="ultrafast"]')).toBeNull();
     expect(host!.querySelector("summary")!.textContent).not.toContain("Ultrafast");
