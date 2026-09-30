@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { mkdir, rename, rm, symlink } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, vi } from "vitest";
