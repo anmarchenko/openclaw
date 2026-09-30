@@ -132,13 +132,15 @@ export async function prepareReplyAgentPayloads(state: {
     runResult.didSendDeterministicApprovalPrompt === true;
   const replyOperationRunState = resolveReplyOperationRunState(opts);
   const implicitContinuation = runResult.meta?.continuationPending === true;
-  const continuationOwner = implicitContinuation
-    ? {
-        stateContext: captureOpenClawStateWorkerContext(),
-        operationKey: replyOperation.key,
-        operationSessionId: replyOperation.sessionId,
-      }
-    : undefined;
+  // A media-run continuation has no children to take over delivery; its status is the reply.
+  const continuationOwner =
+    implicitContinuation && runResult.acceptedSessionSpawns?.length
+      ? {
+          stateContext: captureOpenClawStateWorkerContext(),
+          operationKey: replyOperation.key,
+          operationSessionId: replyOperation.sessionId,
+        }
+      : undefined;
   const pendingContinuation =
     runResult.meta?.yielded === true ||
     implicitContinuation ||

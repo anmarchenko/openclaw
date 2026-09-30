@@ -99,6 +99,19 @@ export function registerWaitingStatusCases({
     });
   });
 
+  it("delivers the waiting status for a media-run continuation without children", async () => {
+    runEmbeddedAgentMock.mockImplementationOnce(async (params: RunEmbeddedAgentInternalParams) => {
+      assert(params.preparedRunAdmission);
+      await params.preparedRunAdmission.admit("embedded");
+      return { payloads: [], meta: { durationMs: 0, continuationPending: true } };
+    });
+    const { run } = createMinimalRun();
+
+    await expect(run()).resolves.toMatchObject({
+      text: "I’m continuing this work and will send the result when it is ready.",
+    });
+  });
+
   it.each([false, true])(
     "uses direct delivery completeness at settlement for waiting status (complete=%s)",
     async (completeAtSettlement) => {
