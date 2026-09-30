@@ -1,3 +1,4 @@
+import { hasCompletionMessageSessionSpawn } from "../../agents/accepted-session-spawn.js";
 import {
   hasCommittedSourceReplyDeliveryEvidence,
   hasCompletedSourceReplyDeliveryEvidence,
@@ -132,9 +133,9 @@ export async function prepareReplyAgentPayloads(state: {
     runResult.didSendDeterministicApprovalPrompt === true;
   const replyOperationRunState = resolveReplyOperationRunState(opts);
   const implicitContinuation = runResult.meta?.continuationPending === true;
-  // A media-run continuation has no children to take over delivery; its status is the reply.
+  // A media-run continuation has no completion child to take over delivery; its status is the reply.
   const continuationOwner =
-    implicitContinuation && runResult.acceptedSessionSpawns?.length
+    implicitContinuation && hasCompletionMessageSessionSpawn(runResult.acceptedSessionSpawns)
       ? {
           stateContext: captureOpenClawStateWorkerContext(),
           operationKey: replyOperation.key,
