@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import * as lancedb from "@lancedb/lancedb";
 import { expectDefined } from "@openclaw/normalization-core";
 import type { PluginDoctorStateMigrationContext } from "openclaw/plugin-sdk/runtime-doctor-migrations";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   createMemoryLanceDbStateMigrations,
   resolveMemoryLanceDbPluginRoot,
@@ -21,6 +21,46 @@ describe("memory-lancedb doctor migration", () => {
   const { getDbPath, getTmpDir } = installTmpDirHarness({
     prefix: "openclaw-memory-doctor-",
   });
+
+  test.each(["tableNames", "openTable"] as const)(
+    "closes the connection when %s fails before migration starts",
+    async (operation) => {
+      const connection = await lancedb.connect(getDbPath());
+      const table = await connection.createTable("memories", [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          text: "legacy shared memory",
+          vector: [1, 0],
+          importance: 0.7,
+          category: "fact",
+          createdAt: 1,
+        },
+      ]);
+      table.close();
+      const failure = new Error(`${operation} failed`);
+      const failedOperation = vi.spyOn(connection, operation).mockRejectedValueOnce(failure);
+      const connect = vi.spyOn(lancedb, "connect").mockResolvedValueOnce(connection);
+      try {
+        const migration = expectDefined(stateMigrations[0], "memory-lancedb state migration");
+        await expect(
+          migration.migrateLegacyState({
+            config: {
+              plugins: { entries: { "memory-lancedb": { config: { dbPath: getDbPath() } } } },
+            },
+            env: { HOME: getTmpDir() },
+            stateDir: getTmpDir(),
+            oauthDir: path.join(getTmpDir(), "oauth"),
+            context: unusedDoctorContext,
+          }),
+        ).rejects.toBe(failure);
+        expect(connection.isOpen()).toBe(false);
+      } finally {
+        connect.mockRestore();
+        failedOperation.mockRestore();
+        connection.close();
+      }
+    },
+  );
 
   test("assigns legacy shared rows to the configured default agent once", async () => {
     const connection = await lancedb.connect(getDbPath());
