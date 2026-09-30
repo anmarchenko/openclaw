@@ -452,12 +452,11 @@ describe("terminal resolution", () => {
       ...overrides,
     });
   };
+  const progressTarget = { tool: "message", provider: "telegram", text: "Making the image now." };
   const progressAck = {
     didSendViaMessagingTool: true,
     messagingToolSentTexts: ["Making the image now."],
-    messagingToolSentTargets: [
-      { tool: "message", provider: "telegram", text: "Making the image now." },
-    ],
+    messagingToolSentTargets: [progressTarget],
   };
 
   it.each([
@@ -468,9 +467,7 @@ describe("terminal resolution", () => {
       overrides: {
         ...progressAck,
         didDeliverSourceReplyViaMessageTool: true,
-        messagingToolSentTargets: [
-          { ...progressAck.messagingToolSentTargets[0], sourceReplyFinal: false },
-        ],
+        messagingToolSentTargets: [{ ...progressTarget, sourceReplyFinal: false }],
         messagingToolSourceReplyPayloads: [
           { text: "Making the image now.", sourceReplyFinal: false },
         ],
