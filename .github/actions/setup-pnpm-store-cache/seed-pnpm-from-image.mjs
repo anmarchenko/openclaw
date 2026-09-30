@@ -35,7 +35,7 @@ const registry = "https://registry.npmjs.org";
 const registryConfigured = (process.env.COREPACK_NPM_REGISTRY || registry).replace(/\/$/u, "");
 // Curl's built-in retry policy already distinguishes transient HTTP responses.
 // Retry only transport exits here so permanent HTTP failures still fail once.
-const retryableCurlStatuses = new Set([5, 6, 7, 18, 28, 35, 52, 55, 56, 92]);
+const retryableCurlStatuses = new Set([5, 6, 7, 18, 35, 52, 55, 56, 92]);
 // These native archives are glibc builds. Windows seeds only the authenticated
 // wrapper; pnpm owns its native binary selection and signature verification.
 let supportedCurrentHost = !current;
