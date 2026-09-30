@@ -4453,7 +4453,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     writeFileSync(
       entrypoint,
       `import { existsSync } from "node:fs";
-        import path from "node:path";
+        import { resolve } from "node:path";
         import { pathToFileURL } from "node:url";
         ${targetResolver}
         const frozenTarget = ${frozen};
