@@ -1,6 +1,6 @@
 import { ensureSqliteLibrarySelected } from "openclaw/plugin-sdk/memory-core-host-engine-knn";
 import { resolveRuntimeWorkerUrl, WorkerTaskPool } from "openclaw/plugin-sdk/process-runtime";
-import { memoryCpuProcessEntrypoints } from "./manager-cpu-entrypoints.js";
+import { memoryCpuProcessEntrypoints } from "./cpu-process-entrypoints.js";
 import type {
   MemoryIndexPreparationInput,
   prepareMemoryIndexChunks,

@@ -19,7 +19,7 @@ import {
   withOpenClawAgentDatabaseWrite,
   type StoreWriterQueue,
 } from "openclaw/plugin-sdk/sqlite-runtime";
-import { memoryCpuProcessEntrypoints } from "./manager-cpu-entrypoints.js";
+import { memoryCpuProcessEntrypoints } from "./cpu-process-entrypoints.js";
 import { MemoryIndexRevisionConflictError } from "./manager-db-kernel.js";
 import {
   closeMemoryDatabase,

@@ -27,7 +27,7 @@ import {
   ensureMemorySessionTombstones,
   memorySessionTombstonesExist,
 } from "./memory-session-tombstones.js";
-import { memoryCpuProcessEntrypoints } from "./memory/manager-cpu-entrypoints.js";
+import { memoryCpuProcessEntrypoints } from "./memory/cpu-process-entrypoints.js";
 import { extractPromotionKeys } from "./short-term-promotion-memory-write.js";
 
 export type { MemoryEntryOrigin };

@@ -1,5 +1,5 @@
 import { documentExtractorWorkerEntrypoint } from "../../extensions/document-extract/document-extractor-worker-entrypoint.ts";
-import { memoryCpuProcessEntrypoints } from "../../extensions/memory-core/src/memory/manager-cpu-entrypoints.ts";
+import { memoryCpuProcessEntrypoints } from "../../extensions/memory-core/src/memory/cpu-process-entrypoints.ts";
 import { vectorKnnProcessEntrypoint } from "../../extensions/memory-core/src/memory/manager-search-knn-entrypoint.ts";
 import {
   createRuntimeProcessBuildEntries,
