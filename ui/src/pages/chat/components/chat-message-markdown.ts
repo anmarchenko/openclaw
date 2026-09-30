@@ -148,7 +148,7 @@ export function hasMessageActionButtons(
 }
 
 export function renderMessageActionButtons(
-  details: MessageActionDetails,
+  details: MessageActionDetails | null | undefined,
   opts: {
     onReply?: (target: MessageReplyTarget) => void;
     onReact?: MessageReactionAction;
@@ -157,6 +157,9 @@ export function renderMessageActionButtons(
     reactionPlacement?: MessageReactionPlacement;
   },
 ) {
+  if (!details) {
+    return nothing;
+  }
   const reactionMessageId = details.reactionMessageId;
   return html`
     ${
