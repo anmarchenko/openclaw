@@ -13,7 +13,6 @@ import type { OpenClawConfig } from "../types.openclaw.js";
 import type { ConversationIdentity } from "./conversation-identity.js";
 import { resolveSessionStorePathCore } from "./paths.js";
 import {
-  normalizeConversationRef,
   selectConversationRowsFromDatabase,
   type ConversationRecord,
 } from "./session-accessor.sqlite-conversation-read.js";
@@ -129,7 +128,7 @@ export function resolveConversation(
   conversationRef: string,
 ): ConversationRecord | undefined {
   return selectConversationRows(scope, {
-    conversationRef: normalizeConversationRef(conversationRef),
+    conversationRef,
     limit: 1,
   })[0];
 }
@@ -141,7 +140,7 @@ export function resolveCurrentConversationSession(
   currentSession?: { sessionKey: string; sessionId: string },
 ): { sessionKey: string; sessionId: string } | undefined {
   const [conversation] = selectConversationRows(scope, {
-    conversationRef: normalizeConversationRef(conversationRef),
+    conversationRef,
     currentBindingOnly: true,
     currentSession,
     limit: 1,

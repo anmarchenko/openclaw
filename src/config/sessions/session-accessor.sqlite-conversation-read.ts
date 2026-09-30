@@ -36,7 +36,7 @@ export type ConversationRecord = {
   lastSeenAt: number;
 };
 
-export function normalizeConversationRef(value: string): string {
+function normalizeConversationRef(value: string): string {
   const normalized = value.trim().toLowerCase();
   if (!CONVERSATION_REF_PATTERN.test(normalized)) {
     throw new Error(`Invalid conversationRef: ${value}`);
@@ -265,8 +265,5 @@ export function resolveConversationInDatabase(
   database: Pick<OpenClawAgentDatabase, "db">,
   conversationRef: string,
 ): ConversationRecord | undefined {
-  return selectConversationRowsFromDatabase(database, {
-    conversationRef: normalizeConversationRef(conversationRef),
-    limit: 1,
-  })[0];
+  return selectConversationRowsFromDatabase(database, { conversationRef, limit: 1 })[0];
 }
