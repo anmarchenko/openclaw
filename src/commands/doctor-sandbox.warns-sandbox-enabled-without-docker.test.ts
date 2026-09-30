@@ -15,6 +15,13 @@ const note = vi.fn();
 const inspectLegacySandboxRegistryFiles = vi.fn();
 const migrateLegacySandboxRegistryFiles = vi.fn();
 const validateSandboxContainerEngineTarget = vi.fn();
+const resolveCodexHealthApi = vi.fn();
+const probeCodexWorkspaceWriteSandbox = vi.fn();
+const codexSandboxCommand = `codex sandbox -c 'sandbox_mode="workspace-write"' -c sandbox_workspace_write.network_access=false -- true`;
+
+vi.mock("../flows/bundled-health-checks.js", () => ({
+  resolveCodexHealthApi,
+}));
 
 vi.mock("../process/exec.js", () => ({
   runExec,
@@ -81,6 +88,14 @@ describe("maybeRepairSandboxImages", () => {
     validateSandboxContainerEngineTarget.mockResolvedValue(undefined);
     inspectLegacySandboxRegistryFiles.mockResolvedValue([]);
     migrateLegacySandboxRegistryFiles.mockResolvedValue([]);
+    resolveCodexHealthApi.mockReturnValue({
+      status: "available",
+      api: { probeCodexWorkspaceWriteSandbox },
+    });
+    probeCodexWorkspaceWriteSandbox.mockResolvedValue({
+      status: "ok",
+      command: codexSandboxCommand,
+    });
   });
 
   function createSandboxConfig(mode: "off" | "all" | "non-main"): OpenClawConfig {
@@ -205,27 +220,24 @@ describe("maybeRepairSandboxImages", () => {
       expect.stringContaining("kernel.apparmor_restrict_unprivileged_userns=0"),
       "Sandbox",
     );
+    expect(probeCodexWorkspaceWriteSandbox).not.toHaveBeenCalled();
   });
 
-  it("checks Codex bwrap network namespaces only when Docker sandbox egress is offline", async () => {
+  it("warns about Codex loopback denial even when the user namespace probe succeeds", async () => {
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
-    runExec.mockImplementation(async (command: string, args: string[]) => {
-      if (command === "docker" && args[0] === "version") {
-        return { stdout: "24.0.0", stderr: "" };
-      }
-      if (command === "unshare") {
-        if (args.includes("--net")) {
-          throw Object.assign(new Error("unshare failed"), {
-            stderr: "unshare: unshare failed: Operation not permitted",
-          });
-        }
-        return { stdout: "", stderr: "" };
-      }
-      return { stdout: "", stderr: "" };
+    runExec.mockResolvedValue({ stdout: "", stderr: "" });
+    const denial = "bwrap: loopback: Failed RTM_NEWADDR: No child processes";
+    probeCodexWorkspaceWriteSandbox.mockResolvedValue({
+      status: "denied",
+      command: codexSandboxCommand,
+      denial,
     });
+    const cfg = createSandboxConfig("all");
+    cfg.plugins = { entries: { codex: { enabled: true } } };
+    const options = { env: { PATH: "/service/bin" }, cwd: "/service/workspace" };
 
     try {
-      await maybeRepairSandboxImages(createSandboxConfig("all"), mockRuntime, mockPrompter);
+      await maybeRepairSandboxImages(cfg, mockRuntime, mockPrompter, options);
     } finally {
       platformSpy.mockRestore();
     }
@@ -235,9 +247,38 @@ describe("maybeRepairSandboxImages", () => {
       "Sandbox",
     );
     expect(note).toHaveBeenCalledWith(
-      expect.stringContaining("bwrap: loopback: Failed RTM_NEWADDR"),
+      expect.stringContaining(`Probe command: ${codexSandboxCommand}`),
       "Sandbox",
     );
+    expect(note).toHaveBeenCalledWith(
+      expect.stringContaining(`Probe result: ${denial}`),
+      "Sandbox",
+    );
+    expect(resolveCodexHealthApi).toHaveBeenCalledExactlyOnceWith({ cfg, ...options });
+    expect(probeCodexWorkspaceWriteSandbox).toHaveBeenCalledExactlyOnceWith({
+      cfg,
+      env: options.env,
+    });
+  });
+
+  it("reports a Codex uid-map denial as a user namespace failure", async () => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+    runExec.mockResolvedValue({ stdout: "", stderr: "" });
+    const denial = "bwrap: setting up uid map: Permission denied";
+    probeCodexWorkspaceWriteSandbox.mockResolvedValue({
+      status: "denied",
+      command: codexSandboxCommand,
+      denial,
+    });
+    try {
+      await maybeRepairSandboxImages(createSandboxConfig("all"), mockRuntime, mockPrompter);
+    } finally {
+      platformSpy.mockRestore();
+    }
+    const message = firstNoteCall()[0];
+    expect(message).toContain("Codex bwrap user namespace probe failed");
+    expect(message).toContain(`Probe result: ${denial}`);
+    expect(message).toContain(`Probe command: ${codexSandboxCommand}`);
   });
 
   it("skips the Codex bwrap network namespace probe when Docker sandbox egress is enabled", async () => {
@@ -262,12 +303,85 @@ describe("maybeRepairSandboxImages", () => {
       platformSpy.mockRestore();
     }
 
-    expect(
-      runExec.mock.calls.some(
-        ([command, args]) => command === "unshare" && Array.isArray(args) && args.includes("--net"),
-      ),
-    ).toBe(false);
+    expect(probeCodexWorkspaceWriteSandbox).not.toHaveBeenCalled();
+    expect(resolveCodexHealthApi).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      name: "an inconclusive probe",
+      selection: { status: "available", api: { probeCodexWorkspaceWriteSandbox } },
+      reason: "Codex sandbox probe timed out.",
+      ranProbe: true,
+    },
+    {
+      name: "an unavailable selected plugin",
+      selection: {
+        status: "unavailable",
+        reason: "The selected Codex health API could not be loaded.",
+        reportAvailability: true,
+      },
+      reason: "The selected Codex health API could not be loaded.",
+      ranProbe: false,
+    },
+    {
+      name: "an older selected plugin without a sandbox probe",
+      selection: { status: "available", api: {} },
+      reason: "The selected Codex plugin does not provide a workspace-write sandbox probe.",
+      ranProbe: false,
+    },
+  ])("reports $name as unverified without diagnosing namespace policy", async (scenario) => {
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+    runExec.mockResolvedValue({ stdout: "", stderr: "" });
+    resolveCodexHealthApi.mockReturnValue(scenario.selection);
+    probeCodexWorkspaceWriteSandbox.mockResolvedValue({
+      status: "inconclusive",
+      command: codexSandboxCommand,
+      reason: scenario.reason,
+    });
+    try {
+      await maybeRepairSandboxImages(createSandboxConfig("all"), mockRuntime, mockPrompter);
+    } finally {
+      platformSpy.mockRestore();
+    }
+    const message = firstNoteCall()[0];
+    expect(message).toContain("Doctor could not verify the Codex bwrap network sandbox.");
+    expect(message).toContain(`Probe result: ${scenario.reason}`);
+    expect(message).not.toContain("namespace probe failed");
+    expect(message).not.toContain("AppArmor");
+    if (scenario.ranProbe) {
+      expect(message).toContain(`Probe command: ${codexSandboxCommand}`);
+    } else {
+      expect(probeCodexWorkspaceWriteSandbox).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(["not-configured", "ok", "skipped"] as const)(
+    "does not emit a network note for a %s Codex sandbox probe",
+    async (status) => {
+      const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+      runExec.mockResolvedValue({ stdout: "", stderr: "" });
+      if (status === "not-configured") {
+        resolveCodexHealthApi.mockReturnValue({ status });
+      } else {
+        probeCodexWorkspaceWriteSandbox.mockResolvedValue(
+          status === "ok"
+            ? { status, command: codexSandboxCommand }
+            : { status, reason: "A remote Codex transport is configured." },
+        );
+      }
+      try {
+        await maybeRepairSandboxImages(createSandboxConfig("all"), mockRuntime, mockPrompter);
+      } finally {
+        platformSpy.mockRestore();
+      }
+      expect(note).not.toHaveBeenCalled();
+      if (status === "not-configured") {
+        expect(probeCodexWorkspaceWriteSandbox).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   describe("sandbox setup script execution", () => {
     const created: string[] = [];
     const scriptRel = path.join("scripts", "sandbox-setup.sh");
