@@ -18,6 +18,7 @@ import {
 import {
   setSessionReaction,
   SessionReactionLimitError,
+  SessionReactionMessageMissingError,
 } from "../../config/sessions/session-reaction-store.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { isConfiguredChannel } from "../../infra/outbound/channel-selection.js";
@@ -447,7 +448,9 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
             ErrorCodes.INVALID_REQUEST,
             error instanceof SessionReactionLimitError
               ? "reaction limit reached"
-              : formatErrorMessage(error),
+              : error instanceof SessionReactionMessageMissingError
+                ? "unknown message"
+                : formatErrorMessage(error),
           ),
         );
         return;

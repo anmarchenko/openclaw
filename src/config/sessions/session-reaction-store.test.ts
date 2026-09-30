@@ -25,6 +25,7 @@ import {
 import {
   listSessionReactions,
   SessionReactionLimitError,
+  SessionReactionMessageMissingError,
   setSessionReaction,
 } from "./session-reaction-store.js";
 
@@ -51,6 +52,19 @@ beforeAll(() => {
   root = tempDirs.make("openclaw-session-reactions-");
 });
 
+/** Reactions attach to persisted message identities, so every test session carries some. */
+async function seedMessages(sessionId: string, messageIds: readonly string[]) {
+  await replaceTranscriptEvents({ ...scope, sessionId }, [
+    { type: "session", id: sessionId, version: 3 },
+    ...messageIds.map((id, index) => ({
+      type: "message",
+      id,
+      parentId: index === 0 ? null : messageIds[index - 1],
+      message: { role: "user", content: `Message ${id}` },
+    })),
+  ]);
+}
+
 beforeEach(async () => {
   scope = {
     agentId: "main",
@@ -58,6 +72,7 @@ beforeEach(async () => {
     sessionKey: `agent:main:reaction-${sessionIndex++}`,
   };
   await upsertSessionEntryCore(scope, { sessionId: "session-a", updatedAt: 1 });
+  await seedMessages("session-a", ["message-a", "message-b", "overflow", "replacement"]);
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -220,6 +235,7 @@ describe("session reaction store", () => {
       setSessionReaction(scope, { ...reaction, expectedSessionId: "session-b" }),
     ).toThrow(SessionWorkStartInvalidatedError);
     await upsertSessionEntryCore(scope, { sessionId: "session-b", updatedAt: 2 });
+    await seedMessages("session-b", ["message-a"]);
     expect(listSessionReactions(scope, { sessionId: "session-a" })).toEqual({});
     expect(() => setSessionReaction(scope, reaction)).toThrow(SessionWorkStartInvalidatedError);
     setSessionReaction(scope, { ...reaction, expectedSessionId: "session-b" });
@@ -232,6 +248,20 @@ describe("session reaction store", () => {
       );
     }, scope);
     expect(listSessionReactions(scope, { sessionId: "session-b" })).toEqual({});
+  });
+
+  it("refuses to add a reaction for a message deleted since the caller's read", async () => {
+    setSessionReaction(scope, { ...reaction, messageId: "message-b" });
+    // The handler read message-a asynchronously; a rewrite removes it before the write.
+    await seedMessages("session-a", ["message-b"]);
+    expect(() => setSessionReaction(scope, reaction)).toThrow(SessionReactionMessageMissingError);
+    expect(setSessionReaction(scope, { ...reaction, remove: true })).toEqual({
+      reactions: [],
+      changed: false,
+    });
+    expect(listSessionReactions(scope, { sessionId: "session-a" })).toEqual({
+      "message-b": [{ emoji: "👍", count: 1, identities: [{ id: "alice", label: "Alice" }] }],
+    });
   });
 
   it("preserves reaction rows when logical nodes are repaired into a canonical node", async () => {

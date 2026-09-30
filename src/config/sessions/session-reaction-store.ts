@@ -14,6 +14,7 @@ import {
 
 export {
   SessionReactionLimitError,
+  SessionReactionMessageMissingError,
   type StoredMessageReactionSummary,
 } from "./session-reaction-store.kernel.js";
 

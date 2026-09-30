@@ -33,8 +33,18 @@ export class SessionReactionLimitError extends Error {
   }
 }
 
+/** The message was deleted between the caller's asynchronous read and this transaction. */
+export class SessionReactionMessageMissingError extends Error {
+  constructor() {
+    super("unknown message");
+    this.name = "SessionReactionMessageMissingError";
+  }
+}
+
 function reactionDb(database: Pick<OpenClawAgentDatabase, "db">) {
-  return getNodeSqliteKysely<Pick<OpenClawAgentKyselyDatabase, "session_reactions">>(database.db);
+  return getNodeSqliteKysely<
+    Pick<OpenClawAgentKyselyDatabase, "session_reactions" | "transcript_event_identities">
+  >(database.db);
 }
 
 function summarizeReactions(rows: SessionReactions[]): StoredMessageReactionSummary[] {
@@ -127,6 +137,20 @@ export function setSessionReactionInDatabase(
       rows.filter((row) => row.identity_id === params.identityId).length >= 20
     ) {
       throw new SessionReactionLimitError();
+    }
+    // The caller looked the message up asynchronously; a transcript rewrite can
+    // have deleted it (and pruned its reactions) since, so re-check inside the
+    // transaction rather than insert a reaction for a message that is gone.
+    const identity = executeSqliteQueryTakeFirstSync(
+      database.db,
+      db
+        .selectFrom("transcript_event_identities")
+        .select("event_id")
+        .where("session_id", "=", params.expectedSessionId)
+        .where("event_id", "=", params.messageId),
+    );
+    if (!identity) {
+      throw new SessionReactionMessageMissingError();
     }
     executeSqliteQuerySync(
       database.db,
