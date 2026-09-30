@@ -306,7 +306,7 @@ describe("gateway sessions patch", () => {
     expect((await f.ok({ attention: null })).agentStatus).toBeUndefined();
   });
 
-  test.each([
+  test.each<{ field: keyof Patch; value: string | boolean; invalid?: string }>([
     { field: "responseUsage", value: "off" },
     { field: "reasoningLevel", value: "off" },
     { field: "fastMode", value: false },
@@ -316,10 +316,10 @@ describe("gateway sessions patch", () => {
       invalid: 'invalid verboseLevel (use "on"|"off"|"full")',
     },
     { field: "elevatedLevel", value: "off", invalid: "invalid elevatedLevel" },
-  ] as const)("persists and clears $field overrides", async (row) => {
+  ])("persists and clears $field overrides", async (row) => {
     const f = fixture();
     expect((await f.ok({ [row.field]: row.value }))[row.field]).toBe(row.value);
-    if ("invalid" in row) {
+    if (row.invalid !== undefined) {
       await f.rejects({ [row.field]: "maybe" }, row.invalid);
     }
     expect((await f.ok({ [row.field]: null }))[row.field]).toBeUndefined();
@@ -390,10 +390,9 @@ describe("gateway sessions patch", () => {
     expect((await f.ok({ toolOverrides: { skills: { release: false } } })).toolOverrides).toEqual({
       skills: { release: false },
     });
-    expect(
-      (await f.ok({ toolOverrides: { mcpToolsDeny: { docs: [] } } })).toolOverrides,
-    ).toBeUndefined();
-    f.store[KEY].toolOverrides = { webSearch: false };
+    const clearedOverrides = await f.ok({ toolOverrides: { mcpToolsDeny: { docs: [] } } });
+    expect(clearedOverrides.toolOverrides).toBeUndefined();
+    clearedOverrides.toolOverrides = { webSearch: false };
     expect((await f.ok({ toolOverrides: null })).toolOverrides).toBeUndefined();
   });
 
@@ -976,7 +975,7 @@ describe("gateway sessions patch", () => {
     const changed = await f.ok({ execNode: "worker-2" });
     expect(changed).toMatchObject({ execNode: "worker-2", execHost: "node" });
     expect(changed.execCwd).toBeUndefined();
-    f.store[KEY].execCwd = "/workspace/on-worker-2";
+    changed.execCwd = "/workspace/on-worker-2";
     const cleared = await f.ok({ execNode: null });
     expect(cleared.execNode).toBeUndefined();
     expect(cleared.execCwd).toBeUndefined();
