@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { backup } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { observeSqliteReadSql } from "../../test/helpers/sqlite-statement-execution-counter.js";
 import { ACTIVITY_SUMMARY_FORMAT_REVISION } from "../config/sessions/activity-summary.js";
@@ -22,6 +22,7 @@ import {
   getSessionColdStorageStatus,
   runSessionColdStorageMaintenance,
 } from "../config/sessions/session-cold-storage.js";
+import { prewarmSessionHistoryWorker } from "../config/sessions/session-transcript-worker-runtime.js";
 import { normalizePersistedSessionEntryShape } from "../config/sessions/store-entry-shape.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { registerAgentRunContext, clearAgentRunContext } from "../infra/agent-run-registry.js";
@@ -37,6 +38,7 @@ import { SQLITE_SESSION_WRITER_QUEUES } from "../state/openclaw-agent-write-admi
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import {
   createOpenClawTestState,
+  withOpenClawTestState,
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
 import { createDirectChatContext } from "./server-chat.agent-events.test-helpers.js";
@@ -141,6 +143,13 @@ describe("Activity recap lifecycle with the canonical session store", () => {
       prepareModel,
       completeModel: complete,
     });
+
+  beforeAll(async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async ({ env }) => {
+      await upsertSessionEntryCore(scope, { sessionId: scope.sessionId, updatedAt: 1 });
+      await prewarmSessionHistoryWorker({ agentId: scope.agentId, env });
+    });
+  });
 
   beforeEach(async () => {
     testState = await createOpenClawTestState({ scenario: "minimal" });

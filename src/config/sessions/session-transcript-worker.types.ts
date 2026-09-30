@@ -4,6 +4,7 @@ import type {
   SessionFileEntry,
   readSessionEntryResetRecallCutoff,
 } from "../../../packages/memory-host-sdk/src/host/session-files.js";
+import type { readActivitySummaryBatch } from "../../gateway/session-activity-summary-source.js";
 import type { PreparedSessionHistoryReadTarget } from "../../gateway/session-history-read.types.js";
 import type {
   SessionRowTranscriptFields,
@@ -193,6 +194,12 @@ type SessionTitleFieldsWorkerInput = {
   database: { agentId: string; path: string };
   scope: SessionTranscriptReadScope;
   includeInterSession?: boolean;
+  admission?: UserTurnTranscriptAdmissionReceipt;
+};
+
+type SessionActivitySummarySourceWorkerInput = Parameters<typeof readActivitySummaryBatch>[0] & {
+  kind: "session-activity-summary-source";
+  database: { agentId: string; path: string };
   admission?: UserTurnTranscriptAdmissionReceipt;
 };
 
@@ -468,6 +475,7 @@ export type SessionHistoryWorkerInput =
   | SessionTranscriptHistoryWorkerInput
   | SessionPreviewWorkerInput
   | SessionTitleFieldsWorkerInput
+  | SessionActivitySummarySourceWorkerInput
   | SessionRowBackfillWorkerInput
   | SessionRowPresenceWorkerInput
   | SessionProjectionStatusWorkerInput
@@ -524,6 +532,10 @@ export type SessionTranscriptWorkerValues = {
   "history-page": SessionHistoryWorkerResult;
   "session-preview": { kind: "session-preview"; items: SessionPreviewItem[] };
   "session-title-fields": { kind: "session-title-fields"; fields: SessionTitleFields };
+  "session-activity-summary-source": {
+    kind: "session-activity-summary-source";
+    source: ReturnType<typeof readActivitySummaryBatch>;
+  };
   "session-row-backfill": { kind: "session-row-backfill"; fields: SessionRowTranscriptFields };
   "session-row-presence": boolean;
   "projection-status": boolean;
@@ -619,6 +631,9 @@ export type SessionHistoryWorkerDatabase = {
   readTitleFields: (
     input: Omit<SessionTitleFieldsWorkerInput, "kind" | "database">,
   ) => Promise<SessionTitleFields>;
+  readActivitySummarySource: (
+    input: Omit<SessionActivitySummarySourceWorkerInput, "kind" | "database">,
+  ) => Promise<ReturnType<typeof readActivitySummaryBatch>>;
   readRowBackfill: (
     params: SessionRowBackfillWorkerInput["params"],
   ) => Promise<SessionRowTranscriptFields>;
