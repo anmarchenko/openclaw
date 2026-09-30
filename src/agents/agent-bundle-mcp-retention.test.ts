@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, expect, it } from "vitest";
 import type { JsonTestResults } from "vitest/node";
@@ -20,7 +21,7 @@ it(
       const configPath = path.join(root, "vitest.config.mts");
       await fs.writeFile(
         configPath,
-        `import { BaseSequencer } from ${JSON.stringify(import.meta.resolve("vitest/node"))};
+        `import { BaseSequencer } from ${JSON.stringify(fileURLToPath(import.meta.resolve("vitest/node")))};
 import { createUnitFastVitestConfig } from ${JSON.stringify(path.join(repoRoot, "test/vitest/vitest.unit-fast.config.ts"))};
 const memoryTest = "src/auto-reply/reply/agent-runner-memory.private-transcript.test.ts";
 class MemoryBeforeRequesterSequencer extends BaseSequencer {
