@@ -262,8 +262,13 @@ export function publishPreparedPluginGeneration(
         owner.generation++;
         retirePreparedModelRuntimeGeneration(owner);
         owner.needsRefresh = true;
-        owner.refreshError = new Error("Prepared model runtime plugin generation retired");
+        owner.refreshError = new PreparedModelRuntimePluginGenerationRetiredError(
+          "Prepared model runtime plugin generation retired",
+        );
         owner.pluginGeneration = undefined;
+        releasePreparedPluginPublication(owner);
+        owner.onPluginGenerationRetired?.();
+        return;
       }
       releasePreparedPluginPublication(owner);
       return;

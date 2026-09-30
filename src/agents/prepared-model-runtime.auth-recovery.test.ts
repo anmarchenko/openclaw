@@ -18,6 +18,7 @@ import {
   createPluginCache,
   getPluginCache,
   retirePluginCache,
+  withPluginCache,
 } from "../plugins/plugin-cache.js";
 import { PluginInstanceUnavailableError } from "../plugins/plugin-instance-error.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
@@ -25,10 +26,16 @@ import {
   getPluginRuntimeGenerationRegistry,
   withPluginRuntimeGenerationScope,
 } from "../plugins/runtime/generation-scope.js";
+import { AsyncWorkScope, isAsyncWorkScopeActiveHere } from "../shared/async-work-scope.js";
 import type { RuntimeAuthProfileStore } from "./auth-profiles/types.js";
 import { PreparedModelRuntimeAuthPublicationOwner } from "./prepared-model-runtime-auth-publication.js";
+import {
+  getPreparedModelRuntimePluginGeneration,
+  withPreparedModelRuntimePluginGenerationScope,
+} from "./prepared-model-runtime-generation-scope.js";
 import { PreparedModelRuntimePublicationSupersededError } from "./prepared-model-runtime.errors.js";
 import {
+  advancePreparedModelRuntimeConfig,
   loadPublishedGatewayReplyDispatchRuntime,
   prepareModelRuntimeSnapshot,
   publishPreparedModelRuntimeSnapshot,
@@ -98,6 +105,73 @@ async function listModels(config: OpenClawConfig) {
   });
   expect(respond).toHaveBeenCalledWith(true, expect.objectContaining({ models: [] }), undefined);
 }
+
+describe("configured plugin generation recovery", () => {
+  it.each([false, true])("republishes retired plugin facts once (failure=%s)", async (fails) => {
+    const originalMetadata = mocks.pluginMetadataSnapshot;
+    const currentCache = getPluginCache();
+    const cache = createPluginCache();
+    mocks.pluginMetadataSnapshot = { ...originalMetadata };
+    bindPluginMetadataSnapshotCache(mocks.pluginMetadataSnapshot, cache);
+    const { config, input, snapshot, registry } = await publishOwner();
+    const generation = resolvePreparedModelRuntimeOwnerBySnapshot(snapshot)!.pluginGeneration!;
+    const nextRegistry = createEmptyPluginRegistry();
+    const failure = new Error("fresh registry acquisition failed");
+    const closingScope = new AsyncWorkScope();
+    mocks.pluginMetadataSnapshot = { ...originalMetadata };
+    bindPluginMetadataSnapshotCache(mocks.pluginMetadataSnapshot, currentCache);
+    mocks.loadAgentRuntimePluginRegistryHandle.mockClear().mockImplementation(() => {
+      expect(getPluginRuntimeGenerationRegistry()).toBeUndefined();
+      expect(getPreparedModelRuntimePluginGeneration()).toBeUndefined();
+      expect(getPluginCache()).toBe(currentCache);
+      expect(isAsyncWorkScopeActiveHere(closingScope)).toBe(false);
+      if (fails) {
+        throw failure;
+      }
+      return nextRegistry;
+    });
+    let retirement: Promise<unknown> | undefined;
+    try {
+      retirement = closingScope.run(() => {
+        closingScope.beginClose();
+        return withPluginCache(cache, () =>
+          withPreparedModelRuntimePluginGenerationScope(generation, () =>
+            withPluginRuntimeGenerationScope(
+              { metadataSnapshot: snapshot.metadataSnapshot, pluginRegistry: registry },
+              () => retirePluginCache(cache),
+            ),
+          ),
+        );
+      });
+      const currentConfig: OpenClawConfig = fails
+        ? config
+        : { ...config, agents: { defaults: { heartbeat: { every: "0m" } } } };
+      advancePreparedModelRuntimeConfig(currentConfig);
+      const dispatch = loadPublishedGatewayReplyDispatchRuntime({ agentId: "default" });
+      if (fails) {
+        await expect(dispatch).rejects.toBe(failure);
+        await expect(prepareModelRuntimeSnapshot(input)).rejects.toBe(failure);
+        expect(mocks.loadAgentRuntimePluginRegistryHandle).toHaveBeenCalledTimes(1);
+        expect(mocks.warn).toHaveBeenCalledExactlyOnceWith(
+          expect.stringContaining("fresh registry acquisition failed"),
+        );
+      } else {
+        await expect(dispatch).resolves.toBeDefined();
+        const replacement = await prepareModelRuntimeSnapshot(input);
+        expect(replacement.pluginRegistry).toBe(nextRegistry);
+        expect(replacement.isCurrent()).toBe(true);
+        expect(snapshot.isCurrent()).toBe(false);
+        expect(replacement.config).toEqual(currentConfig);
+        await listModels(currentConfig);
+        expect(mocks.warn).not.toHaveBeenCalled();
+      }
+    } finally {
+      mocks.pluginMetadataSnapshot = originalMetadata;
+      await retirement;
+      await closingScope.drain();
+    }
+  });
+});
 
 describe("auth publication generation recovery", () => {
   it("preserves the retirement reason when an auth gate settles after its owner retires", async () => {
