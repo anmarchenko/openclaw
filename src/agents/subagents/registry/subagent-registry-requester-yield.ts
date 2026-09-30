@@ -474,6 +474,7 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
             };
           }
           entry.requesterSettleWake = {
+            ...(existing?.pauseNotice ? { pauseNotice: existing.pauseNotice } : {}),
             status: "pending",
             attemptCount: 0,
             batchRunIds,
@@ -554,6 +555,10 @@ export async function settleRequesterTurnAfterSessionSpawns(params: {
       : {}),
     afterRelease: () => {
       for (const entry of entries) {
+        if (entry.pauseReason === "sessions_yield" && entry.requesterSettleWake?.pauseNotice) {
+          params.schedule(entry.runId, entry, "settle");
+          continue;
+        }
         if (
           entry.completionTarget === "parent" &&
           typeof entry.execution.endedAt === "number" &&
