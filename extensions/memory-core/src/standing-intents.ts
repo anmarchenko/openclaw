@@ -7,7 +7,7 @@ import {
   withOpenClawAgentDatabaseAsync,
 } from "openclaw/plugin-sdk/sqlite-runtime";
 import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
-import { memoryCpuProcessEntrypoints } from "./memory/manager-cpu-entrypoints.js";
+import { memoryCpuProcessEntrypoints } from "./memory/cpu-process-entrypoints.js";
 import {
   DEFAULT_INTENT_COOLDOWN_SECONDS,
   DEFAULT_INTENT_EXPIRY_MS,

@@ -6,8 +6,8 @@ export const nativeSchtasksIntegrationEnabled =
 export const vitestWorkerRuntimeAssets = ["node-host-launcher.mjs"];
 
 export const runtimeProcessDeclarationEntries = {
-  "extensions/memory-core/manager-cpu-entrypoints":
-    "extensions/memory-core/src/memory/manager-cpu-entrypoints.ts",
+  "extensions/memory-core/cpu-process-entrypoints":
+    "extensions/memory-core/src/memory/cpu-process-entrypoints.ts",
   "infra/runtime-process-entrypoints": "src/infra/runtime-process-entrypoints.ts",
   "extensions/document-extract/document-extractor-worker-entrypoint":
     "extensions/document-extract/document-extractor-worker-entrypoint.ts",

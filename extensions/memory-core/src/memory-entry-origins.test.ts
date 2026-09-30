@@ -32,7 +32,7 @@ import {
   reserveMemoryEntryOrigins,
   type MemoryEntryOrigin,
 } from "./memory-entry-origins.js";
-import { memoryCpuProcessEntrypoints } from "./memory/manager-cpu-entrypoints.js";
+import { memoryCpuProcessEntrypoints } from "./memory/cpu-process-entrypoints.js";
 import { buildPromotionMarker, extractPromotionKeys } from "./short-term-promotion-memory-write.js";
 import { recordShortTermRecalls } from "./short-term-promotion-record.js";
 import {

@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { resolveRuntimeWorkerUrl } from "openclaw/plugin-sdk/process-runtime";
 import * as sqliteRuntime from "openclaw/plugin-sdk/sqlite-runtime";
 import { vi } from "vitest";
-import { memoryCpuProcessEntrypoints } from "./memory/manager-cpu-entrypoints.js";
+import { memoryCpuProcessEntrypoints } from "./memory/cpu-process-entrypoints.js";
 
 /** Install the real fault only after the original worker has admitted and bound its database. */
 export function failMemoryEntryOriginWrites(params: {
