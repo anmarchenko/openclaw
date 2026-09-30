@@ -1,8 +1,6 @@
-import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { html, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { groupToolCalls, type ToolCallGroup } from "../../../../../src/chat/tool-call-grouping.js";
-import { resolveLocalUserName } from "../../../app/user-identity.ts";
 import type { BrowserTabSelection } from "../../../components/browser/browser-target.ts";
 import { icons } from "../../../components/icons.ts";
 import {
@@ -34,13 +32,18 @@ import type { AssistantMessageExpansionState } from "../chat-message-recovery.ts
 import type { TurnRecap } from "../chat-progress.ts";
 import { transcriptRunId } from "../chat-thread-run-identity.ts";
 import { persistedMessageEntryId, readPendingSendStatus } from "../chat-thread.ts";
-import { hasForwardedSource } from "../chat-turn-boundary.ts";
+import { hasForwardedSource, isInterSessionGroup } from "../chat-turn-boundary.ts";
 import { workspaceResultConflictFromTranscript } from "../workspace-conflict.ts";
 import { activityHeadline, selectActivityHeadline } from "./chat-activity-headline.ts";
 import { renderChatAuthorAvatar } from "./chat-author-avatar.ts";
 import { renderForwardedAttribution } from "./chat-forwarded-attribution.ts";
 import { renderGroupedMessage } from "./chat-message-bubble.ts";
 import { renderRewindButton } from "./chat-message-confirmation.ts";
+import {
+  isOwnSenderGroup,
+  isSourceOnlyUserGroup,
+  resolveMessageGroupSenderLabel,
+} from "./chat-message-group-identity.ts";
 import {
   FULL_MESSAGE_RETRY_REVISION_LIMIT,
   renderMessageActionButtons,
@@ -59,6 +62,7 @@ import {
 import type { AssistantMessageDisclosure } from "./chat-message-text.ts";
 import { extractGroupMeta, renderMessageMeta } from "./chat-message-timestamp.ts";
 import { renderChatReplyAttribution } from "./chat-reply-attribution.ts";
+import { renderInterSessionActivity } from "./chat-session-activity.ts";
 import type { SidebarContent, SidebarFullMessageLoader } from "./chat-sidebar.ts";
 import {
   renderBrowserTabPreviews,
@@ -77,7 +81,7 @@ type ReplyPreview = MessageReplyTarget & { sourceMessageId: string };
 
 type GroupedMessageRenderOptions = Parameters<typeof renderGroupedMessage>[2];
 
-type RenderMessageGroupOptions = Omit<
+export type RenderMessageGroupOptions = Omit<
   GroupedMessageRenderOptions,
   | "isStreaming"
   | "duplicateCount"
@@ -191,14 +195,6 @@ function renderPreparedGroupMessage(
     },
     opts.onOpenSidebar,
   );
-}
-
-function isOwnSenderGroup(
-  group: Pick<MessageGroup, "sender">,
-  userId: string | null | undefined,
-): boolean {
-  const identity = group.sender?.identity;
-  return identity?.type === "profile" && identity.id === userId;
 }
 
 export function renderActivityGroup(
@@ -384,61 +380,6 @@ export function renderActivityGroup(
       `;
 }
 
-function isSourceOnlyUserGroup(
-  group: Pick<MessageGroup, "role" | "sender" | "senderLabel" | "sourceClients">,
-): boolean {
-  return (
-    normalizeRoleForGrouping(group.role) === "user" &&
-    Boolean(group.sourceClients?.length) &&
-    !group.sender &&
-    !group.senderLabel?.trim()
-  );
-}
-
-export function resolveMessageGroupSenderLabel(
-  group: Pick<MessageGroup, "role" | "sender" | "senderLabel" | "sourceClients"> & {
-    messages: ReadonlyArray<{ message: unknown }>;
-  },
-  opts: Pick<RenderMessageGroupOptions, "assistantName" | "userId" | "userName">,
-): string {
-  const normalizedRole = normalizeRoleForGrouping(group.role);
-  if (isSourceOnlyUserGroup(group)) {
-    return messageClientSourcesLabel(group.sourceClients ?? []);
-  }
-  if (normalizedRole === "custom") {
-    const isError = group.messages.every(({ message }) => {
-      const customType = asNullableRecord(message)?.customType;
-      return (
-        customType === "run-failed-before-reply" || customType === "cloud-workspace-recovery-failed"
-      );
-    });
-    if (isError) {
-      const isContention = group.messages.every(({ message }) => {
-        const entry = asNullableRecord(message);
-        return (
-          entry?.customType === "run-failed-before-reply" &&
-          asNullableRecord(entry.details)?.errorKind === "state_contention"
-        );
-      });
-      return t(isContention ? "common.system" : "chat.messages.errorSender");
-    }
-    return group.messages.every(({ message }) => workspaceResultConflictFromTranscript(message))
-      ? t("chat.workspaceConflict.eventSender")
-      : t("common.system");
-  }
-  const resolvedUserName = resolveLocalUserName({ name: opts.userName });
-  const userLabel = group.senderLabel?.trim();
-  return normalizedRole === "user"
-    ? isOwnSenderGroup(group, opts.userId)
-      ? resolvedUserName
-      : (userLabel ?? t("chat.messages.unattributedSender"))
-    : normalizedRole === "assistant"
-      ? (userLabel ?? opts.assistantName ?? "Assistant")
-      : normalizedRole === "tool"
-        ? t("chat.messages.toolSender")
-        : normalizedRole;
-}
-
 function isActivityMessageGroup(group: MessageGroup): boolean {
   if (normalizeRoleForGrouping(group.role) !== "tool") {
     return false;
@@ -473,6 +414,24 @@ export function renderMessageGroupContent(group: MessageGroup, opts: RenderMessa
 }
 
 export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroupOptions) {
+  if (isInterSessionGroup(group)) {
+    return renderInterSessionActivity(group, opts, (item, index) => {
+      const prepared = prepareGroupMessage(group, item, opts);
+      return {
+        content: renderPreparedGroupMessage(
+          group,
+          index,
+          {
+            ...opts,
+            isForwarded: true,
+            onToggleUserMessageExpanded: undefined,
+          },
+          prepared,
+        ),
+        actions: prepared.actions ? renderMessageActionButtons(prepared.actions, opts) : nothing,
+      };
+    });
+  }
   const normalizedRole = normalizeRoleForGrouping(group.role);
   const sourceOnly = isSourceOnlyUserGroup(group);
   const showAvatar =

@@ -2,7 +2,7 @@
 // already-loaded transcript rows first, then the reply-message access loader.
 import { normalizeMessage } from "../../../lib/chat/message-normalizer.ts";
 import { persistedMessageEntryId } from "../chat-thread.ts";
-import { resolveMessageGroupSenderLabel } from "./chat-message-group.ts";
+import { resolveMessageGroupSenderLabel } from "./chat-message-group-identity.ts";
 import { resolveMessageReplyText } from "./chat-message-markdown.ts";
 import type { MessageReplyTarget } from "./chat-message.ts";
 import type { ChatThreadProps } from "./chat-thread-interactions.ts";

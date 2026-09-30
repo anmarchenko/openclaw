@@ -1,4 +1,5 @@
 import type { GatewaySessionRow } from "../../../api/types.ts";
+import type { MessageGroup } from "../../../lib/chat/chat-types.ts";
 import { agentRunFrameActiveStatusParts } from "../chat-agent-run-grouping.ts";
 import {
   agentRunFrameGroups,
@@ -13,8 +14,9 @@ import {
   persistedMessageEntryId,
   setExpansionState,
 } from "../chat-thread.ts";
+import { isInterSessionGroup } from "../chat-turn-boundary.ts";
 import { readLiveTerminalRevision } from "../terminal-message-identity.ts";
-import { resolveMessageGroupSenderLabel } from "./chat-message-group.ts";
+import { resolveMessageGroupSenderLabel } from "./chat-message-group-identity.ts";
 import type { StreamGroupPart } from "./chat-message.ts";
 import { projectChatPositions, type ChatPositionIndex } from "./chat-position-projection.ts";
 import type { LoadedReplySource } from "./chat-reply-preview.ts";
@@ -73,6 +75,52 @@ const chains = new WeakMap<object, ChainEntry>();
 const liveChains = new WeakMap<TranscriptChain, LiveProjection>();
 const indexes = new WeakMap<object, { key: readonly unknown[]; value: TranscriptIndex }>();
 const baseIndexes = new WeakMap<object, { key: readonly unknown[]; value: BaseIndex }>();
+
+// Fold only the final presentation, after causal run/turn ownership is settled.
+// Every original message and its reply identity remains in chronological order.
+function coalesceInterSessionUpdates(items: ChatRenderItem[]): ChatRenderItem[] {
+  const result: ChatRenderItem[] = [];
+  let pending: MessageGroup[] = [];
+  const flush = () => {
+    const first = pending[0];
+    if (first) {
+      result.push(
+        pending.length === 1
+          ? first
+          : {
+              ...first,
+              runId: undefined,
+              messages: pending.flatMap((group) => group.messages),
+              visibleContent: pending.some((group) => group.visibleContent === "non-text")
+                ? "non-text"
+                : pending.some((group) => group.visibleContent === "text")
+                  ? "text"
+                  : "none",
+            },
+      );
+    }
+    pending = [];
+  };
+  for (const item of items) {
+    if (item.kind !== "group" || !isInterSessionGroup(item) || !item.senderSession?.sessionKey) {
+      flush();
+      result.push(item);
+      continue;
+    }
+    const first = pending[0];
+    if (
+      first &&
+      (first.senderSession?.sessionKey !== item.senderSession.sessionKey ||
+        first.senderSession?.agentId !== item.senderSession.agentId ||
+        first.senderSession?.label !== item.senderSession.label)
+    ) {
+      flush();
+    }
+    pending.push(item);
+  }
+  flush();
+  return result;
+}
 
 function ownsStream(item: ChatRenderItem, stream: LiveStream): item is StreamOwner {
   return item.kind === "stream-run"
@@ -176,13 +224,14 @@ export function projectTranscriptChain(
     }
   }
   const build = () => {
-    const collapsedItems = coalesceAgentRunFrames(
+    const frames = coalesceAgentRunFrames(
       coalesceActivityRuns(
         collapseCompletedTurnWork(coalesceStreamRuns(chatItems), options),
         options,
       ),
       options,
     );
+    const collapsedItems = options.searchActive ? frames : coalesceInterSessionUpdates(frames);
     const continuations = new Map<string, StreamGroupPart[]>();
     const transcriptItems = collapsedItems.filter((item, index) => {
       const previous = collapsedItems[index - 1];
@@ -334,6 +383,13 @@ export function expandReplyTargetWork(
   for (const item of transcriptItems) {
     const parts = item.kind === "agent-run-frame" ? item.parts : [item];
     for (const part of parts) {
+      if (
+        part.kind === "group" &&
+        isInterSessionGroup(part) &&
+        part.messages.some((source) => persistedMessageEntryId(source.message) === messageId)
+      ) {
+        setExpansionState(expandedToolCards, "inter-session:" + part.key, true);
+      }
       if (
         part.kind === "work-group" &&
         part.groups.some((group) =>
