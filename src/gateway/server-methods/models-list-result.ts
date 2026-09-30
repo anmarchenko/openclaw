@@ -1,4 +1,3 @@
-// Resolves public model catalogs without exposing runtime-only provider params.
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import type {
   ModelChoice,
@@ -81,7 +80,6 @@ import {
 } from "./models-list-public-projection.js";
 import { prepareModelPickerRuntimeChoices } from "./models-list-runtime-choices.js";
 
-type ModelsListEntryWithCapabilities = ModelChoice;
 type ApiKeyProviderCapabilities = ReturnType<typeof apiKeyProviderCapabilities>;
 type PreparedModelsListResult = {
   read: () => ModelsListResult;
@@ -147,12 +145,12 @@ function createPublicModelsListProjector(params: {
 }) {
   const catalogResolver = createThinkingCatalogResolver(params.thinkingCatalog);
   // Route rows retain identity across reads; keep display/thinking work outside the hot overlay.
-  const prepared = new WeakMap<ModelCatalogEntry, Map<string, ModelsListEntryWithCapabilities>>();
+  const prepared = new WeakMap<ModelCatalogEntry, Map<string, ModelChoice>>();
   return (
     entry: ModelCatalogEntry,
     evaluation: ModelAuthAvailabilityEvaluation,
     runtimeChoice?: string,
-  ): ModelsListEntryWithCapabilities => {
+  ): ModelChoice => {
     const runtimeKey = runtimeChoice ?? "";
     let preparedEntry = prepared.get(entry)?.get(runtimeKey);
     if (!preparedEntry) {
@@ -215,7 +213,7 @@ function createPublicModelsListProjector(params: {
           : {}),
         ...(params.includeInput && entry.input?.length ? { input: entry.input } : {}),
       };
-      const entries = prepared.get(entry) ?? new Map<string, ModelsListEntryWithCapabilities>();
+      const entries = prepared.get(entry) ?? new Map<string, ModelChoice>();
       entries.set(runtimeKey, preparedEntry);
       prepared.set(entry, entries);
     }

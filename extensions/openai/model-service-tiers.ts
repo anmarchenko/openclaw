@@ -35,14 +35,3 @@ export function readOpenAICodexServiceTiers(
     ];
   });
 }
-
-/** Attach only the profile actually used for the authenticated catalog request. */
-export function scopeOpenAICatalogOutcome<T extends { outcome?: ProviderCatalogOutcome }>(
-  catalog: T,
-  profileId: string | undefined,
-): T {
-  const scopedProfileId = profileId?.trim();
-  return catalog.outcome && scopedProfileId
-    ? { ...catalog, outcome: { ...catalog.outcome, profileId: scopedProfileId } }
-    : catalog;
-}

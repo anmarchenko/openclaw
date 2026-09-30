@@ -55,7 +55,7 @@ import {
   normalizeOpenAIModelRouteId,
   resolveOpenAICodexReasoningEfforts,
 } from "./model-route-contract.js";
-import { readOpenAICodexServiceTiers, scopeOpenAICatalogOutcome } from "./model-service-tiers.js";
+import { readOpenAICodexServiceTiers } from "./model-service-tiers.js";
 import {
   buildOpenAIChatGPTAuthMethodRuns,
   buildOpenAICodexProviderHooks,
@@ -96,7 +96,7 @@ function classifyOpenAiFailoverCode(code: string | undefined) {
 const OPENAI_MODELS_ENDPOINT = "https://api.openai.com/v1/models";
 // Keep synchronized with extensions/codex's exact @openai/codex dependency;
 // the provider contract test fails when that managed-runtime pin changes.
-const OPENAI_CODEX_CLIENT_VERSION = "0.155.1";
+const OPENAI_CODEX_CLIENT_VERSION = "0.158.0";
 const OPENAI_CODEX_MODELS_ENDPOINT = `${OPENAI_CODEX_RESPONSES_BASE_URL}/models?client_version=${OPENAI_CODEX_CLIENT_VERSION}`;
 const OPENAI_MODELS_CACHE_TTL_MS = 60_000;
 const OPENAI_CODEX_MODELS_CACHE_TTL_MS = 60_000;
@@ -108,20 +108,6 @@ const OPENAI_GPT_54_MINI_CONTEXT_TOKENS = 400_000;
 const OPENAI_GPT_54_NANO_CONTEXT_TOKENS = 400_000;
 const OPENAI_GPT_54_MAX_TOKENS = 128_000;
 const OPENAI_CHAT_LATEST_COST = { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 } as const;
-const OPENAI_GPT_54_COST = { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 } as const;
-const OPENAI_GPT_54_PRO_COST = { input: 30, output: 180, cacheRead: 0, cacheWrite: 0 } as const;
-const OPENAI_GPT_54_MINI_COST = {
-  input: 0.75,
-  output: 4.5,
-  cacheRead: 0.075,
-  cacheWrite: 0,
-} as const;
-const OPENAI_GPT_54_NANO_COST = {
-  input: 0.2,
-  output: 1.25,
-  cacheRead: 0.02,
-  cacheWrite: 0,
-} as const;
 const OPENAI_GPT_55_PRO_TEMPLATE_MODEL_IDS = [
   OPENAI_GPT_54_PRO_MODEL_ID,
   OPENAI_GPT_54_MODEL_ID,
@@ -177,60 +163,6 @@ function buildOpenAIManifestModelsForBaseUrl(baseUrl: string): ModelDefinitionCo
   );
 }
 
-function buildOpenAIDiscoverablePlatformModels(baseUrl: string): ModelDefinitionConfig[] {
-  const models = [
-    {
-      id: OPENAI_CHAT_LATEST_MODEL_ID,
-      name: "Chat Latest",
-      reasoning: false,
-      cost: OPENAI_CHAT_LATEST_COST,
-      contextWindow: 400_000,
-    },
-    {
-      id: OPENAI_GPT_54_MODEL_ID,
-      name: "GPT-5.4",
-      reasoning: true,
-      cost: OPENAI_GPT_54_COST,
-      contextWindow: OPENAI_GPT_54_CONTEXT_TOKENS,
-    },
-    {
-      id: OPENAI_GPT_54_PRO_MODEL_ID,
-      name: "GPT-5.4 Pro",
-      reasoning: true,
-      cost: OPENAI_GPT_54_PRO_COST,
-      contextWindow: OPENAI_GPT_54_PRO_CONTEXT_TOKENS,
-    },
-    {
-      id: OPENAI_GPT_54_MINI_MODEL_ID,
-      name: "GPT-5.4 Mini",
-      reasoning: true,
-      cost: OPENAI_GPT_54_MINI_COST,
-      contextWindow: OPENAI_GPT_54_MINI_CONTEXT_TOKENS,
-    },
-    {
-      id: OPENAI_GPT_54_NANO_MODEL_ID,
-      name: "GPT-5.4 Nano",
-      reasoning: true,
-      cost: OPENAI_GPT_54_NANO_COST,
-      contextWindow: OPENAI_GPT_54_NANO_CONTEXT_TOKENS,
-    },
-  ] as const;
-
-  // First-party discovery must retain provider-owned costs and capabilities;
-  // generic projection would otherwise surface valid models as zero-cost.
-  return models.map(({ id, name, reasoning, cost, contextWindow }) => ({
-    id,
-    name,
-    reasoning,
-    cost,
-    contextWindow,
-    api: "openai-responses",
-    baseUrl,
-    input: ["text", "image"],
-    maxTokens: OPENAI_GPT_54_MAX_TOKENS,
-  }));
-}
-
 type OpenAILiveProviderCatalog = {
   provider: ModelProviderConfig;
   outcome?: ProviderCatalogOutcome;
@@ -245,6 +177,20 @@ function buildOpenAIStaticPlatformProviderConfig(
     api: "openai-responses",
     ...(apiKey ? { apiKey } : {}),
     models: buildOpenAIManifestModelsForBaseUrl(baseUrl),
+  };
+}
+
+function projectOpenAICatalog(catalog: OpenAILiveProviderCatalog, profileId?: string) {
+  const scopedProfileId = profileId?.trim();
+  return {
+    providers: { [PROVIDER_ID]: catalog.provider },
+    ...(catalog.outcome
+      ? {
+          outcomes: [
+            scopedProfileId ? { ...catalog.outcome, profileId: scopedProfileId } : catalog.outcome,
+          ],
+        }
+      : {}),
   };
 }
 
@@ -296,7 +242,20 @@ async function buildOpenAILiveProviderConfig(
     return {
       provider: {
         ...fallback,
-        models: [...models, ...buildOpenAIDiscoverablePlatformModels(baseUrl)].filter((model) => {
+        models: [
+          ...models,
+          {
+            id: OPENAI_CHAT_LATEST_MODEL_ID,
+            name: "Chat Latest",
+            reasoning: false,
+            cost: OPENAI_CHAT_LATEST_COST,
+            contextWindow: 400_000,
+            api: "openai-responses",
+            baseUrl,
+            input: ["text", "image"],
+            maxTokens: OPENAI_GPT_54_MAX_TOKENS,
+          } satisfies ModelDefinitionConfig,
+        ].filter((model) => {
           if (!discoveredIds.has(model.id) || selectedIds.has(model.id)) {
             return false;
           }
@@ -870,29 +829,13 @@ export function buildOpenAIProvider(): ProviderPlugin {
         }
         const auth = ctx.resolveProviderAuth(PROVIDER_ID);
         if (isSIWCAuthFlow(auth.authFlow)) {
-          // Token sharing authorizes Responses, not either model-discovery endpoint.
-          const sharing = auth.authFlow === TOKEN_SHARING_AUTH_FLOW;
-          const provider = buildOpenAIStaticPlatformProviderConfig(
-            undefined,
-            TOKEN_SHARING_RESOURCE,
-          );
-          return {
-            providers: {
-              [PROVIDER_ID]: {
-                ...provider,
-                models: sharing
-                  ? provider.models.filter((model) => model.api === "openai-responses")
-                  : [],
-              },
-            },
-            outcomes: [
-              {
-                provider: PROVIDER_ID,
-                profileId: auth.profileId,
-                status: sharing ? ("unavailable" as const) : ("auth-rejected" as const),
-              },
-            ],
-          };
+          const { buildTokenSharingCatalog } = await import("./token-sharing-catalog.js");
+          return await buildTokenSharingCatalog({
+            auth,
+            models: buildOpenAIStaticPlatformProviderConfig(undefined, TOKEN_SHARING_RESOURCE)
+              .models,
+            signal: ctx.signal,
+          });
         }
         if (auth.preparationFailed) {
           return null;
@@ -932,17 +875,13 @@ export function buildOpenAIProvider(): ProviderPlugin {
               ? { profileId: runtimeAuth.profileId ?? auth.profileId }
               : {}),
           });
-          const catalog = scopeOpenAICatalogOutcome(
+          return projectOpenAICatalog(
             await buildOpenAICodexLiveProviderConfig({
               discoveryApiKey: runtimeAuth.apiKey,
               accountId: metadata.accountId,
             }),
             runtimeAuth.profileId ?? auth.profileId,
           );
-          return {
-            providers: { [PROVIDER_ID]: catalog.provider },
-            ...(catalog.outcome ? { outcomes: [catalog.outcome] } : {}),
-          };
         }
         if (!auth.profileId && isCodexCatalogAuthMode(auth.mode) && auth.apiKey) {
           const discoveryApiKey =
@@ -954,13 +893,9 @@ export function buildOpenAIProvider(): ProviderPlugin {
               outcomes: [{ provider: PROVIDER_ID, status: "unavailable" }],
             };
           }
-          const catalog = await buildOpenAICodexLiveProviderConfig({
-            discoveryApiKey,
-          });
-          return {
-            providers: { [PROVIDER_ID]: catalog.provider },
-            ...(catalog.outcome ? { outcomes: [catalog.outcome] } : {}),
-          };
+          return projectOpenAICatalog(
+            await buildOpenAICodexLiveProviderConfig({ discoveryApiKey }),
+          );
         }
         if (auth.profileId && isCodexCatalogAuthMode(auth.mode)) {
           return {
@@ -996,7 +931,7 @@ export function buildOpenAIProvider(): ProviderPlugin {
               ],
             };
           }
-          const catalog = scopeOpenAICatalogOutcome(
+          return projectOpenAICatalog(
             await buildOpenAILiveProviderConfig({
               apiKey: auth.apiKey,
               baseUrl: resolveOpenAICatalogBaseUrl(ctx),
@@ -1004,10 +939,6 @@ export function buildOpenAIProvider(): ProviderPlugin {
             }),
             auth.profileId,
           );
-          return {
-            providers: { [PROVIDER_ID]: catalog.provider },
-            ...(catalog.outcome ? { outcomes: [catalog.outcome] } : {}),
-          };
         }
         return null;
       },

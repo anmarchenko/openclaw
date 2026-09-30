@@ -13,4 +13,6 @@ export type ProviderCatalogOutcome = {
     baseUrl: string;
     serviceTiers: readonly string[];
   }[];
+  /** Optional successful discovery order for models already present in the catalog. */
+  modelOrder?: readonly string[];
 };
