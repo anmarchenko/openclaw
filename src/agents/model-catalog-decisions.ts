@@ -7,8 +7,11 @@ import type { ProviderCatalogOutcome } from "../plugins/provider-catalog.types.j
 import type { PluginRegistry } from "../plugins/registry.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import type { GatewayAgentRuntime } from "../shared/session-types.js";
+import { getActiveOpenClawStateDatabaseReadSnapshot } from "../state/openclaw-state-db-readonly.js";
+import { captureOpenClawStateReadContext } from "../state/openclaw-state-worker-context.js";
 import { isUserModelAuthProfileId } from "../state/user-model-account-id.js";
 import { listUserProfileAuthLinks } from "../state/user-model-accounts.js";
+import { captureUserProfileModelAccountLinksAuthority } from "../state/user-profile-events.js";
 import type { PreparedAgentCredentialModes } from "./agent-auth-credential-modes.js";
 import { isDefaultAgentRuntimeId } from "./agent-runtime-id.js";
 import { resolveAgentDir, resolveAgentWorkspaceDir } from "./agent-scope.js";
@@ -211,6 +214,22 @@ export function createModelCatalogDecisions(params: ModelCatalogDecisionParams) 
   let authStore = params.preparedAuthStore;
   const preferredProfilesByProvider = new Map<string, string>();
   const personalProviders = new Set<string>();
+  if (
+    !params.preferredProfileId &&
+    params.requesterProfileId &&
+    getActiveOpenClawStateDatabaseReadSnapshot()
+  ) {
+    throw new PreparedModelRuntimePublicationSupersededError(
+      "Default account selection requires current link authority",
+    );
+  }
+  const defaultLinksAreCurrent =
+    !params.preferredProfileId && params.requesterProfileId
+      ? captureUserProfileModelAccountLinksAuthority(
+          captureOpenClawStateReadContext().admission,
+          params.requesterProfileId,
+        )
+      : undefined;
   // A persisted session pin wins over the current viewer's links. Only these
   // explicit selections enter this private projection, never its shared owner.
   if (params.preferredProfileId && isUserModelAuthProfileId(params.preferredProfileId)) {
@@ -361,6 +380,7 @@ export function createModelCatalogDecisions(params: ModelCatalogDecisionParams) 
   const accountObservations: Array<() => boolean> = [];
   const isCurrent = () =>
     Date.now() < authValidUntil &&
+    defaultLinksAreCurrent?.() !== false &&
     (params.isCurrent?.() ?? params.observationConfig === undefined) &&
     accountObservations.every((current) => current());
   const prepareSelectedAccountCatalog = async (

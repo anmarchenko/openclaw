@@ -100,7 +100,7 @@ export type CodexAppServerRuntimeOptions = {
   /** Prepared boundary for an explicit session permission mode. */
   sessionRoot?: string;
   serviceTier?: CodexServiceTier | null;
-  /** Prefer supported Ultrafast only when no shared Fast-mode control is supplied. */
+  /** Prefer supported Ultrafast with no shared Fast-mode control or when Auto is active. */
   enableUltrafast?: boolean;
   networkProxy?: ResolvedCodexAppServerNetworkProxyConfig;
 };

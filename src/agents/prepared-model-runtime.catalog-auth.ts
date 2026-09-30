@@ -57,7 +57,16 @@ export function createPreparedAccountCatalogAccess(
       }
       const captured = observation;
       const current = () => ownerIsCurrent() && accounts.get(params.profileId) === captured;
-      const outcomes = captured.outcomes ?? (await captured.result);
+      let outcomes: readonly ProviderCatalogOutcome[];
+      try {
+        outcomes = captured.outcomes ?? (await captured.result);
+      } catch (error) {
+        // A revoked request cannot poison a later authorized selection of this account.
+        if (current()) {
+          accounts.delete(params.profileId);
+        }
+        throw error;
+      }
       if (!current()) {
         throw new PreparedModelRuntimePublicationSupersededError(
           "Selected account catalog changed",

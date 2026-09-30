@@ -436,6 +436,7 @@ export async function prepareModelsListResult(
     await projector.prepareSelectedAccountCatalog(
       () => {
         draft?.assertCurrent();
+        scope?.assertCurrent?.();
         if (!isCurrent()) {
           throw new PreparedModelRuntimePublicationSupersededError(
             "Selected account catalog changed",

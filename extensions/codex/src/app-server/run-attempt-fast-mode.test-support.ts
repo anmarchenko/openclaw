@@ -166,11 +166,33 @@ export function registerCodexFastModeTests({
       supported: true,
       fastMode: false,
       activateAuto: true,
+      expected: "ultrafast",
+    },
+    {
+      name: "inactive Auto",
+      supported: true,
+      fastMode: false,
+      automatic: true,
+      expected: null,
+    },
+    {
+      name: "auto without Ultrafast opt-in",
+      supported: true,
+      fastMode: false,
+      activateAuto: true,
+      enableUltrafast: false,
+      expected: "priority",
+    },
+    {
+      name: "auto with unsupported Ultrafast",
+      supported: false,
+      fastMode: false,
+      activateAuto: true,
       expected: "priority",
     },
   ])(
     "applies optional Ultrafast for $name at the actual turn boundary",
-    async ({ supported, fastMode, activateAuto, enableUltrafast = true, expected }) => {
+    async ({ supported, fastMode, activateAuto, automatic, enableUltrafast = true, expected }) => {
       const { sessionFile, workspaceDir } = createRunPaths();
       await writeExistingBinding(sessionFile, workspaceDir, { model: "gpt-5.2" });
       const harness = createResumeHarness("thread-existing", async (method) => {
@@ -198,7 +220,7 @@ export function registerCodexFastModeTests({
       });
       const params = createParams(sessionFile, workspaceDir);
       let active = fastMode;
-      params.fastMode = activateAuto ? () => active : fastMode;
+      params.fastMode = activateAuto || automatic ? () => active : fastMode;
       params.onAgentEvent = (event) => {
         if (
           event.stream === "codex_app_server.lifecycle" &&

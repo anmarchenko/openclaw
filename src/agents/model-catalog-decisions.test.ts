@@ -68,6 +68,19 @@ function nativeOwner(complete: boolean, loggedIn: boolean, isCurrent = () => tru
 }
 
 describe("captured model decisions", () => {
+  beforeEach(() => {
+    // These cases describe prepared auth facts, not credentials from the host shell.
+    for (const key of [
+      "OPENAI_API_KEY",
+      "CODEX_API_KEY",
+      "OPENAI_OAUTH_TOKEN",
+      "CHATGPT_OAUTH_TOKEN",
+    ]) {
+      vi.stubEnv(key, "");
+    }
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
   it("retains account discovery across request projections until explicit refresh or identity replacement", async () => {
     const retirement = new AbortController();
     const owner = createPreparedAccountCatalogAccess(() => true, retirement.signal);
