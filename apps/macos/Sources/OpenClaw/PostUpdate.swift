@@ -13,6 +13,7 @@ struct PostAppUpdateReceipt: Codable, Equatable {
         case gatewayUpdateIncomplete
         case notificationAttempts
         case notificationInFlight
+        case runtimeBuildID
     }
 
     let fromVersion: String
@@ -21,6 +22,7 @@ struct PostAppUpdateReceipt: Codable, Equatable {
     let gatewayUpdateIncomplete: Bool
     let notificationAttempts: Int
     let notificationInFlight: Bool
+    let runtimeBuildID: String?
 
     init(
         fromVersion: String,
@@ -28,7 +30,8 @@ struct PostAppUpdateReceipt: Codable, Equatable {
         recordedAt: Date,
         gatewayUpdateIncomplete: Bool = false,
         notificationAttempts: Int = 0,
-        notificationInFlight: Bool = false)
+        notificationInFlight: Bool = false,
+        runtimeBuildID: String? = nil)
     {
         self.fromVersion = fromVersion
         self.toVersion = toVersion
@@ -36,6 +39,7 @@ struct PostAppUpdateReceipt: Codable, Equatable {
         self.gatewayUpdateIncomplete = gatewayUpdateIncomplete
         self.notificationAttempts = notificationAttempts
         self.notificationInFlight = notificationInFlight
+        self.runtimeBuildID = runtimeBuildID
     }
 
     init(from decoder: Decoder) throws {
@@ -52,11 +56,13 @@ struct PostAppUpdateReceipt: Codable, Equatable {
         self.notificationInFlight = try container.decodeIfPresent(
             Bool.self,
             forKey: .notificationInFlight) ?? false
+        self.runtimeBuildID = try container.decodeIfPresent(String.self, forKey: .runtimeBuildID)
     }
 }
 
 enum PostAppUpdateReceiptStore {
     static let notificationRetryLimit = 2
+    private static let lastLaunchedRuntimeBuildIDKey = "openclaw.lastLaunchedRuntimeBuildID"
 
     static func record(
         fromVersion: String,
@@ -73,18 +79,22 @@ enum PostAppUpdateReceiptStore {
 
     static func pending(
         currentVersion: String?,
+        currentRuntimeBuildID: String? = nil,
         defaults: UserDefaults = AppDefaults.standard) -> PostAppUpdateReceipt?
     {
         guard let currentVersion = normalized(currentVersion),
               let data = defaults.data(forKey: postAppUpdateReceiptKey),
               let receipt = try? JSONDecoder().decode(PostAppUpdateReceipt.self, from: data),
-              normalized(receipt.toVersion) == currentVersion
+              normalized(receipt.toVersion) == currentVersion,
+              receipt.runtimeBuildID == nil || currentRuntimeBuildID == nil ||
+              receipt.runtimeBuildID == currentRuntimeBuildID
         else { return nil }
         return receipt
     }
 
     static func pendingForLaunch(
         currentVersion: String?,
+        currentRuntimeBuildID: String? = nil,
         onboardingSeen: Bool,
         allowsUpdateWorkflow: Bool = true,
         defaults: UserDefaults = AppDefaults.standard,
@@ -92,27 +102,36 @@ enum PostAppUpdateReceiptStore {
     {
         guard let currentVersion = normalized(currentVersion) else { return nil }
         let previousVersion = self.normalized(defaults.string(forKey: lastLaunchedAppVersionKey))
+        let runtimeBuildID = self.normalized(currentRuntimeBuildID)
+        let previousBuildID = self.normalized(defaults.string(forKey: self.lastLaunchedRuntimeBuildIDKey))
         let receipt: PostAppUpdateReceipt?
         if !onboardingSeen || !allowsUpdateWorkflow {
             // A receipt can arrive before first-run onboarding. Consume it here so
             // completing onboarding cannot replay old post-update work later.
             self.clear(defaults: defaults)
             receipt = nil
-        } else if let pending = self.pending(currentVersion: currentVersion, defaults: defaults) {
+        } else if let pending = self.pending(
+            currentVersion: currentVersion,
+            currentRuntimeBuildID: runtimeBuildID,
+            defaults: defaults),
+            runtimeBuildID == nil || pending.runtimeBuildID == runtimeBuildID
+        {
             receipt = pending
-        } else if previousVersion != currentVersion {
+        } else if previousVersion != currentVersion || (runtimeBuildID != nil && runtimeBuildID != previousBuildID) {
             // The first recorder-capable build has no prior launch marker. An
             // onboarded install is therefore an upgrade; fresh installs were gated above.
             let bootstrap = PostAppUpdateReceipt(
                 fromVersion: previousVersion ?? "unknown",
                 toVersion: currentVersion,
-                recordedAt: now)
+                recordedAt: now,
+                runtimeBuildID: runtimeBuildID)
             self.persist(bootstrap, defaults: defaults)
             receipt = bootstrap
         } else {
             receipt = nil
         }
         defaults.set(currentVersion, forKey: lastLaunchedAppVersionKey)
+        defaults.set(runtimeBuildID, forKey: self.lastLaunchedRuntimeBuildIDKey)
         return receipt
     }
 
@@ -132,7 +151,8 @@ enum PostAppUpdateReceiptStore {
             recordedAt: receipt.recordedAt,
             gatewayUpdateIncomplete: incomplete,
             notificationAttempts: receipt.notificationAttempts,
-            notificationInFlight: receipt.notificationInFlight)
+            notificationInFlight: receipt.notificationInFlight,
+            runtimeBuildID: receipt.runtimeBuildID)
         self.persist(updated, defaults: defaults)
         return updated
     }
@@ -150,7 +170,8 @@ enum PostAppUpdateReceiptStore {
             recordedAt: receipt.recordedAt,
             gatewayUpdateIncomplete: receipt.gatewayUpdateIncomplete,
             notificationAttempts: min(receipt.notificationAttempts + 1, self.notificationRetryLimit),
-            notificationInFlight: receipt.notificationInFlight)
+            notificationInFlight: receipt.notificationInFlight,
+            runtimeBuildID: receipt.runtimeBuildID)
         self.persist(updated, defaults: defaults)
         return updated
     }
@@ -167,7 +188,8 @@ enum PostAppUpdateReceiptStore {
             recordedAt: receipt.recordedAt,
             gatewayUpdateIncomplete: receipt.gatewayUpdateIncomplete,
             notificationAttempts: receipt.notificationAttempts,
-            notificationInFlight: inFlight)
+            notificationInFlight: inFlight,
+            runtimeBuildID: receipt.runtimeBuildID)
         self.persist(updated, defaults: defaults)
         // Cross the persistence boundary before the Gateway request. A crash
         // after enqueue must not replay this one-time welcome on next launch.
@@ -225,6 +247,7 @@ enum PostUpdateGatewayAction: Equatable {
     case repair
     case update
     case install
+    case prepareBundledRuntime
 }
 
 struct PostUpdateSessionsResponse: Decodable {
@@ -267,11 +290,12 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
 
     @discardableResult
     func startIfNeeded(profile: AppProfile = .current) -> Bool {
-        guard !profile.isActive else { return false }
+        guard !profile.isActive || BundledRuntime.isBundledApp else { return false }
         guard let receipt = PostAppUpdateReceiptStore.pendingForLaunch(
             currentVersion: GatewayEnvironment.appVersionString(),
+            currentRuntimeBuildID: Bundle.main.infoDictionary?["OpenClawRuntimeBuildID"] as? String,
             onboardingSeen: AppStateStore.shared.onboardingSeen,
-            allowsUpdateWorkflow: !CLIInstallBuild.isDebug)
+            allowsUpdateWorkflow: BundledRuntime.isBundledApp || !CLIInstallBuild.isDebug)
         else { return false }
         self.receipt = receipt
         self.run()
@@ -342,7 +366,7 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
     }
 
     private func finishUpdate(receipt: PostAppUpdateReceipt) async {
-        guard !AppProfile.current.isActive else {
+        guard !AppProfile.current.isActive || BundledRuntime.isBundledApp else {
             self.finishSilently()
             return
         }
@@ -366,43 +390,15 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
             return
         }
 
-        let managedStatus = await CLIInstaller.managedStatus()
-        let runtimeProgramArguments: [String]
-        switch connectionMode {
-        case .local:
-            guard let programArguments = GatewayLaunchAgentManager.launchdProgramArguments() else {
-                self.finishAfterOwnershipCheckFailure(
-                    connectionMode: connectionMode,
-                    receipt: receipt)
-                return
-            }
-            runtimeProgramArguments = programArguments
-        case .remote:
-            guard let programArguments = NodeServiceManager.launchdProgramArguments() else {
-                self.finishAfterOwnershipCheckFailure(
-                    connectionMode: connectionMode,
-                    receipt: receipt)
-                return
-            }
-            runtimeProgramArguments = programArguments
-        case .unconfigured:
-            runtimeProgramArguments = []
-        }
-        let ownsManagedRuntime = Self.ownsManagedRuntime(
+        let bundled = BundledRuntime.isBundledApp
+        let action = await self.resolveGatewayAction(
             connectionMode: connectionMode,
-            programArguments: runtimeProgramArguments,
-            gatewayUpdateChannel: OpenClawConfigFile.gatewayUpdateChannel(),
-            installPolicy: CLIInstallPolicy.storedPolicy(),
-            launchAgentWriteDisabled: GatewayLaunchAgentManager.isLaunchAgentWriteDisabled())
+            gatewayUpdateIncomplete: receipt.gatewayUpdateIncomplete)
         let restartGateway = connectionMode == .local && !AppStateStore.shared.isPaused
 
         // App-only relaunches stay invisible. The window belongs only to
         // confirmed managed Gateway work and its recovery path.
-        switch Self.gatewayAction(
-            status: managedStatus,
-            ownsManagedRuntime: ownsManagedRuntime,
-            gatewayUpdateIncomplete: receipt.gatewayUpdateIncomplete)
-        {
+        switch action {
         case .none:
             self.finishSilently()
             return
@@ -411,6 +407,19 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
                 connectionMode: connectionMode,
                 receipt: receipt)
             return
+        case .prepareBundledRuntime:
+            self.setGatewayUpdateIncomplete(true, receipt: receipt)
+            self.model.phase = .updating
+            self.model.message = String(localized: "Preparing the bundled Gateway runtime…")
+            self.show()
+            do {
+                try await GatewayProcessManager.shared.prepareBundledRuntimeAfterUpdate()
+            } catch {
+                self.fail(
+                    message: String(localized: "The bundled Gateway update could not finish."),
+                    details: error.localizedDescription)
+                return
+            }
         case .repair:
             self.model.phase = .updating
             self.show()
@@ -452,12 +461,52 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
         self.model.message = connectionMode == .local
             ? String(localized: "Restarting and verifying the Gateway…")
             : String(localized: "Verifying the Mac node runtime…")
-        guard await self.verifyRuntime(connectionMode: connectionMode) else { return }
+        if !bundled {
+            guard await self.verifyRuntime(connectionMode: connectionMode) else { return }
+        }
         // Verification owns the persistence boundary: clearing earlier would
         // turn a failed health check into a silent app-only completion on retry.
         self.setGatewayUpdateIncomplete(false, receipt: receipt)
 
         await self.finishNotification(receipt: receipt, connectionMode: connectionMode)
+    }
+
+    private func resolveGatewayAction(
+        connectionMode: AppState.ConnectionMode,
+        gatewayUpdateIncomplete: Bool) async -> PostUpdateGatewayAction
+    {
+        if BundledRuntime.isBundledApp {
+            await GatewayProcessManager.shared.waitForStartupAttempt()
+            return Self.gatewayAction(
+                ownsManagedRuntime: GatewayProcessManager.shared.usesSeededGateway,
+                gatewayUpdateIncomplete: gatewayUpdateIncomplete,
+                usesBundledRuntime: true)
+        }
+        let status = await CLIInstaller.managedStatus()
+        let runtimeProgramArguments: [String]
+        switch connectionMode {
+        case .local:
+            guard let arguments = GatewayLaunchAgentManager.launchdProgramArguments() else {
+                return .ownershipFailure
+            }
+            runtimeProgramArguments = arguments
+        case .remote:
+            guard let arguments = NodeServiceManager.launchdProgramArguments() else {
+                return .ownershipFailure
+            }
+            runtimeProgramArguments = arguments
+        case .unconfigured:
+            runtimeProgramArguments = []
+        }
+        return Self.gatewayAction(
+            status: status,
+            ownsManagedRuntime: Self.ownsManagedRuntime(
+                connectionMode: connectionMode,
+                programArguments: runtimeProgramArguments,
+                gatewayUpdateChannel: OpenClawConfigFile.gatewayUpdateChannel(),
+                installPolicy: CLIInstallPolicy.storedPolicy(),
+                launchAgentWriteDisabled: GatewayLaunchAgentManager.isLaunchAgentWriteDisabled()),
+            gatewayUpdateIncomplete: gatewayUpdateIncomplete)
     }
 
     private func finishNotification(
@@ -695,14 +744,17 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
     }
 
     static func gatewayAction(
-        status: CLIInstaller.Status,
+        status: CLIInstaller.Status? = nil,
         ownsManagedRuntime: Bool,
-        gatewayUpdateIncomplete: Bool) -> PostUpdateGatewayAction
+        gatewayUpdateIncomplete: Bool,
+        usesBundledRuntime: Bool = false) -> PostUpdateGatewayAction
     {
         if gatewayUpdateIncomplete, !ownsManagedRuntime {
             return .ownershipFailure
         }
         guard ownsManagedRuntime else { return .none }
+        if usesBundledRuntime { return .prepareBundledRuntime }
+        guard let status else { return .none }
         return switch status {
         case .ready:
             gatewayUpdateIncomplete ? .repair : .none

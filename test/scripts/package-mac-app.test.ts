@@ -7,7 +7,6 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,

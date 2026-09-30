@@ -30,6 +30,17 @@ final class CLIInstallPrompter {
         guard connectionMode == .local else { return }
         await GatewayProcessManager.shared.waitForStartupAttempt()
         guard GatewayProcessManager.shared.installation == .managed else { return }
+        if BundledRuntime.isBundledApp {
+            guard userInitiated else { return }
+            self.installStatus = String(localized: "Preparing OpenClaw…")
+            do {
+                _ = try await BundledRuntime.seed()
+                self.installStatus = await Self.activationMessage(CLIInstaller.activateLocalGateway())
+            } catch {
+                self.installStatus = error.localizedDescription
+            }
+            return
+        }
         guard let version = Self.appVersion() else { return }
         let status = await CLIInstaller.status()
         let managedStatus = await CLIInstaller.managedStatus()
@@ -101,6 +112,7 @@ final class CLIInstallPrompter {
         presentingSheetOn window: NSWindow?) async -> CLIInstaller.InstallTarget?
     {
         let appVersion = Self.appVersion()
+        if BundledRuntime.isBundledApp, let appVersion { return .exact(appVersion) }
         if let target = CLIInstaller.automaticInstallTarget(
             appVersion: appVersion,
             isDebug: CLIInstallBuild.isDebug)

@@ -189,6 +189,7 @@ enum CLIInstaller {
     }
 
     static func status() async -> Status {
+        if BundledRuntime.isBundledApp { return self.bundledStatus() }
         let preferredPaths = await CommandResolver.preferredPathsAsync()
         let locations = self.installedLocations(
             searchPaths: preferredPaths,
@@ -217,6 +218,7 @@ enum CLIInstaller {
     }
 
     private static func managedStatus(expectedVersion: String?) async -> Status {
+        if BundledRuntime.isBundledApp { return self.bundledStatus() }
         let location = self.managedExecutableLocation()
         guard FileManager.default.isExecutableFile(atPath: location) else {
             return .missing(location: location)
@@ -239,6 +241,18 @@ enum CLIInstaller {
             location: location,
             expectedVersion: GatewayEnvironment.expectedGatewayVersionString(),
             preferredPaths: preferredPaths)
+    }
+
+    private static func bundledStatus() -> Status {
+        let location = self.managedExecutableLocation()
+        do {
+            guard let runtime = try BundledRuntime.seeded() else { return .missing(location: location) }
+            _ = try BundledRuntime.resolve(root: runtime.root, bundle: .main)
+            let version = GatewayEnvironment.appVersionString() ?? "unknown"
+            return .ready(location: runtime.packageRoot.appendingPathComponent("openclaw.mjs").path, version: version)
+        } catch {
+            return .unusable(location: location)
+        }
     }
 
     private static func status(
@@ -334,6 +348,18 @@ enum CLIInstaller {
         target: InstallTarget,
         statusHandler: @escaping @MainActor @Sendable (String) async -> Void) async -> Bool
     {
+        if BundledRuntime.isBundledApp {
+            await statusHandler("Preparing OpenClaw…")
+            do {
+                _ = try await BundledRuntime.seed()
+                NotificationCenter.default.post(name: .openclawCLIInstalled, object: nil)
+                await statusHandler("OpenClaw is ready.")
+                return true
+            } catch {
+                await statusHandler("Preparation failed: \(error.localizedDescription)")
+                return false
+            }
+        }
         let prefix = Self.installPrefix()
         await statusHandler("Installing OpenClaw CLI (\(target.selector))…")
         guard let installerURL = Bundle.main.url(forResource: "install-cli", withExtension: "sh") else {
