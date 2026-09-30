@@ -4,7 +4,7 @@ import Testing
 @testable import OpenClaw
 
 struct PipeReadStreamTests {
-    @Test func `cancelled finish still joins reader cleanup`() throws {
+    @Test func `cancelled finish still joins reader cleanup`() async throws {
         let pipe = Pipe()
         let probe = PipeReadProbe()
         let entered = DispatchSemaphore(value: 0)
@@ -36,7 +36,7 @@ struct PipeReadStreamTests {
         try #require(started.wait(timeout: .now() + 2) == .success)
         #expect(joined.wait(timeout: .now() + 0.1) == .timedOut)
         release.signal()
-        #expect(joined.wait(timeout: .now() + 2) == .success)
+        await closing.value
         #expect(probe.finishCount == 1)
     }
 
