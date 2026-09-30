@@ -120,10 +120,7 @@ export function normalizeSafeBins(entries?: readonly string[]): Set<string> {
 }
 
 export function resolveSafeBins(entries?: readonly string[] | null): Set<string> {
-  if (entries === undefined) {
-    return normalizeSafeBins(DEFAULT_SAFE_BINS);
-  }
-  return normalizeSafeBins(entries ?? []);
+  return normalizeSafeBins(entries === undefined ? DEFAULT_SAFE_BINS : (entries ?? []));
 }
 
 export function isSafeBinUsage(params: {
@@ -209,11 +206,6 @@ type ExecAllowlistContext = {
   allowShellBuiltins?: boolean;
 };
 
-function normalizeSkillBinName(value: string | undefined): string | null {
-  const trimmed = normalizeOptionalLowercaseString(value);
-  return trimmed && trimmed.length > 0 ? trimmed : null;
-}
-
 function normalizeSkillBinResolvedPath(value: string | undefined): string | null {
   const trimmed = normalizeOptionalString(value);
   if (!trimmed) {
@@ -234,7 +226,7 @@ function buildSkillBinTrustIndex(
     return trustByName;
   }
   for (const entry of entries) {
-    const name = normalizeSkillBinName(entry.name);
+    const name = normalizeOptionalLowercaseString(entry.name);
     const resolvedPath = normalizeSkillBinResolvedPath(entry.resolvedPath);
     if (!name || !resolvedPath) {
       continue;
@@ -264,7 +256,7 @@ function isSkillAutoAllowedSegment(params: {
   if (!rawExecutable || isPathScopedExecutableToken(rawExecutable)) {
     return false;
   }
-  const executableName = normalizeSkillBinName(execution.executableName);
+  const executableName = normalizeOptionalLowercaseString(execution.executableName);
   const resolvedPath = normalizeSkillBinResolvedPath(trustPath);
   if (!executableName || !resolvedPath) {
     return false;
@@ -834,19 +826,10 @@ function hasSegmentExecutableMatch(
 ): boolean {
   const execution = resolveExecutionTargetResolution(segment.resolution);
   const candidates = [execution?.executableName, execution?.rawExecutable, segment.argv[0]];
-  for (const candidate of candidates) {
-    if (typeof candidate !== "string") {
-      continue;
-    }
-    const trimmed = candidate.trim();
-    if (!trimmed) {
-      continue;
-    }
-    if (predicate(trimmed)) {
-      return true;
-    }
-  }
-  return false;
+  return candidates.some((candidate) => {
+    const trimmed = normalizeOptionalString(candidate);
+    return trimmed ? predicate(trimmed) : false;
+  });
 }
 
 function isShellWrapperSegment(segment: ExecCommandSegment): boolean {

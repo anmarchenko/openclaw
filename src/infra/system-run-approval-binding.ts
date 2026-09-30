@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { sha256Hex } from "./crypto-digest.js";
-// Binds system-run approval requests to stable command identities.
 import type {
   ExecCommandSegment,
   SystemRunApprovalBinding,
@@ -41,7 +40,7 @@ function normalizeSystemRunEnvEntries(env: unknown): NormalizedSystemRunEnvEntry
     return [];
   }
   const entries: NormalizedSystemRunEnvEntry[] = [];
-  for (const [rawKey, rawValue] of Object.entries(env as Record<string, unknown>)) {
+  for (const [rawKey, rawValue] of Object.entries(env)) {
     if (typeof rawValue !== "string") {
       continue;
     }
@@ -55,20 +54,13 @@ function normalizeSystemRunEnvEntries(env: unknown): NormalizedSystemRunEnvEntry
   return entries;
 }
 
-function hashSystemRunEnvEntries(entries: NormalizedSystemRunEnvEntry[]): string | null {
-  if (entries.length === 0) {
-    return null;
-  }
-  return sha256Hex(JSON.stringify(entries));
-}
-
 export function buildSystemRunApprovalEnvBinding(env: unknown): {
   envHash: string | null;
   envKeys: string[];
 } {
   const entries = normalizeSystemRunEnvEntries(env);
   return {
-    envHash: hashSystemRunEnvEntries(entries),
+    envHash: entries.length > 0 ? sha256Hex(JSON.stringify(entries)) : null,
     envKeys: entries.map(([key]) => key),
   };
 }
@@ -134,7 +126,7 @@ function matchSystemRunApprovalEnvHash(params: {
 }): SystemRunApprovalMatchResult {
   // Fail closed if callers provide inconsistent hash/key state. This guards against
   // normalization drift between approval and execution paths.
-  if (!params.expectedEnvHash && !params.actualEnvHash && params.actualEnvKeys.length > 0) {
+  if (!params.expectedEnvHash && (params.actualEnvHash || params.actualEnvKeys.length > 0)) {
     return {
       ok: false,
       code: "APPROVAL_ENV_BINDING_MISSING",
@@ -144,14 +136,6 @@ function matchSystemRunApprovalEnvHash(params: {
   }
   if (!params.expectedEnvHash && !params.actualEnvHash) {
     return { ok: true };
-  }
-  if (!params.expectedEnvHash && params.actualEnvHash) {
-    return {
-      ok: false,
-      code: "APPROVAL_ENV_BINDING_MISSING",
-      message: "approval id missing env binding for requested env overrides",
-      details: { envKeys: params.actualEnvKeys },
-    };
   }
   if (params.expectedEnvHash !== params.actualEnvHash) {
     return {
@@ -173,16 +157,12 @@ export function matchSystemRunApprovalBinding(params: {
   actual: SystemRunApprovalBinding;
   actualEnvKeys: string[];
 }): SystemRunApprovalMatchResult {
-  if (!argvMatches(params.expected.argv, params.actual.argv)) {
-    return requestMismatch();
-  }
-  if (params.expected.cwd !== params.actual.cwd) {
-    return requestMismatch();
-  }
-  if (params.expected.agentId !== params.actual.agentId) {
-    return requestMismatch();
-  }
-  if (params.expected.sessionKey !== params.actual.sessionKey) {
+  if (
+    !argvMatches(params.expected.argv, params.actual.argv) ||
+    params.expected.cwd !== params.actual.cwd ||
+    params.expected.agentId !== params.actual.agentId ||
+    params.expected.sessionKey !== params.actual.sessionKey
+  ) {
     return requestMismatch();
   }
   return matchSystemRunApprovalEnvHash({
@@ -204,17 +184,10 @@ export function toSystemRunApprovalMismatchError(params: {
   runId: string;
   match: SystemRunApprovalMismatch;
 }): { ok: false; message: string; details: Record<string, unknown> } {
-  const details: Record<string, unknown> = {
-    code: params.match.code,
-    runId: params.runId,
-  };
-  if (params.match.details) {
-    Object.assign(details, params.match.details);
-  }
   return {
     ok: false,
     message: params.match.message,
-    details,
+    details: Object.assign({ code: params.match.code, runId: params.runId }, params.match.details),
   };
 }
 
