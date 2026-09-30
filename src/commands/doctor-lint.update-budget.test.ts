@@ -1,7 +1,10 @@
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { clearHealthChecksForTest } from "../flows/health-check-registry.js";
 import type { DoctorHealthCheck } from "../flows/health-check-runner-types.js";
+import { resolveRuntimeProcessEntrypointUrl } from "../infra/runtime-process-url.js";
+import { withRuntimeWorkerGeneration } from "../infra/runtime-worker-generation.js";
 import { parseReleasedDoctorLintReport } from "../infra/test-fixtures/update-doctor-lint.v2026-9-5.js";
 import { buildUpdateRehearsalPathEnv } from "../infra/update-rehearsal-paths.js";
 import { createUpdateRun, recordUpdateRunPhase } from "../infra/update-run-ledger.js";
@@ -122,11 +125,32 @@ async function runLintFixture(
       return true;
     });
     try {
-      const exitCode = await runDoctorLintCli(createTestRuntime(), {
-        json: true,
-        severityMin: "error",
-        ...options,
-      });
+      // Rehearsal TMPDIR is fixture-owned; join its broker before restoring or removing it.
+      const exitCode = await withRuntimeWorkerGeneration(
+        async (bind) => {
+          const backend = resolveRuntimeProcessEntrypointUrl("sharedStateStore");
+          const fixtureBackend = pathToFileURL(
+            await state.writeText(
+              "worker-generation/shared-state.mjs",
+              `export * from ${JSON.stringify(backend.href)};\n`,
+            ),
+          );
+          bind((url) => {
+            if (url.href === backend.href || url.href === fixtureBackend.href) {
+              return fixtureBackend;
+            }
+            const scoped = new URL(url);
+            scoped.searchParams.set("doctor-lint-fixture", state.root);
+            return scoped;
+          });
+          return runDoctorLintCli(createTestRuntime(), {
+            json: true,
+            severityMin: "error",
+            ...options,
+          });
+        },
+        async () => {},
+      );
       return {
         exitCode,
         stdout: String(stdout.mock.calls.at(-1)?.[0]),
