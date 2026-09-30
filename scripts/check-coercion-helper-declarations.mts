@@ -180,7 +180,6 @@ export const CANONICAL_COERCION_HELPER_OWNERS = [
     kind: "function",
     names: [
       "classifyBoundedUnsignedDecimal",
-      "parseCiBooleanFlag",
       "parsePermissiveBooleanToken",
       "parseStrictBooleanArg",
     ],

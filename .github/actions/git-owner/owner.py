@@ -467,7 +467,6 @@ def checkout_harness(sha):
     # The manifest builder runs from the harness and imports these siblings by file-relative paths.
     preflight_scripts = (
         "scripts/ci-build-manifest.mjs",
-        "scripts/lib/arg-utils.runtime.mjs",
         "scripts/lib/release-context.mjs",
         "scripts/lib/release-version.mjs",
     )

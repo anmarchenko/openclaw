@@ -221,25 +221,6 @@ export function classifyBoundedUnsignedDecimal(value, min, max) {
   }
   return { kind: "value", value: parsed };
 }
-/**
- * Parse CI workflow flags without accepting the broader yes/no/on/off argument grammar.
- * Empty tokens disable; missing or unknown tokens retain the caller fallback.
- * @param {string | undefined} value
- * @param {boolean} [fallback]
- */
-export function parseCiBooleanFlag(value, fallback = false) {
-  if (value === undefined) {
-    return fallback;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1") {
-    return true;
-  }
-  if (normalized === "false" || normalized === "0" || normalized === "") {
-    return false;
-  }
-  return fallback;
-}
 const PERMISSIVE_BOOLEAN_TRUE_TOKENS = new Set(["1", "on", "true", "yes"]);
 const PERMISSIVE_BOOLEAN_FALSE_TOKENS = new Set(["0", "false", "no", "off"]);
 /**
