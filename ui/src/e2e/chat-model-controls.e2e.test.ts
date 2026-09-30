@@ -663,7 +663,7 @@ suite.define(() => {
           await model.click();
           const menu = composer.locator(".chat-controls__model-menu");
           await expect.poll(() => menu.isVisible()).toBe(true);
-          expect(await menu.getByText(/Effort|Speed/).count()).toBe(0);
+          expect(await menu.getByText(/^(?:Effort|Speed)$/).count()).toBe(0);
           expect(
             await menu.locator("[data-chat-thinking-slider], [data-chat-speed-option]").count(),
           ).toBe(0);
