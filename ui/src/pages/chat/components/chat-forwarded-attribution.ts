@@ -33,7 +33,10 @@ export function renderForwardedAttribution(
   const sourceIsCronRun = /^cron:[^:]+:run:[^:]+$/u.test(sourceParsed?.rest ?? "");
   const sourceIsSubagent = isSubagentSessionKey(sourceSessionKey);
   const sourceIsOtherAgent =
-    !sourceIsSubagent && sourceParsed && sourceParsed.agentId !== opts.agentId;
+    !sourceIsSubagent &&
+    sourceParsed &&
+    Boolean(opts.agentId) &&
+    sourceParsed.agentId !== opts.agentId;
   // Only agent-prefixed keys are navigable: the titler, hovercard, and click
   // handlers all reject other shapes, so a legacy key must stay plain text
   // instead of becoming a focusable link that goes nowhere.
