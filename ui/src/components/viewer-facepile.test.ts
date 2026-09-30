@@ -192,8 +192,9 @@ it("shares the current self avatar with typed owner faces missing a revision", a
     avatarUrl: "/api/users/profile-ada/avatar?v=7",
     watchedSessions: [],
   } satisfies PresenceViewer;
-  const { gateway, publish } = createApplicationGateway();
-  publish({ ...gateway.snapshot, phase: "connected", selfUser: user });
+  const fixture = createApplicationGateway();
+  const { gateway } = fixture;
+  fixture.publish({ ...gateway.snapshot, phase: "connected", selfUser: user });
   const provider = document.createElement("div");
   void new ContextProvider(provider, {
     context: createContext<Pick<ApplicationContext, "gateway">>(applicationContext),
@@ -225,7 +226,7 @@ it("shares the current self avatar with typed owner faces missing a revision", a
     expect(avatar.querySelector(".viewer-avatar")?.classList.contains("is-fallback")).toBe(false);
   }
 
-  publish({
+  fixture.publish({
     ...gateway.snapshot,
     selfUser: { ...user, avatarUrl: "/api/users/profile-ada/avatar?v=8" },
   });
