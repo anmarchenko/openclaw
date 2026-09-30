@@ -1,9 +1,10 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { sliceUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
-import {
-  ACTIVITY_SUMMARY_FORMAT_REVISION,
-  type SessionActivitySummary,
-} from "../config/sessions/activity-summary.js";
+import type {
+  SessionActivitySummaryBatchInput,
+  SessionActivitySummaryBatchResult,
+} from "../config/sessions/activity-summary-source.types.js";
+import { ACTIVITY_SUMMARY_FORMAT_REVISION } from "../config/sessions/activity-summary.js";
 import {
   readSessionTranscriptActivePathEntryRelation,
   readSessionTranscriptBoundedMessageTailPage,
@@ -26,10 +27,9 @@ import {
 import { resolveOpenClawAgentSqlitePath } from "../state/openclaw-agent-db.paths.js";
 
 /** Runs in the existing transcript worker; only byte-bounded bodies leave it. */
-export function readActivitySummaryBatch(params: {
-  scope: Parameters<typeof readSessionTranscriptBoundedMessageTailPage>[0];
-  previous?: SessionActivitySummary;
-}) {
+export function readActivitySummaryBatch(
+  params: SessionActivitySummaryBatchInput,
+): SessionActivitySummaryBatchResult {
   const snapshot = readSessionTranscriptBoundedMessageTailPage(params.scope, {
     maxBytes: 0,
     maxMessages: 0,
@@ -92,7 +92,7 @@ export function readActivitySummaryBatch(params: {
 }
 
 export async function readActivitySummarySource(
-  params: Parameters<typeof readActivitySummaryBatch>[0] & {
+  params: SessionActivitySummaryBatchInput & {
     assertCurrent: () => void;
   },
 ) {

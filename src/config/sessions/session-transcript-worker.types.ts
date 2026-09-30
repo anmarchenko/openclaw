@@ -4,7 +4,6 @@ import type {
   SessionFileEntry,
   readSessionEntryResetRecallCutoff,
 } from "../../../packages/memory-host-sdk/src/host/session-files.js";
-import type { readActivitySummaryBatch } from "../../gateway/session-activity-summary-source.js";
 import type { PreparedSessionHistoryReadTarget } from "../../gateway/session-history-read.types.js";
 import type {
   SessionRowTranscriptFields,
@@ -19,6 +18,10 @@ import type { SensitiveTextRedactionSnapshot } from "../../logging/redact.js";
 import type { UserTurnTranscriptAdmissionReceipt } from "../../sessions/user-turn-transcript.types.js";
 import type { OpenClawRegisteredAgentDatabase } from "../../state/openclaw-agent-db-contract.js";
 import type { AgentDatabaseExecutionFileIdentity } from "../../state/openclaw-agent-execution-contract.js";
+import type {
+  SessionActivitySummaryBatchInput,
+  SessionActivitySummaryBatchResult,
+} from "./activity-summary-source.types.js";
 import type { SessionLifecycleTimestamps } from "./lifecycle.types.js";
 import type { SessionTranscriptBoundedActiveContext } from "./session-accessor.sqlite-active-context.js";
 import type { TranscriptArchivePresenceRead } from "./session-accessor.sqlite-archive-types.js";
@@ -197,7 +200,7 @@ type SessionTitleFieldsWorkerInput = {
   admission?: UserTurnTranscriptAdmissionReceipt;
 };
 
-type SessionActivitySummarySourceWorkerInput = Parameters<typeof readActivitySummaryBatch>[0] & {
+type SessionActivitySummarySourceWorkerInput = SessionActivitySummaryBatchInput & {
   kind: "session-activity-summary-source";
   database: { agentId: string; path: string };
   admission?: UserTurnTranscriptAdmissionReceipt;
@@ -527,7 +530,7 @@ export type SessionTranscriptWorkerValues = {
   "session-title-fields": { kind: "session-title-fields"; fields: SessionTitleFields };
   "session-activity-summary-source": {
     kind: "session-activity-summary-source";
-    source: ReturnType<typeof readActivitySummaryBatch>;
+    source: SessionActivitySummaryBatchResult;
   };
   "session-row-backfill": { kind: "session-row-backfill"; fields: SessionRowTranscriptFields };
   "session-row-presence": boolean;
@@ -627,7 +630,7 @@ export type SessionHistoryWorkerDatabase = {
   readTitleFields: SessionHistoryReader<SessionTitleFieldsWorkerInput, SessionTitleFields>;
   readActivitySummarySource: SessionHistoryReader<
     SessionActivitySummarySourceWorkerInput,
-    ReturnType<typeof readActivitySummaryBatch>
+    SessionActivitySummaryBatchResult
   >;
   readRowBackfill: (
     params: SessionRowBackfillWorkerInput["params"],
