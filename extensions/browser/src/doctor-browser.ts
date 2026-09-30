@@ -56,7 +56,7 @@ function collectBrowserDoctorProfiles(cfg: OpenClawConfig, resolved: ResolvedBro
       const profile = resolveProfile(resolved, name);
       return profile ? [profile] : [];
     })
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .toSorted((left, right) => left.name.localeCompare(right.name));
   return {
     managed: profiles.filter(isLocalManagedProfile),
     chromeMcp: profiles.filter(

@@ -185,7 +185,12 @@ describe("browser doctor readiness", () => {
     expect(importNote).toContain("System browser profile discovery skipped");
   });
 
-  it.each([
+  it.each<{
+    name: string;
+    browser: NonNullable<Parameters<typeof noteChromeMcpBrowserReadiness>[0]["browser"]>;
+    managed: boolean;
+    chromeMcp: boolean;
+  }>([
     {
       name: "custom default Chrome MCP",
       browser: { defaultProfile: "work", profiles: { work: { driver: "existing-session" } } },
@@ -277,33 +282,30 @@ describe("browser doctor readiness", () => {
       chromeMcp: false,
     },
     { name: "unconfigured built-ins", browser: {}, managed: false, chromeMcp: false },
-  ] as const)(
-    "checks only launch prerequisites for $name",
-    async ({ browser, managed, chromeMcp }) => {
-      const noteFn = vi.fn();
-      const resolveManagedExecutable = vi.fn(() => null);
-      const resolveChromeExecutable = vi.fn(() => null);
-      await noteChromeMcpBrowserReadiness(
-        { browser: { headless: false, ...browser, extensionRelay: { allowLegacyAuth: false } } },
-        {
-          ...managedHost,
-          env: {},
-          getUid: () => 0,
-          noteFn,
-          resolveManagedExecutable,
-          resolveChromeExecutable,
-        },
-      );
+  ])("checks only launch prerequisites for $name", async ({ browser, managed, chromeMcp }) => {
+    const noteFn = vi.fn();
+    const resolveManagedExecutable = vi.fn(() => null);
+    const resolveChromeExecutable = vi.fn(() => null);
+    await noteChromeMcpBrowserReadiness(
+      { browser: { headless: false, ...browser, extensionRelay: { allowLegacyAuth: false } } },
+      {
+        ...managedHost,
+        env: {},
+        getUid: () => 0,
+        noteFn,
+        resolveManagedExecutable,
+        resolveChromeExecutable,
+      },
+    );
 
-      const notes = noteFn.mock.calls.map(([message]) => String(message)).join("\n");
-      expect(resolveManagedExecutable).toHaveBeenCalledTimes(managed ? 1 : 0);
-      expect(resolveChromeExecutable).toHaveBeenCalledTimes(chromeMcp ? 1 : 0);
-      expect(notes.includes("No Chromium-based browser executable was found")).toBe(managed);
-      expect(notes.includes("No DISPLAY or WAYLAND_DISPLAY is set")).toBe(managed);
-      expect(notes.includes("The Gateway is running as root")).toBe(managed);
-      expect(notes.includes("Google Chrome was not found")).toBe(chromeMcp);
-    },
-  );
+    const notes = noteFn.mock.calls.map(([message]) => String(message)).join("\n");
+    expect(resolveManagedExecutable).toHaveBeenCalledTimes(managed ? 1 : 0);
+    expect(resolveChromeExecutable).toHaveBeenCalledTimes(chromeMcp ? 1 : 0);
+    expect(notes.includes("No Chromium-based browser executable was found")).toBe(managed);
+    expect(notes.includes("No DISPLAY or WAYLAND_DISPLAY is set")).toBe(managed);
+    expect(notes.includes("The Gateway is running as root")).toBe(managed);
+    expect(notes.includes("Google Chrome was not found")).toBe(chromeMcp);
+  });
 
   it.each([
     { name: "profile headless override", global: false, profile: true, env: {}, warning: false },
