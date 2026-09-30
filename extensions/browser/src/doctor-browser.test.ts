@@ -193,6 +193,41 @@ describe("browser doctor readiness", () => {
       chromeMcp: true,
     },
     {
+      name: "explicit Chrome MCP endpoint",
+      browser: {
+        profiles: { endpoint: { driver: "existing-session", cdpUrl: "https://browser.example" } },
+      },
+      managed: false,
+      chromeMcp: false,
+    },
+    {
+      name: "Chrome MCP endpoint arguments",
+      browser: {
+        profiles: {
+          endpoint: {
+            driver: "existing-session",
+            mcpArgs: Array.of("--browserUrl", "https://browser.example"),
+          },
+        },
+      },
+      managed: false,
+      chromeMcp: false,
+    },
+    {
+      name: "explicit Chrome MCP auto-connect override",
+      browser: {
+        profiles: {
+          local: {
+            driver: "existing-session",
+            cdpUrl: "https://browser.example",
+            mcpArgs: Array.of("--autoConnect"),
+          },
+        },
+      },
+      managed: false,
+      chromeMcp: true,
+    },
+    {
       name: "explicit managed override of user",
       browser: {
         defaultProfile: "user",

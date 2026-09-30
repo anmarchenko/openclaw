@@ -59,7 +59,9 @@ function collectBrowserDoctorProfiles(cfg: OpenClawConfig, resolved: ResolvedBro
     .sort((left, right) => left.name.localeCompare(right.name));
   return {
     managed: profiles.filter(isLocalManagedProfile),
-    chromeMcp: profiles.filter((profile) => getBrowserProfileCapabilities(profile).usesChromeMcp),
+    chromeMcp: profiles.filter(
+      (profile) => getBrowserProfileCapabilities(profile).usesChromeMcp && !profile.cdpUrl,
+    ),
   };
 }
 
