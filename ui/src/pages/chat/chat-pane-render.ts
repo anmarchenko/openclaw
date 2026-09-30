@@ -40,8 +40,8 @@ import {
 } from "./chat-pane-session-controls.ts";
 import { resolveSidebarLayoutForBoard } from "./chat-pane-sidebar-layout.ts";
 import {
+  chatSubmitState,
   dismissChatError,
-  initialHistorySubmitState,
   resolveChatPaneFollowUpMode,
 } from "./chat-pane-state.ts";
 import { ChatProviderReviewController } from "./chat-provider-review-controller.ts";
@@ -338,7 +338,7 @@ export class ChatPane extends ChatPaneLayoutRender {
     const composerAvailability = {
       canCompose: composerAccess.canCompose && composerAvailable,
       canSend: composerAccess.canSend && composerAvailable,
-      ...initialHistorySubmitState(state, initialHistoryUnavailable),
+      ...chatSubmitState(state, initialHistoryUnavailable, !catalog && !suggestionViewer),
       modelRequiredReason,
       disabledReason:
         catalogDisabledReason ??
@@ -579,7 +579,6 @@ export class ChatPane extends ChatPaneLayoutRender {
       // so an active follow lock stays pinned to the latest message.
       onAssistantAttachmentLoaded: () => scheduleChatScroll(state),
       getDraft: () => state.chatMessage,
-      onDraftChange: state.handleChatDraftChange,
       onRequestUpdate: state.requestUpdate,
       onHistoryKeydown: state.handleChatInputHistoryKey,
       onSlashIntent: () => refreshChatCommands(state),
