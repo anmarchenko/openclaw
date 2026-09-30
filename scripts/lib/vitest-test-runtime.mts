@@ -1,5 +1,4 @@
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { resolveTestBunSourceArgs } from "../../src/test-utils/bun-process.ts";
 import { resolveRepoRoot } from "./repo-root.mjs";
 import { resolveVitestNodeArgs } from "./vitest-process-env.mts";
@@ -40,7 +39,7 @@ export function resolveVitestTestCommand(
         ...env,
         NODE_OPTIONS: [
           env.NODE_OPTIONS,
-          `--import=${JSON.stringify(pathToFileURL(path.join(tracerHome, "register.js")).href)}`,
+          `--import=${JSON.stringify(new URL("./datadog-test-register.mjs", import.meta.url).href)}`,
           `--require=${JSON.stringify(path.join(tracerHome, "ci/init.js"))}`,
         ]
           .filter(Boolean)

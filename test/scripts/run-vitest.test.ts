@@ -163,8 +163,7 @@ describe("scripts/run-vitest", () => {
     expect(command.env).toMatchObject({
       DD_SERVICE: service,
       DD_CIVISIBILITY_ITR_ENABLED: tia,
-      NODE_OPTIONS:
-        '--max-old-space-size=8192 --import="file:///ci%20tools/dd-trace/register.js" --require="/ci tools/dd-trace/ci/init.js"',
+      NODE_OPTIONS: `--max-old-space-size=8192 --import=${JSON.stringify(new URL("../../scripts/lib/datadog-test-register.mjs", import.meta.url).href)} --require="/ci tools/dd-trace/ci/init.js"`,
     });
     expect(env).not.toHaveProperty("DD_SERVICE");
   });
