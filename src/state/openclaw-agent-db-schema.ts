@@ -107,9 +107,7 @@ import {
 const agentDbLog = createSubsystemLogger("state/agent-db");
 
 function dropLegacyMemoryIndexSchema(db: DatabaseSync): void {
-  const columns = db.prepare("PRAGMA table_info(memory_index_sources)").all() as Array<{
-    name?: unknown;
-  }>;
+  const columns = db.prepare("PRAGMA table_info(memory_index_sources)").all();
   const hasLegacySourceColumns = columns.some((row) => row.name === "source_kind");
   if (!hasLegacySourceColumns) {
     return;
