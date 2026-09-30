@@ -143,6 +143,73 @@ describe("scripts/run-vitest", () => {
     },
   );
 
+  it.each([
+    { config: "test/vitest/vitest.tooling.config.ts", service: "openclaw-tests", tia: "true" },
+    { config: "test/vitest/vitest.e2e.config.ts", service: "openclaw-e2e", tia: "false" },
+    { config: "test/vitest/vitest.ui-e2e.config.ts", service: "openclaw-e2e", tia: "false" },
+    {
+      config: "test/vitest/vitest.ui-e2e-prebuilt.config.ts",
+      service: "openclaw-e2e",
+      tia: "false",
+    },
+  ])("instruments $config without changing test operands", ({ config, service, tia }) => {
+    const args = ["node_modules/vitest/vitest.mjs", "run", "--config", config, "--maxWorkers=2"];
+    const env = {
+      OPENCLAW_DD_TRACE_HOME: "/ci tools/dd-trace",
+      NODE_OPTIONS: "--max-old-space-size=8192",
+    };
+    const command = resolveVitestTestCommand(args, env);
+    expect(command.args).toEqual(args);
+    expect(command.env).toMatchObject({
+      DD_SERVICE: service,
+      DD_CIVISIBILITY_ITR_ENABLED: tia,
+      NODE_OPTIONS:
+        '--max-old-space-size=8192 --import="file:///ci%20tools/dd-trace/register.js" --require="/ci tools/dd-trace/ci/init.js"',
+    });
+    expect(env).not.toHaveProperty("DD_SERVICE");
+  });
+
+  it.each([
+    { tests: "true", e2e: "false" },
+    { tests: "false", e2e: "true" },
+    { tests: "false", e2e: "false" },
+    { tests: "true", e2e: "true" },
+  ])("controls normal and E2E TIA independently ($tests/$e2e)", ({ tests, e2e }) => {
+    const args = ["node_modules/vitest/vitest.mjs", "run"];
+    const env = {
+      OPENCLAW_DD_TRACE_HOME: "/tracer",
+      OPENCLAW_DD_TIA_TESTS: tests,
+      OPENCLAW_DD_TIA_E2E: e2e,
+    };
+    expect(resolveVitestTestCommand(args, env).env).toMatchObject({
+      DD_SERVICE: "openclaw-tests",
+      DD_CIVISIBILITY_ITR_ENABLED: tests,
+    });
+    expect(
+      resolveVitestTestCommand(args, { ...env, OPENCLAW_DD_TEST_KIND: "e2e" }).env,
+    ).toMatchObject({
+      DD_SERVICE: "openclaw-e2e",
+      DD_CIVISIBILITY_ITR_ENABLED: e2e,
+    });
+  });
+
+  it("keeps preparation and Bun uninstrumented even when Datadog is configured", () => {
+    const env = { OPENCLAW_DD_TRACE_HOME: "/tracer" };
+    expect(resolveVitestTestCommand(["scripts/prepare.mts"], env).env).toBeUndefined();
+    expect(
+      resolveVitestTestCommand(["node_modules/vitest/vitest.mjs", "run"], {
+        ...env,
+        OPENCLAW_VITEST_RUNTIME: "bun",
+      }).env,
+    ).toBeUndefined();
+    expect(() =>
+      resolveVitestTestCommand(["node_modules/vitest/vitest.mjs", "run"], {
+        ...env,
+        OPENCLAW_DD_TIA_TESTS: "invalid",
+      }),
+    ).toThrow("Datadog TIA switches must be true or false");
+  });
+
   it("rejects an unsupported test runtime before launching a child", () => {
     expect(() =>
       spawnWatchedVitestProcess({

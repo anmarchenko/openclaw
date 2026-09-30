@@ -1701,6 +1701,15 @@ jobs:
           # Use the physical runner to keep hosted retries store-only.
           dependency-cache: &trusted_dependency_cache ${{ (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) != 'github' && runner.environment == 'self-hosted' && (github.event_name != 'workflow_dispatch' || ((needs.preflight.outputs.node_runner_backend == 'runson' || needs.preflight.outputs.ci_qualification == 'true') && github.run_attempt == 1)) && github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'true' || 'false' }}
 
+      - &datadog_test_setup
+        name: Setup Datadog Test Optimization
+        uses: ./.github/actions/setup-datadog-tests
+        with:
+          api-key: ${{ secrets.DD_API_KEY }}
+          site: ${{ vars.DD_SITE }}
+          tia-tests: ${{ vars.OPENCLAW_DD_TIA_TESTS || 'true' }}
+          tia-e2e: ${{ vars.OPENCLAW_DD_TIA_E2E || 'false' }}
+
       - name: Restore dist build cache
         id: dist_build_cache
         if: needs.preflight.outputs.cache_mode != 'off'
@@ -2166,6 +2175,8 @@ jobs:
           dependency-cache: *trusted_dependency_cache
           restore-test-caches: &restore_test_caches ${{ (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && 'true' || 'false' }}
 
+      - *datadog_test_setup
+
       - name: Setup pinned Bun test runtime
         if: needs.preflight.outputs.ui_test_runtime_policy == 'bun-compatible' || needs.preflight.outputs.ui_test_runtime_policy == 'dual'
         uses: ./.ci-harness/.github/actions/setup-test-bun
@@ -2242,6 +2253,7 @@ jobs:
     # Runtime-budget Chromium projects stay serial.
     timeout-minutes: 25
     env:
+      OPENCLAW_DD_TEST_KIND: e2e
       OPENCLAW_UI_E2E_SKIP_REAL_GATEWAY: "1"
     strategy:
       fail-fast: false
@@ -2257,6 +2269,8 @@ jobs:
           install-bun: "false"
           dependency-cache: &trusted_first_attempt_dependency_cache ${{ ((needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' || runner.environment != 'self-hosted' || (github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'false' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'true' || 'false') }}
           restore-test-caches: *restore_test_caches
+
+      - *datadog_test_setup
 
       - *cache_playwright_chromium
       - *install_playwright_chromium
@@ -2340,6 +2354,8 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix: ${{ fromJson(needs.preflight.outputs.ui_real_gateway_matrix) }}
+    env:
+      OPENCLAW_DD_TEST_KIND: e2e
     steps:
       - *linux_node_checkout_step
       - name: Setup Node environment
@@ -2349,6 +2365,8 @@ jobs:
           node-version: "24.x"
           install-bun: "false"
           dependency-cache: *trusted_first_attempt_dependency_cache
+
+      - *datadog_test_setup
 
       - *cache_playwright_chromium
       - *install_playwright_chromium
@@ -2706,6 +2724,8 @@ jobs:
           dependency-cache: *trusted_dependency_cache
           restore-test-caches: ${{ (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && (matrix.task == 'bundled-protocol' || matrix.task == 'contracts-plugins-ci-routing' || matrix.task == 'ci-routing' || matrix.task == 'bun-launcher') && 'true' || 'false' }}
 
+      - *datadog_test_setup
+
       - name: Run ${{ matrix.task }} (${{ matrix.runtime }})
         env:
           OPENCLAW_TEST_PROJECTS_PARALLEL: 3
@@ -2844,6 +2864,8 @@ jobs:
       fail-fast: false
       max-parallel: ${{ (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && 6 || 4 }}
       matrix: ${{ fromJson(needs.preflight.outputs.qa_smoke_ci_matrix) }}
+    env:
+      OPENCLAW_DD_TEST_KIND: e2e
     steps:
       - *linux_node_checkout_step
       - name: Setup Node environment
@@ -2853,6 +2875,8 @@ jobs:
           install-bun: "false"
           dependency-cache: *trusted_dependency_cache
           node-compile-cache: "true"
+
+      - *datadog_test_setup
 
       - name: Build QA smoke runtime
         env:
@@ -3034,6 +3058,8 @@ jobs:
           dependency-cache: *trusted_dependency_cache
           restore-test-caches: *restore_test_caches
 
+      - *datadog_test_setup
+
       - name: Run plugin contract shard
         env:
           OPENCLAW_CONTRACT_INCLUDE_PATTERNS_JSON: ${{ toJson(matrix) }}
@@ -3088,6 +3114,7 @@ jobs:
     steps:
       - *linux_node_checkout_step
       - *contract_node_setup_step
+      - *datadog_test_setup
 
       - name: Run channel contract shard
         env:
@@ -3114,6 +3141,8 @@ jobs:
           node-version: "24.16.0"
           install-bun: "false"
           build-all-cache-scope: full
+
+      - *datadog_test_setup
 
       - name: Configure Node test resources
         run: echo "OPENCLAW_VITEST_MAX_WORKERS=2" >> "$GITHUB_ENV"
@@ -3180,6 +3209,8 @@ jobs:
           vitest-fs-cache: "true"
           vitest-worker-cache: ${{ needs.preflight.outputs.frozen_target != 'true' && matrix.pretest_build_mode == null && (matrix.node_version == null || matrix.node_version == '24.x') && 'true' || 'false' }}
           node-compile-cache: "true"
+
+      - *datadog_test_setup
 
       - name: Apply frozen Node test compatibility
         if: needs.preflight.outputs.checkout_revision == 'f773aa06a1a93b36b050f1a3f4b57d3d91311541'
