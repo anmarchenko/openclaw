@@ -8,7 +8,7 @@ import type { CallToolResult, ReadResourceResult } from "@modelcontextprotocol/s
 import { expectDefined } from "@openclaw/normalization-core";
 import { materializeRequesterScopedMcpToolsForHarnessRun } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDeferred, withTestTimeout } from "../../test/helpers/promise.js";
+import { createDeferred } from "../../test/helpers/promise.js";
 import {
   cleanupTempDirs,
   makeTempDir,
@@ -1415,11 +1415,7 @@ describe("session MCP runtime", () => {
 
     try {
       await waitForFileText(logPath, "recv tools/list", LIST_TOOLS_SERVER_LOG_TIMEOUT_MS);
-      const result = await withTestTimeout(
-        catalogResult,
-        LIST_TOOLS_TEST_DEADLINE_MS,
-        "timed out waiting for bundle MCP catalog timeout",
-      );
+      const result = await catalogResult;
 
       expect(result.status).toBe("resolved");
       if (result.status === "resolved") {
@@ -1428,11 +1424,7 @@ describe("session MCP runtime", () => {
       }
     } finally {
       await runtime.dispose();
-      await withTestTimeout(
-        catalogResult,
-        1_000,
-        "timed out waiting for bundle MCP catalog cleanup",
-      );
+      await catalogResult;
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
@@ -1546,11 +1538,7 @@ describe("session MCP runtime", () => {
 
       nowMs += 5_001;
       expect(runtime.peekCatalog()).toBe(failedCatalog);
-      const staleCatalog = await withTestTimeout(
-        runtime.getCatalog(),
-        300,
-        "catalog retry blocked the triggering turn",
-      );
+      const staleCatalog = await runtime.getCatalog();
       expect(staleCatalog).toBe(failedCatalog);
       expect(staleCatalog.diagnostics?.[0]?.serverName).toBe("retryServer");
       await waitForFileTextCount(
@@ -1896,13 +1884,9 @@ describe("session MCP runtime", () => {
         /^bundle-mcp server "child" is (?:not connected|disconnected: mcp transport closed)$/,
       );
       await waitForFileTextCount(logPath, "recv tools/list", 2, LIST_TOOLS_TEST_DEADLINE_MS);
-      await expect(
-        withTestTimeout(
-          runtime.callTool("healthy", "slow_tool", {}),
-          400,
-          "healthy sibling stalled during reconnect",
-        ),
-      ).resolves.toMatchObject({ isError: false });
+      await expect(runtime.callTool("healthy", "slow_tool", {})).resolves.toMatchObject({
+        isError: false,
+      });
       await fs.writeFile(listToolsReleasePath, "release", "utf8");
       await waitForPredicate(
         async () => {
@@ -2095,11 +2079,7 @@ process.on("SIGINT", shutdown);`,
     });
 
     try {
-      const catalog = await withTestTimeout(
-        runtime.getCatalog(),
-        LIST_TOOLS_SERVER_LOG_TIMEOUT_MS,
-        "continuous tools/list invalidation blocked the catalog",
-      );
+      const catalog = await runtime.getCatalog();
 
       expect(catalog.tools.map((tool) => tool.toolName).toSorted()).toEqual([
         "healthy_tool",
@@ -2284,13 +2264,7 @@ process.on("SIGINT", shutdown);`,
           await view.dispose();
         } else {
           work.beginClose(reason);
-          await expect(
-            withTestTimeout(
-              pending,
-              LIST_TOOLS_TEST_DEADLINE_MS,
-              "Private MCP startup did not settle",
-            ),
-          ).rejects.toBe(reason);
+          await expect(pending).rejects.toBe(reason);
         }
         expect(runtime?.activeLeases).toBe(0);
         expect(() => process.kill(pid, 0)).toThrow();

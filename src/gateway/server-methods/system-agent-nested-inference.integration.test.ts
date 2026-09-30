@@ -5,7 +5,7 @@
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { createDeferred, withTestTimeout } from "../../../test/helpers/promise.js";
+import { awaitGateBeforeSettlement, createDeferred } from "../../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { runEmbeddedAgent } from "../../agents/embedded-agent-runner/run-orchestrator.js";
 import type { RunEmbeddedAgentParams } from "../../agents/embedded-agent-runner/run/params.js";
@@ -260,9 +260,9 @@ describe("system-agent nested inference through real Gateway admission", () => {
         throw new Error("gateway handler did not start");
       }
       try {
-        const observation = await withTestTimeout(
+        const observation = await awaitGateBeforeSettlement(
           conversation.observed.promise,
-          2_000,
+          handler,
           "fixture did not reach the real runner admission boundary",
         );
         await new Promise<void>((resolve) => {

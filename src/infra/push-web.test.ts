@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import webPush from "web-push";
-import { createDeferred, withTestTimeout } from "../../test/helpers/promise.js";
+import { awaitGateBeforeSettlement, createDeferred } from "../../test/helpers/promise.js";
 import { trackSqliteStatementExecutions } from "../../test/helpers/sqlite-statement-execution-counter.js";
 import {
   insertOperatorApproval,
@@ -150,15 +150,10 @@ function startExpiredWebPushBroadcast(payload: Parameters<typeof broadcastWebPus
     return broadcast;
   };
   return {
-    started: withTestTimeout(
-      Promise.race([
-        started.promise,
-        broadcast.then(() => {
-          throw new Error("Web Push broadcast completed before send started");
-        }),
-      ]),
-      1_000,
-      "Web Push send did not start",
+    started: awaitGateBeforeSettlement(
+      started.promise,
+      broadcast,
+      "Web Push broadcast completed before send started",
     ),
     finish,
     // Join the send before afterEach removes the real SQLite fixture, even when a case fails.

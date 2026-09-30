@@ -2,7 +2,7 @@ import { symlinkSync } from "node:fs";
 import { copyFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { withTestTimeout } from "../../test/helpers/promise.js";
+import { awaitGateBeforeSettlement } from "../../test/helpers/promise.js";
 import { observeHostDataSql } from "../../test/helpers/sqlite-statement-execution-counter.js";
 import { setRuntimeConfigSnapshot } from "../config/config.js";
 import { formatSqliteSessionFileMarker } from "../config/sessions/legacy-sqlite-marker.js";
@@ -129,7 +129,7 @@ it("admits a committed update without host SQL while a marker awaits prepared me
     const tasks = [marker];
     const settled = Promise.allSettled(tasks);
     try {
-      await withTestTimeout(entered.promise, 2_000, "Marker membership did not prepare");
+      await awaitGateBeforeSettlement(entered.promise, marker, "Marker membership did not prepare");
       expect(projection.needsMembershipPreparation()).toBe(false);
       sessionChanges.emit({ all: true, scope: "catalog" });
       expect(projection.dirtyRowCount).toBeGreaterThan(0);
@@ -273,7 +273,11 @@ it.each(
             });
       const settled = Promise.allSettled([pending]);
       try {
-        await withTestTimeout(entered.promise, 2_000, "Event did not await original topology");
+        await awaitGateBeforeSettlement(
+          entered.promise,
+          pending,
+          "Event did not await original topology",
+        );
         if (change === "replace" || change === "same-id-reset") {
           const next = {
             ...entry,
@@ -387,7 +391,11 @@ it.each(["config", "identity scopes", "dispose", "source"] as const)(
       const pending = projection.prepareMembership();
       const settled = Promise.allSettled([pending]);
       try {
-        await withTestTimeout(entered.promise, 2_000, "Topology snapshot did not reach its owner");
+        await awaitGateBeforeSettlement(
+          entered.promise,
+          pending,
+          "Topology snapshot did not reach its owner",
+        );
         expect(projection.capture(query)).toBe(captured);
         if (change === "config") {
           cfg = { agents: { entries: { main: { identity: { name: "Replacement" } } } } };
@@ -495,7 +503,11 @@ it.each(["chat.startup", "sessions.resolve"] as const)(
       );
       const settled = Promise.allSettled([pending]);
       try {
-        await withTestTimeout(entered.promise, 2_000, "Request did not await topology readiness");
+        await awaitGateBeforeSettlement(
+          entered.promise,
+          pending,
+          "Request did not await topology readiness",
+        );
         active = false;
         release.resolve();
         expect(await settled).toEqual([{ status: "rejected", reason: revoked }]);
@@ -541,7 +553,11 @@ it("starts a new topology read after healthy integrity confirmation without revi
     const pending = projection.prepareMembership();
     const settled = Promise.allSettled([pending]);
     try {
-      await withTestTimeout(entered.promise, 2_000, "Topology snapshot did not reach its owner");
+      await awaitGateBeforeSettlement(
+        entered.promise,
+        pending,
+        "Topology snapshot did not reach its owner",
+      );
       await applyOpenClawDatabaseVerificationResults({
         env: state.env,
         targets: [{ kind: "state", label: "OpenClaw state database", path: database.path }],

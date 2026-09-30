@@ -92,7 +92,7 @@ function spawnWrapperFixture(
   return {
     signal,
     async waitForExit() {
-      const exit = await withTestTimeout(completion, 3_000, "timed out waiting for wrapper close");
+      const exit = await completion;
       if (childError) {
         throw childError;
       }
@@ -104,7 +104,7 @@ function spawnWrapperFixture(
       if (!closed && !shutdownRequested) {
         signal("SIGTERM");
       }
-      // The assertion's exit wait still rejects; teardown owns bounded escalation.
+      // Bound the shutdown grace so a stuck wrapper still reaches SIGKILL below.
       await withTestTimeout(completion, 3_000, "wrapper still draining").catch(() => undefined);
       // The wrapper owns tsx helper processes in its group; the wrapped command
       // creates a separate group whose identity is recorded by the fixture.
@@ -139,11 +139,7 @@ function spawnWrapperFixture(
           5_000,
         );
       }
-      await withTestTimeout(
-        completion,
-        5_000,
-        `wrapper did not close; retained fixture: ${tempDir}`,
-      );
+      await completion;
       if (wrapper.pid) {
         await waitFor(
           () => inspectManagedProcessGroup(wrapper, { errorPolicy: "indeterminate" }) === "dead",

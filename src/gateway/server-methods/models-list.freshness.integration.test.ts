@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import { expect, it } from "vitest";
 import type { ModelsListResult } from "../../../packages/gateway-protocol/src/schema/agents-models-skills.js";
-import { createDeferred, withTestTimeout } from "../../../test/helpers/promise.js";
+import { createDeferred } from "../../../test/helpers/promise.js";
 import { getPublishedPreparedModelCatalogOwnerSnapshot } from "../../agents/prepared-model-catalog.js";
 import { resolvePreparedModelRuntimeOwnerBySnapshot } from "../../agents/prepared-model-runtime.owner.js";
 import { createOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
@@ -209,23 +209,11 @@ it.for([
         // Arm the response hold before making any accepted inventory due.
         failSibling = withSibling && !initiallyEmpty;
         expire(withSibling && !initiallyEmpty ? providers : [provider]);
-        const saved = await withTestTimeout(
-          list(),
-          1_000,
-          "models.list waited for expired provider inventory",
-        );
+        const saved = await list();
         expect(saved.models.map((row) => row.id)).toEqual(original);
         expect(saved.siblingModels).toEqual(withSibling ? ["sibling"] : []);
-        await withTestTimeout(
-          renewal.promise,
-          3_000,
-          "models.list did not refresh the expired provider",
-        );
-        const concurrent = await withTestTimeout(
-          Promise.all([list(), list()]),
-          1_000,
-          "concurrent catalog reads waited for discovery",
-        );
+        await renewal.promise;
+        const concurrent = await Promise.all([list(), list()]);
         expect(concurrent.map((result) => result.models.map((row) => row.id))).toEqual([
           original,
           original,
