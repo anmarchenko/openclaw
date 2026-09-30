@@ -3,8 +3,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { stripLeadingPackageManagerSeparator } from "./lib/arg-utils.runtime.mjs";
 
 const { values, positionals } = parseArgs({
+  args: stripLeadingPackageManagerSeparator(process.argv.slice(2)),
   allowPositionals: true,
   options: {
     version: { type: "string" },

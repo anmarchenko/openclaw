@@ -17,6 +17,7 @@ function render(
   records: unknown[],
   reason = "Parent failed after staging",
   releaseVersion = version,
+  separator: string[] = [],
 ) {
   const directory = directories.make("clawhub-recovery-");
   const paths = records.map((record, index) => {
@@ -28,6 +29,7 @@ function render(
     process.execPath,
     [
       "scripts/plugin-clawhub-recovery.mjs",
+      ...separator,
       "--version",
       releaseVersion,
       "--reason",
@@ -42,6 +44,12 @@ function render(
 }
 
 describe("ClawHub staged publication recovery commands", () => {
+  it("accepts the pnpm argument separator from pnpm release:clawhub-recovery --", () => {
+    const result = render([pending], "Recovery", version, ["--"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("package recover 'attempt-1'");
+  });
+
   it("rejects a version that could escape the generated comment", () => {
     const releaseVersion = "2026.9.7\necho injected";
     const result = render([{ ...pending, version: releaseVersion }], "Recovery", releaseVersion);

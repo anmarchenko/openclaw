@@ -647,7 +647,7 @@ for publication ordering and prepared/direct recovery.
   awaited parent fail, preventing finalization of the staged siblings.
   Reconcile the original child's `*-publish-json` artifacts before any
   republish or parent resume. Use
-  `node scripts/plugin-clawhub-recovery.mjs --version <version> --reason '<parent failure>' --clawhub-source <isolated pinned ClawHub checkout> <package-publish.json>...`
+  `pnpm release:clawhub-recovery -- --version <version> --reason '<parent failure>' --clawhub-source <isolated pinned ClawHub checkout> <package-publish.json>...`
   to print exact attempt recovery commands; see the publication recovery guide
   for the pinned source CLI and authorized execution. Public version 404s do
   not distinguish staged from missing, and attempt status needs publisher

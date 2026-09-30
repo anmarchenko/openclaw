@@ -139,7 +139,7 @@ and attempt), then render recovery commands for that release version:
 ```bash
 gh run download <original-clawhub-child-run> --repo openclaw/openclaw \
   --pattern '*-publish-json' --dir /path/to/child-publish-json
-node scripts/plugin-clawhub-recovery.mjs --version <published-version> \
+pnpm release:clawhub-recovery -- --version <published-version> \
   --reason 'Recover staged packages after parent <run>/<attempt> failed' \
   --clawhub-source /path/to/isolated-pinned-clawhub \
   /path/to/child-publish-json/*/package-publish.json
