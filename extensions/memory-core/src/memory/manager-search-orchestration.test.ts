@@ -9,8 +9,8 @@ import { openOpenClawAgentDatabase } from "openclaw/plugin-sdk/sqlite-runtime-te
 import { describe, expect, it, vi } from "vitest";
 import { recordMemoryEntryOrigins } from "../memory-entry-origins.js";
 import { forgetMemoryEntries } from "../memory-forget.js";
-import type { EmbeddingProvider } from "./embeddings.js";
 import { memoryCpuProcessEntrypoints } from "./cpu-process-entrypoints.js";
+import type { EmbeddingProvider } from "./embeddings.js";
 import * as memoryCpuWorkerRuntime from "./manager-cpu-worker-runtime.js";
 import { MemoryIndexRevisionConflictError } from "./manager-db-kernel.js";
 import { createManagerIndexFixture } from "./manager-index.test-support.js";
