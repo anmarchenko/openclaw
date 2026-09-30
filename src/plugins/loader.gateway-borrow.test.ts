@@ -168,3 +168,34 @@ it("stops borrowed callbacks when the lending Gateway retires the instance", asy
   await disposePluginRegistryInstances(gateway);
   await expect(bound.execute("after", {})).rejects.toThrow(/no longer active/);
 });
+
+it.each([true, false])("never adopts a predecessor's loan (lender supplied: %s)", async (lend) => {
+  const { gateway, gatewayRecord, gatewayInstance, borrowOptions } = setupLender();
+  const first = loadOpenClawPlugins({ ...borrowOptions, onlyPluginIds: [lenderId] });
+  registries.push(first);
+  const releaseFirst = retainPreparedPluginRegistry(first);
+  const next = loadOpenClawPlugins({
+    ...borrowOptions,
+    onlyPluginIds: [lenderId],
+    previousRegistry: first,
+    borrowRegistry: lend ? gateway : undefined,
+  });
+  registries.push(next);
+  const releaseNext = retainPreparedPluginRegistry(next);
+  try {
+    expect.soft(next.plugins[0] === gatewayRecord).toBe(lend);
+    expect.soft(gatewayInstance.owner?.registry).toBe(gateway);
+    await releaseFirst?.();
+    await expect(bindProbe(next, lenderId).execute("successor", {})).resolves.toMatchObject({
+      content: [{ type: "text", text: lend ? "1" : "2" }],
+    });
+    await releaseNext?.();
+    expect.soft(gatewayInstance.acceptingCalls).toBe(true);
+    await expect(bindProbe(gateway, lenderId).execute("gateway", {})).resolves.toMatchObject(
+      firstGeneration,
+    );
+  } finally {
+    await releaseFirst?.();
+    await releaseNext?.();
+  }
+});

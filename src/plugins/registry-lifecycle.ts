@@ -234,6 +234,11 @@ export function markPluginRecordBorrowed(registry: PluginRegistry, record: Plugi
   records.add(record);
 }
 
+/** Projection reads the loader's borrowing fact without inferring custody from record identity. */
+export function isPluginRecordBorrowed(registry: PluginRegistry, record: PluginRecord): boolean {
+  return borrowedRecords.get(getPluginRegistryResourceOwner(registry))?.has(record) === true;
+}
+
 /** Transfer exact instances at publication without reviving a removed or failed instance. */
 export function adoptPluginRegistryRecords(registryView: PluginRegistry | null | undefined): void {
   const registry = registryView && getPluginRegistryResourceOwner(registryView);

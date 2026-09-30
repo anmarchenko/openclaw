@@ -4,13 +4,13 @@ import {
   createRuntimePluginManifestLookup,
 } from "../plugins/active-runtime-registry.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
+import { getPluginRegistryGatewayOwner } from "../plugins/registry-lifecycle.js";
 import type { PluginRegistry } from "../plugins/registry-types.js";
+import { getPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
 import {
-  getActivePluginRegistry,
-  getActivePluginRegistryWorkspaceDir,
-  getActivePluginRuntimeSubagentMode,
-} from "../plugins/runtime.js";
-import { getReusablePluginRuntimeActivation } from "../plugins/runtime/load-context.js";
+  getPluginRuntimeLoadContext,
+  getReusablePluginRuntimeActivation,
+} from "../plugins/runtime/load-context.js";
 import type { RuntimePluginLoadPurpose } from "./harness/runtime-plugin-load-plan.js";
 import { prepareOwnedPluginLoadContext } from "./prepared-model-runtime.plugin-context.js";
 import type { PreparedModelRuntimeBuildResources } from "./prepared-model-runtime.resources.js";
@@ -64,13 +64,16 @@ function resolveLendingGatewayRegistry(
   input: PreparedInboundRegistryInput,
   metadataSnapshot: PluginMetadataSnapshot,
 ): PluginRegistry | undefined {
-  const activeRegistry = getActivePluginRegistry();
-  return input.allowGatewaySubagentBinding === true &&
-    input.env === undefined &&
-    getActivePluginRuntimeSubagentMode() === "gateway-bindable" &&
-    activeRegistry &&
-    getActivePluginRegistryWorkspaceDir() === metadataSnapshot.workspaceDir
-    ? activeRegistry
+  if (input.allowGatewaySubagentBinding !== true || input.env !== undefined) {
+    return undefined;
+  }
+  // Startup and admitted turns carry their Gateway registry through the same scope.
+  // A process-active sibling with matching files is not this caller's runtime owner.
+  const requestRegistry = getPluginRuntimeGatewayRequestScope()?.pluginRegistry;
+  const registry = requestRegistry && getPluginRegistryGatewayOwner(requestRegistry)?.current();
+  return registry &&
+    getPluginRuntimeLoadContext(registry)?.workspaceDir === metadataSnapshot.workspaceDir
+    ? registry
     : undefined;
 }
 

@@ -185,12 +185,16 @@ Preparing another instance does not overwrite that instance's runtime. Calls
 outside managed instance scope retain the store's existing standalone behavior.
 Gateway-hosted agent turns use the admitting Gateway's own instance for each
 unchanged plugin: same source, install, manifest, activation, entry policy, and
-configuration, in the Gateway's workspace and environment. Those turns run the
-Gateway's `registrationMode: "full"` registrations and share that instance's
+configuration, in the Gateway's workspace and environment. The lender comes from
+the admitting Gateway owner, never another Gateway that happens to be process-active.
+Without an unambiguous live owner, preparation loads separate instances. Borrowing
+turns run the Gateway's `registrationMode: "full"` registrations and share its
 services and runtime store; only plugins the Gateway lacks or configures
 differently load a separate discovery instance. After `openclaw plugins reload`,
 later turns use the reloaded Gateway instance, and the reload waits for turns that
-still hold the previous one.
+still hold the previous one. Borrowed channel methods and read-authority grants
+expire with the borrowing runtime or invocation scope; retiring the borrower does
+not retire the Gateway's instance.
 
 Turns that load a plugin separately borrow its tool registrations from the
 admitting Gateway's current registry, so factories and execution share the

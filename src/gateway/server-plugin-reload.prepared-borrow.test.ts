@@ -31,6 +31,7 @@ import {
 } from "../plugins/runtime.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import { resetGatewayWorkAdmission } from "../process/gateway-work-admission.js";
+import { createDeferredCore } from "../shared/deferred.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import * as bootstrap from "./server-plugin-bootstrap.js";
@@ -82,11 +83,22 @@ it.each(["plugins.reload", "auth refresh"] as const)(
   "borrows unchanged Gateway instances into prepared turns across %s",
   async (change) => {
     await withOpenClawTestState({ label: "prepared-gateway-borrow" }, async (state) => {
+      const queued = createDeferredCore();
+      const disposed = createDeferredCore();
+      const disposalEvent = `prepared-borrow-disposed:${state.workspaceDir}`;
+      const onDisposed = (generation: number) => {
+        if (generation === 1) {
+          disposed.resolve();
+        }
+      };
+      process.on(disposalEvent, onDisposed);
+      using _ = { [Symbol.dispose]: () => process.off(disposalEvent, onDisposed) };
       const toolFile = writeFixturePlugin(
         state.path("plugins"),
         toolPluginId,
         { contracts: { tools: [toolName] } },
-        `api.registerTool({ name: ${JSON.stringify(toolName)}, description: "Report the module generation",
+        `api.lifecycle.onDispose(() => process.emit(${JSON.stringify(disposalEvent)}, generation));
+        api.registerTool({ name: ${JSON.stringify(toolName)}, description: "Report the module generation",
         parameters: { type: "object", properties: {} },
         async execute() { return { content: [{ type: "text", text: "generation " + generation }] }; } });`,
       );
@@ -134,7 +146,16 @@ it.each(["plugins.reload", "auth refresh"] as const)(
       };
       await state.writeConfig(config);
       setRuntimeConfigSnapshot(config);
-      const logs = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      const logs = {
+        info: vi.fn((message: string) => {
+          if (message.includes("Plugin replacement queued behind")) {
+            queued.resolve();
+          }
+        }),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       const log = { ...createSubsystemLogger("gateway/plugins"), ...logs };
       const metadataSnapshot = await resolveConfigWidePluginMetadataSnapshotAsync({ config, env });
       const initial = bootstrap.prepareGatewayPluginLoad({
@@ -327,11 +348,12 @@ it.each(["plugins.reload", "auth refresh"] as const)(
             },
           },
         );
-        await vi.waitFor(() =>
-          expect(logs.info).toHaveBeenCalledWith(
-            expect.stringContaining("Plugin replacement queued behind"),
-          ),
-        );
+        await Promise.race([
+          queued.promise,
+          reload.then(() => {
+            throw new Error("Expected plugin replacement to queue behind the admitted turn");
+          }),
+        ]);
         expect(oldInstance.acceptingCalls).toBe(true);
         await expect(executeProbe(lease)).resolves.toMatchObject({
           content: [{ type: "text", text: "generation 1" }],
@@ -340,7 +362,8 @@ it.each(["plugins.reload", "auth refresh"] as const)(
         lease = undefined;
         await reload;
         expect(logs.info).toHaveBeenCalledWith(`Plugin replacement applied: ${toolPluginId}`);
-        await vi.waitFor(() => expect(oldInstance.disposing).toBe(true));
+        await disposed.promise;
+        expect(oldInstance.disposing).toBe(true);
         expect(oldInstance.acceptingCalls).toBe(false);
 
         // The refreshed prepared runtime borrows the reloaded Gateway instance.

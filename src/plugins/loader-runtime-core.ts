@@ -36,6 +36,7 @@ import { createEmptyPluginRegistry } from "./registry-empty.js";
 import type { PluginRegistryInspectionResources } from "./registry-inspection-resources.js";
 import {
   isPluginRecordActive,
+  isPluginRecordBorrowed,
   isPluginRegistryActivated,
   markPluginRecordBorrowed,
   withPluginRegistryPreparationScope,
@@ -85,6 +86,9 @@ function resolvePluginRecordRetention(
     previousRegistry &&
     previous &&
     previousInput &&
+    // A predecessor can transfer only its own instances, not another owner's loans.
+    // Reborrow from the supplied lender so callbacks never retain the old borrower.
+    !isPluginRecordBorrowed(previousRegistry, previous) &&
     params.signature !== undefined &&
     !params.replaced &&
     samePluginLoadInput(previousInput.signature, params.signature)
