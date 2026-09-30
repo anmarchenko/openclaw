@@ -46,6 +46,8 @@ runs:
           echo "DD_API_KEY=$DD_API_KEY"
           echo "DD_SITE=$DD_SITE"
           echo "DD_ENV=ci"
+          # The OpenAI span aggregator mutates streamed SDK chunks in dd-trace 6.18.0.
+          echo "DD_TRACE_OPENAI_ENABLED=false"
           echo "DD_CIVISIBILITY_AGENTLESS_ENABLED=true"
           echo "DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED=false"
           echo "DD_CIVISIBILITY_FLAKY_RETRY_ENABLED=false"
