@@ -211,8 +211,7 @@ export async function prepareCodexAttemptTurnRequest(
       enabled:
         fastMode === "ultrafast" ||
         (turnAppServer.enableUltrafast === true &&
-          (fastMode === undefined ||
-            (typeof runtimeParams.fastMode === "function" && fastMode === true))),
+          (fastMode === undefined || (typeof runtimeParams.fastMode === "function" && fastMode))),
       serviceTier: turnStartParams.serviceTier,
       model: turnStartParams.model ?? model,
       modelProvider,
