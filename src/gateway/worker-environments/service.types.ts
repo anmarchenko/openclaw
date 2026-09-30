@@ -1,4 +1,5 @@
 import type { AnyAgentTool } from "../../agents/tools/common.js";
+import type { CloudWorkerSetupMutationAdmission } from "../../infra/device-bootstrap.worker-types.js";
 import type { GatewayScheduler } from "../../infra/gateway-scheduler.js";
 import type { WorkerExecutionMode, WorkerProfile } from "../../plugins/types.js";
 import type { WorkerConnectionIdentity } from "./connection-identity.js";
@@ -55,6 +56,7 @@ export type WorkerEnvironmentServiceOptions = WorkerProviderLifecycleInputOption
     nodePortalCarrier?: WorkerNodePortalCarrier;
     closeWorkerPortals?: (environmentId: string, ownerEpoch?: number) => Promise<void>;
     stopNodeEnrollmentWaits?: () => void;
+    admitsNodeSetupCompletion?: (setup: CloudWorkerSetupMutationAdmission) => boolean;
     closeNodeBootstrapArtifacts?: () => Promise<void>;
     stopNodeWorkerBundleTransfers?: () => void | Promise<void>;
     maintainProviders?: (signal: AbortSignal) => Promise<void>;
