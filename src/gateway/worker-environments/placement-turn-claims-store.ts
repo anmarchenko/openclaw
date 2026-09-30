@@ -1,4 +1,6 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { assertSessionEntryCurrentAdmission } from "../../config/sessions/session-entry-current-admission.js";
+import type { SessionEntryCurrentFacts } from "../../config/sessions/session-entry-current.types.js";
 import { isSqliteLockError } from "../../infra/sqlite-error-diagnostics.js";
 import type { SqliteWorkerCommand } from "../../infra/sqlite-worker-contract.js";
 import {
@@ -22,6 +24,7 @@ import {
 import { prepareWorkerTurnClaimClosed } from "./placement-turn-claim-events.js";
 import { ActiveTurnClaimError, type createPlacementTurnClaimOps } from "./placement-turn-claims.js";
 import type {
+  PlacementTurnClaimCurrentCheck,
   PlacementTurnClaimReceipt,
   PlacementTurnClaimWorkerOperations,
 } from "./placement-turn-claims.worker-contract.js";
@@ -53,7 +56,16 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
   async function execute(
     input: SqliteWorkerCommand<PlacementTurnClaimWorkerOperations>,
     assertCurrent?: () => void,
+    current?: PlacementTurnClaimCurrentCheck,
   ): Promise<PlacementTurnClaimReceipt> {
+    const entryCheck = current?.sessionEntry;
+    const capturedEntryCheck = entryCheck
+      ? {
+          source: { ...entryCheck.source },
+          assertCurrent: (facts: SessionEntryCurrentFacts | undefined) =>
+            entryCheck.assertCurrent(facts),
+        }
+      : undefined;
     const requested = input.input.claim;
     const owner: WorkerSessionTurnOwner =
       requested.owner.kind === "local"
@@ -93,6 +105,7 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
                 claim: { ...claim, placementGeneration: input.input.claim.placementGeneration },
                 stagedResultRef: input.input.stagedResultRef,
                 repositoryWorkspaceId: input.input.repositoryWorkspaceId,
+                sessionEntryCurrentSource: capturedEntryCheck?.source,
               },
             }
           : input.type === "placementTurns.updateWorkspaceBaseManifest"
@@ -102,6 +115,7 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
                   nowMs: input.input.nowMs,
                   claim: { ...claim, placementGeneration: input.input.claim.placementGeneration },
                   manifestRef: input.input.manifestRef,
+                  sessionEntryCurrentSource: capturedEntryCheck?.source,
                 },
               }
             : input.type === "placementTurns.recoverWorkspace"
@@ -175,26 +189,37 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
             createAdmission: () => {
               admission = createSqliteWorkerOperationAdmission((request, grant) => {
                 check();
-                if (request.stage === "commit") {
-                  if (!isReceipt(request.facts)) {
+                const transactionStage =
+                  request.stage === "transaction" || request.stage === "commit";
+                const admitted = transactionStage
+                  ? assertSessionEntryCurrentAdmission(request, capturedEntryCheck)
+                  : request;
+                if (current && transactionStage) {
+                  if (!isReceipt(admitted.facts)) {
+                    throw new Error("Placement admission has no current placement facts");
+                  }
+                  current.assertPlacementCurrent(admitted.facts.placement);
+                }
+                if (admitted.stage === "commit") {
+                  if (!isReceipt(admitted.facts)) {
                     throw new Error("Placement claim commit has no receipt");
                   }
-                  prepared = request.facts;
+                  prepared = admitted.facts;
                   if (
                     command.type === "placementTurns.recordStagedResult" ||
                     command.type === "placementTurns.updateWorkspaceBaseManifest"
                   ) {
-                    if (request.facts.placement?.sessionId !== command.input.claim.sessionId) {
+                    if (admitted.facts.placement?.sessionId !== command.input.claim.sessionId) {
                       throw new Error("Staged workspace result receipt has a different owner");
                     }
                     publication = stagePlacementWorkspaceResultWorkerPublication(
                       context.admission.identity,
-                      request.facts.placement.sessionId,
+                      admitted.facts.placement.sessionId,
                     );
-                  } else if (request.facts.placement) {
+                  } else if (admitted.facts.placement) {
                     publication = stagePlacementTurnClaimWorkerPublication(
                       context.admission.identity,
-                      request.facts.placement,
+                      admitted.facts.placement,
                     );
                   }
                 }
@@ -325,6 +350,7 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
     async updateWorkspaceBaseManifest(
       input: Parameters<Claims["updateWorkspaceBaseManifest"]>[0],
       assertCurrent?: () => void,
+      current?: PlacementTurnClaimCurrentCheck,
     ) {
       const receipt = await execute(
         {
@@ -332,6 +358,7 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
           input: { ...input, nowMs: runtime.now?.() },
         },
         assertCurrent,
+        current,
       );
       if (!receipt.placement) {
         throw new Error("Workspace journal commit receipt is missing its placement");
@@ -343,6 +370,7 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
       stagedResultRef: string,
       repositoryWorkspaceId?: string,
       assertCurrent?: () => void,
+      current?: PlacementTurnClaimCurrentCheck,
     ): Promise<void> {
       await execute(
         {
@@ -350,6 +378,7 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
           input: { claim, stagedResultRef, repositoryWorkspaceId },
         },
         assertCurrent,
+        current,
       );
     },
     async retainInterruptedTurnWorkspace(

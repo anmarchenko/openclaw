@@ -11,6 +11,9 @@ import {
 import { find, getRequired } from "./placement-row-codec.js";
 import type { PlacementStoreRuntime } from "./placement-runtime.js";
 import type {
+  WorkerWorkspaceJournalOwner,
+  WorkspaceJournalChange,
+  WorkspaceJournalMutation,
   WorkspaceJournalReadCommand,
   WorkspaceJournalReadResult,
 } from "./placement-workspace-journal.worker-contract.js";
@@ -29,13 +32,6 @@ type WorkspaceJournalDatabase = Pick<
 >;
 
 const query = (db: DatabaseSync) => getNodeSqliteKysely<WorkspaceJournalDatabase>(db);
-
-export type WorkerWorkspaceJournalOwner = {
-  sessionId: string;
-  environmentId: string;
-  ownerEpoch: number;
-  placementGeneration: number;
-};
 
 export function isCurrentJournalOwner(
   db: DatabaseSync,
@@ -173,15 +169,6 @@ function loadWorkspaceReconciliation(
   }
   return { ...plan, basePack: row.base_pack };
 }
-
-type WorkspaceJournalChange =
-  | { agentId: string; sessionKey: string }
-  | { all: true; scope: "worker-placements" };
-
-export type WorkspaceJournalMutation = {
-  owners: WorkerWorkspaceJournalOwner[];
-  changes: WorkspaceJournalChange[];
-};
 
 export function createPlacementWorkspaceJournalOps(
   runtime: Pick<PlacementStoreRuntime, "now" | "write">,

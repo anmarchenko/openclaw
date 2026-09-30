@@ -3,6 +3,7 @@ import type {
   WorkerSessionPlacementStore,
   WorkerSessionTurnClaim,
 } from "./placement-store.js";
+import type { PlacementTurnClaimCurrentCheck } from "./placement-turn-claims.worker-contract.js";
 import { sessionWorkspaceRoot, type WorkerSessionWorkspace } from "./session-workspace.js";
 import {
   projectWorkspaceResultConflict,
@@ -28,6 +29,7 @@ export function createWorkspaceResultJournal(params: {
   >;
   turnClaim: WorkerSessionTurnClaim;
   assertCurrent?: () => void;
+  current?: PlacementTurnClaimCurrentCheck;
 }) {
   const owner = {
     sessionId: params.placement.sessionId,
@@ -49,6 +51,7 @@ export function createWorkspaceResultJournal(params: {
         await params.placements.updateWorkspaceBaseManifest(
           { claim: params.turnClaim, manifestRef },
           params.assertCurrent,
+          params.current,
         );
         manifestAccepted = true;
       },

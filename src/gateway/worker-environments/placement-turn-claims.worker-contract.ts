@@ -1,3 +1,7 @@
+import type {
+  SessionEntryCurrentCheck,
+  SessionEntryCurrentSource,
+} from "../../config/sessions/session-entry-current.types.js";
 import type { SqliteWorkerCommand } from "../../infra/sqlite-worker-contract.js";
 import type {
   WorkerSessionPlacementRecord,
@@ -8,9 +12,18 @@ export type PlacementTurnClaimReceipt = {
   placement?: WorkerSessionPlacementRecord;
   claim?: WorkerSessionTurnClaim;
 };
+export type PlacementTurnClaimCurrentCheck = {
+  sessionEntry?: SessionEntryCurrentCheck;
+  assertPlacementCurrent(placement: WorkerSessionPlacementRecord | undefined): void;
+};
 export type PlacementTurnClaimWorkerOperations = {
   "placementTurns.updateWorkspaceBaseManifest": {
-    input: { claim: WorkerSessionTurnClaim; manifestRef: string; nowMs?: number };
+    input: {
+      claim: WorkerSessionTurnClaim;
+      manifestRef: string;
+      nowMs?: number;
+      sessionEntryCurrentSource?: SessionEntryCurrentSource;
+    };
     output: PlacementTurnClaimReceipt;
   };
   "placementTurns.claim": {
@@ -22,6 +35,7 @@ export type PlacementTurnClaimWorkerOperations = {
       claim: WorkerSessionTurnClaim;
       stagedResultRef: string;
       repositoryWorkspaceId?: string;
+      sessionEntryCurrentSource?: SessionEntryCurrentSource;
       nowMs?: number;
     };
     output: PlacementTurnClaimReceipt;

@@ -1,11 +1,23 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { SqliteWorkerCommand } from "../../infra/sqlite-worker-contract.js";
 import type { WorkerSessionPlacementRecord } from "./placement-record.js";
-import type {
-  WorkerWorkspaceJournalOwner,
-  WorkspaceJournalMutation,
-} from "./placement-workspace-journal.js";
 import type { WorkerWorkspaceReconciliationJournal } from "./workspace-manifest.js";
+
+export type WorkerWorkspaceJournalOwner = {
+  sessionId: string;
+  environmentId: string;
+  ownerEpoch: number;
+  placementGeneration: number;
+};
+
+export type WorkspaceJournalChange =
+  | { agentId: string; sessionKey: string }
+  | { all: true; scope: "worker-placements" };
+
+export type WorkspaceJournalMutation = {
+  owners: WorkerWorkspaceJournalOwner[];
+  changes: WorkspaceJournalChange[];
+};
 
 export type WorkspaceJournalReceipt = WorkspaceJournalMutation & {
   type: "placementJournals.begin" | "placementJournals.abort" | "placementJournals.prune";

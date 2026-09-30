@@ -13,9 +13,9 @@ import { executeExistingOpenClawStateRead } from "../../state/openclaw-state-db-
 import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-worker-context.js";
 import { runOpenClawStateWorkerOperation } from "../../state/openclaw-state-worker-store.js";
 import { stagePlacementWorkspaceResultWorkerPublication } from "./placement-turn-authority.js";
-import type { WorkerWorkspaceJournalOwner } from "./placement-workspace-journal.js";
 import {
   isWorkspaceJournalReceipt,
+  type WorkerWorkspaceJournalOwner,
   type WorkspaceJournalReadCommand,
   type WorkspaceJournalReadResult,
   type WorkspaceJournalReceipt,
