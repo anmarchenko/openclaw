@@ -343,42 +343,36 @@ function stageWorkerChange(identity: DatabasePathIdentity, input: ClaimChange) {
   const change = { ...input, sequence };
   owner.pending.add(change);
   let settled = false;
+  const settle = (apply: () => void) => {
+    if (!settled) {
+      settled = true;
+      apply();
+    }
+  };
+  const publish = () => {
+    commitChange(owner, change, sequence);
+    for (const retained of Array.from(owner.claims.get(change.sessionId) ?? [])) {
+      notifyRevoked(retained);
+    }
+  };
   return {
-    commit() {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      commitChange(owner, change, sequence);
-      for (const retained of Array.from(owner.claims.get(change.sessionId) ?? [])) {
-        notifyRevoked(retained);
-      }
-    },
-    rollback() {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      owner.pending.delete(change);
-      prunePublication(owner, change.sessionId);
-    },
-    invalidate() {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      // Uncertain claim/tool writes revoke that incarnation. Workspace-only writes
-      // invalidate read observations while preserving the separate turn authority.
-      if (change.kind === "tools") {
-        change.authority = undefined;
-      } else if (change.kind === "claim") {
-        change.facts = undefined;
-      }
-      commitChange(owner, change, sequence);
-      for (const retained of Array.from(owner.claims.get(change.sessionId) ?? [])) {
-        notifyRevoked(retained);
-      }
-    },
+    commit: () => settle(publish),
+    rollback: () =>
+      settle(() => {
+        owner.pending.delete(change);
+        prunePublication(owner, change.sessionId);
+      }),
+    invalidate: () =>
+      settle(() => {
+        // Uncertain claim/tool writes revoke that incarnation. Workspace-only writes
+        // invalidate read observations while preserving the separate turn authority.
+        if (change.kind === "tools") {
+          change.authority = undefined;
+        } else if (change.kind === "claim") {
+          change.facts = undefined;
+        }
+        publish();
+      }),
   };
 }
 

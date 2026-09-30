@@ -1,3 +1,4 @@
+import { normalizeOptionalString as relationKey } from "@openclaw/normalization-core/string-coerce";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { withSessionEntryReadOnlyInWorker } from "../../config/sessions/session-entry-read-runtime.js";
@@ -28,13 +29,6 @@ export type WorkerSessionToolTarget = {
     storePath: string;
   };
 };
-
-function relationKey(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed || undefined;
-}
-
-export { relationKey as workerSessionRelationKey };
 
 export async function readWorkerSessionToolEntry(sessionKey: string, agentId?: string) {
   const target = await resolveGatewaySessionStoreTargetInWorker({

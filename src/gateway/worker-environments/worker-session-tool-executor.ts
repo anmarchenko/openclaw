@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { normalizeOptionalString as relationKey } from "@openclaw/normalization-core/string-coerce";
 import {
   bindAgentToolExecutionLocation,
   copyAgentToolMetadata,
@@ -54,7 +55,6 @@ import {
   readWorkerSessionToolEntry,
   resolveWorkerSessionToolSource as exactSource,
   resolveWorkerSessionToolTarget as exactAuthorizedTarget,
-  workerSessionRelationKey as relationKey,
   type WorkerSessionToolSource as ExactSource,
 } from "./worker-session-tool-topology.js";
 
@@ -553,8 +553,7 @@ export function createWorkerGatewayTools(
     ...(params.skillWorkshop ? [params.skillWorkshop] : []),
   ];
   const retainWorkshopCall = createWorkerWorkshopCallRetention();
-  const boundTools: AnyAgentTool[] = [];
-  for (const tool of tools) {
+  return tools.map((tool) => {
     const bound = copyAgentToolMetadata<AnyAgentTool>(tool, {
       ...tool,
       execute: async (toolCallId, raw, signal, onUpdate) => {
@@ -592,7 +591,6 @@ export function createWorkerGatewayTools(
             ? { timeout: { argument: "timeoutSeconds", defaultSeconds: 30, paddingMs: 60_000 } }
             : {}),
     });
-    boundTools.push(bound);
-  }
-  return boundTools;
+    return bound;
+  });
 }
