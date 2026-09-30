@@ -9,6 +9,10 @@ export type PlacementTurnClaimReceipt = {
   claim?: WorkerSessionTurnClaim;
 };
 export type PlacementTurnClaimWorkerOperations = {
+  "placementTurns.updateWorkspaceBaseManifest": {
+    input: { claim: WorkerSessionTurnClaim; manifestRef: string; nowMs?: number };
+    output: PlacementTurnClaimReceipt;
+  };
   "placementTurns.claim": {
     input: { claim: WorkerTurnClaimInput; nowMs?: number };
     output: PlacementTurnClaimReceipt;
@@ -49,6 +53,7 @@ export function isPlacementTurnClaimCommand(command: {
   type: PropertyKey;
 }): command is SqliteWorkerCommand<PlacementTurnClaimWorkerOperations> {
   return (
+    command.type === "placementTurns.updateWorkspaceBaseManifest" ||
     command.type === "placementTurns.claim" ||
     command.type === "placementTurns.recordStagedResult" ||
     command.type === "placementTurns.release" ||

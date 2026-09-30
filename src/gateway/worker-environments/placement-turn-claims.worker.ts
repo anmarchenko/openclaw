@@ -42,6 +42,8 @@ export function executePlacementTurnClaimCommand(
       if (command.type === "placementTurns.claim") {
         const claim = claims.claimTurn(command.input.claim);
         receipt = { claim, placement: getRequired(db, claim.sessionId) };
+      } else if (command.type === "placementTurns.updateWorkspaceBaseManifest") {
+        receipt = { placement: claims.updateWorkspaceBaseManifest(command.input) };
       } else if (command.type === "placementTurns.recordStagedResult") {
         recordStagedWorkerWorkspaceResult(
           db,

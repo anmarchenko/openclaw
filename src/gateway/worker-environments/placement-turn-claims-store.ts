@@ -25,6 +25,7 @@ import type {
   PlacementTurnClaimReceipt,
   PlacementTurnClaimWorkerOperations,
 } from "./placement-turn-claims.worker-contract.js";
+import { AcceptedWorkspacePublicationIndeterminateError } from "./workspace-accepted-publication.js";
 
 const log = createSubsystemLogger("gateway/placement");
 
@@ -94,32 +95,47 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
                 repositoryWorkspaceId: input.input.repositoryWorkspaceId,
               },
             }
-          : input.type === "placementTurns.recoverWorkspace"
+          : input.type === "placementTurns.updateWorkspaceBaseManifest"
             ? {
                 type: input.type,
                 input: {
                   nowMs: input.input.nowMs,
-                  gatewayInstanceId: input.input.gatewayInstanceId,
                   claim: { ...claim, placementGeneration: input.input.claim.placementGeneration },
+                  manifestRef: input.input.manifestRef,
                 },
               }
-            : input.type === "placementTurns.handoffRuntimeRefreshResult"
+            : input.type === "placementTurns.recoverWorkspace"
               ? {
                   type: input.type,
                   input: {
                     nowMs: input.input.nowMs,
-                    claim: { ...claim, placementGeneration: input.input.claim.placementGeneration },
-                    expectedGeneration: input.input.expectedGeneration,
                     gatewayInstanceId: input.input.gatewayInstanceId,
+                    claim: { ...claim, placementGeneration: input.input.claim.placementGeneration },
                   },
                 }
-              : {
-                  type: input.type,
-                  input: {
-                    nowMs: input.input.nowMs,
-                    claim: { ...claim, placementGeneration: input.input.claim.placementGeneration },
-                  },
-                };
+              : input.type === "placementTurns.handoffRuntimeRefreshResult"
+                ? {
+                    type: input.type,
+                    input: {
+                      nowMs: input.input.nowMs,
+                      claim: {
+                        ...claim,
+                        placementGeneration: input.input.claim.placementGeneration,
+                      },
+                      expectedGeneration: input.input.expectedGeneration,
+                      gatewayInstanceId: input.input.gatewayInstanceId,
+                    },
+                  }
+                : {
+                    type: input.type,
+                    input: {
+                      nowMs: input.input.nowMs,
+                      claim: {
+                        ...claim,
+                        placementGeneration: input.input.claim.placementGeneration,
+                      },
+                    },
+                  };
     const close =
       command.type === "placementTurns.release" || command.type === "placementTurns.releaseIfOwned"
         ? prepareWorkerTurnClaimClosed(runtime.path, command.input.claim)
@@ -164,7 +180,10 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
                     throw new Error("Placement claim commit has no receipt");
                   }
                   prepared = request.facts;
-                  if (command.type === "placementTurns.recordStagedResult") {
+                  if (
+                    command.type === "placementTurns.recordStagedResult" ||
+                    command.type === "placementTurns.updateWorkspaceBaseManifest"
+                  ) {
                     if (request.facts.placement?.sessionId !== command.input.claim.sessionId) {
                       throw new Error("Staged workspace result receipt has a different owner");
                     }
@@ -200,10 +219,19 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
           publication?.rollback();
         } else if (
           command.type === "placementTurns.handoffRuntimeRefreshResult" ||
-          command.type === "placementTurns.recordStagedResult"
+          command.type === "placementTurns.recordStagedResult" ||
+          command.type === "placementTurns.updateWorkspaceBaseManifest"
         ) {
           // An uncertain result write requires fresh recovery authority; never replay it.
           publication?.invalidate();
+          if (command.type === "placementTurns.updateWorkspaceBaseManifest") {
+            // An unobserved commit cannot authorize an inverse filesystem apply.
+            throw new AcceptedWorkspacePublicationIndeterminateError(
+              "commit",
+              error,
+              new Error("Workspace journal commit settlement is unavailable"),
+            );
+          }
         } else {
           if (command.type === "placementTurns.recoverWorkspace") {
             // An unchanged claim does not prove its result fence committed. Recovery
@@ -294,6 +322,22 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
     }
   }
   return {
+    async updateWorkspaceBaseManifest(
+      input: Parameters<Claims["updateWorkspaceBaseManifest"]>[0],
+      assertCurrent?: () => void,
+    ) {
+      const receipt = await execute(
+        {
+          type: "placementTurns.updateWorkspaceBaseManifest",
+          input: { ...input, nowMs: runtime.now?.() },
+        },
+        assertCurrent,
+      );
+      if (!receipt.placement) {
+        throw new Error("Workspace journal commit receipt is missing its placement");
+      }
+      return receipt.placement;
+    },
     async recordStagedWorkspaceResult(
       claim: WorkerSessionTurnClaim,
       stagedResultRef: string,

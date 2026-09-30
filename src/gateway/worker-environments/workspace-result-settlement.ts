@@ -38,19 +38,27 @@ export function createWorkspaceResultJournal(params: {
   let manifestAccepted = false;
   return {
     adapter: {
-      load: () => params.placements.loadWorkspaceReconciliation(owner),
+      load: () =>
+        params.placements.loadWorkspaceReconciliation(owner, undefined, params.assertCurrent),
       begin: (next: Parameters<typeof params.placements.beginWorkspaceReconciliation>[1]) => {
         params.assertCurrent?.();
-        return params.placements.beginWorkspaceReconciliation(owner, next);
+        return params.placements.beginWorkspaceReconciliation(owner, next, params.assertCurrent);
       },
-      commit: (manifestRef: string) => {
+      commit: async (manifestRef: string) => {
         params.assertCurrent?.();
-        params.placements.updateWorkspaceBaseManifest({ claim: params.turnClaim, manifestRef });
+        await params.placements.updateWorkspaceBaseManifest(
+          { claim: params.turnClaim, manifestRef },
+          params.assertCurrent,
+        );
         manifestAccepted = true;
       },
       abort: () => {
         params.assertCurrent?.();
-        return params.placements.abortWorkspaceReconciliation(owner);
+        return params.placements.abortWorkspaceReconciliation(
+          owner,
+          undefined,
+          params.assertCurrent,
+        );
       },
     },
     wasAccepted: () => manifestAccepted,

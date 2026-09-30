@@ -57,6 +57,8 @@ import { executeWorkerInferenceStoreCommand } from "../gateway/worker-environmen
 import { startWorkerPlacementDispatchInWorker } from "../gateway/worker-environments/placement-dispatch-store.worker.js";
 import { isPlacementTurnClaimCommand } from "../gateway/worker-environments/placement-turn-claims.worker-contract.js";
 import { executePlacementTurnClaimCommand } from "../gateway/worker-environments/placement-turn-claims.worker.js";
+import { isWorkspaceJournalWriteCommand } from "../gateway/worker-environments/placement-workspace-journal.worker-contract.js";
+import { executeWorkspaceJournalCommand } from "../gateway/worker-environments/placement-workspace-journal.worker.js";
 import { isWorkerEnvironmentCommand } from "../gateway/worker-environments/store-worker-contract.js";
 import { executeWorkerEnvironmentCommand } from "../gateway/worker-environments/store.worker.js";
 import {
@@ -213,6 +215,9 @@ export function executeSharedStateCommand(
   }
   if (isWorkerInferenceStoreCommand(command)) {
     return executeWorkerInferenceStoreCommand(command, open());
+  }
+  if (isWorkspaceJournalWriteCommand(command)) {
+    return executeWorkspaceJournalCommand(command, open());
   }
   if (isPlacementTurnClaimCommand(command)) {
     return executePlacementTurnClaimCommand(command, open());
