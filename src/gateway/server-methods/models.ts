@@ -107,7 +107,8 @@ export const modelsHandlers: GatewayRequestHandlers = {
           GATEWAY_CLIENT_CAPS.MODEL_SELECTION_POLICY,
         ),
         requesterProfileId: publicationScope.requesterProfileId,
-        readScope: publicationScope,
+        readScope: scope,
+        publicationScope,
       });
       publicationScope.draftAccountSelection?.assertCurrent();
       publicationScope.assertCurrent?.();

@@ -272,6 +272,8 @@ type BuildModelsListResultParams = {
   agentId?: string;
   requesterProfileId?: string;
   readScope?: ChatMetadataReadParams;
+  /** Request authority does not imply a session/account-selection projection. */
+  publicationScope?: Pick<ChatMetadataReadParams, "isCurrent" | "assertCurrent">;
   params: ModelsListParams;
   includeManualSelection?: boolean;
   preloadedCatalog?: {
@@ -303,6 +305,7 @@ export async function prepareModelsListResult(
 ): Promise<PreparedModelsListResult> {
   const { source } = params;
   const scope = params.readScope;
+  const publicationScope = params.publicationScope ?? scope;
   const draft = scope?.draftAccountSelection;
   const sessionEntry: ChatMetadataSessionEntry | undefined = draft
     ? { authProfileOverride: draft.authProfileId, authProfileOverrideSource: "user" }
@@ -371,7 +374,7 @@ export async function prepareModelsListResult(
   const isCurrent = () =>
     currentConfig() === requestConfig &&
     preparedOwnerIsCurrent?.() === true &&
-    scope?.isCurrent?.() !== false;
+    publicationScope?.isCurrent?.() !== false;
   if (!metadataSnapshot || !preparedAuthStore) {
     throw new Error("Gateway model catalog owner omitted prepared metadata or auth state");
   }
@@ -436,7 +439,7 @@ export async function prepareModelsListResult(
     await projector.prepareSelectedAccountCatalog(
       () => {
         draft?.assertCurrent();
-        scope?.assertCurrent?.();
+        publicationScope?.assertCurrent?.();
         if (!isCurrent()) {
           throw new PreparedModelRuntimePublicationSupersededError(
             "Selected account catalog changed",
