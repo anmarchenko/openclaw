@@ -17,10 +17,14 @@ vi.mock("../cron/delivery.js", async (importOriginal) => {
 import { sendGatewayCronFailureAlert as sendGatewayCronFailureAlertBase } from "./server-cron-notifications.js";
 
 const sendGatewayCronFailureAlert = (
-  params: Omit<Parameters<typeof sendGatewayCronFailureAlertBase>[0], "onDeliverySettled">,
+  params: Omit<
+    Parameters<typeof sendGatewayCronFailureAlertBase>[0],
+    "onDeliverySettled" | "routing"
+  >,
 ) =>
   sendGatewayCronFailureAlertBase({
     ...params,
+    routing: { defaultAgentId: "main" },
     onDeliverySettled: async () => {},
   });
 

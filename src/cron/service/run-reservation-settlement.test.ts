@@ -1,7 +1,10 @@
+import { expectDefined } from "@openclaw/normalization-core";
 import { expect, it, vi } from "vitest";
 import {
+  loseFirstCronMutationReply,
   observeCronJobWrites,
   observeCronStoreCommits,
+  terminateFirstCronMutationBeforeCommit,
 } from "../../../test/helpers/cron/runtime-mutation.js";
 import {
   createCronRegressionState,
@@ -9,14 +12,22 @@ import {
   setupCronRegressionFixtures,
 } from "../../../test/helpers/cron/service-regression-fixtures.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
-import { openOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
+import { hasSqliteWorkerOutcomeUnknown } from "../../infra/sqlite-worker-contract.js";
+import {
+  closeOpenClawStateDatabaseAsync,
+  openOpenClawStateDatabase,
+} from "../../state/openclaw-state-db.js";
+import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { CRON_AGENT_SELECTION_REQUIRED_MESSAGE } from "../agent-id.js";
 import { readCronRunHistoryPageForTests } from "../run-history.test-support.js";
 import { loadCronStore, saveCronStore } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
+import { isCronRunReceiptOwnerStale } from "../store/run-receipt-store.js";
+import type { CronRunReceiptHandle } from "../store/run-receipt.types.js";
 import { start, stop } from "./ops-lifecycle.js";
 import { list } from "./ops-read.js";
 import { run } from "./ops-run.js";
+import * as admissionMutation from "./run-admission-mutation.js";
 import { persistQueuedCronRunReservations, runWithCronAdmission } from "./run-admission.js";
 import * as runHistory from "./run-history.js";
 import { runMissedJobs } from "./timer.js";
@@ -25,6 +36,244 @@ import { onTimer } from "./timer.test-support.js";
 const opsRegressionFixtures = setupCronRegressionFixtures({
   prefix: "cron-reservation-settlement-",
 });
+
+it.each(["startup", "scheduled"] as const)(
+  "releases exact local %s ownership after real unknown cleanup settlement without replay",
+  async (entrypoint) => {
+    await withOpenClawTestState(
+      { label: `cron-${entrypoint}-unknown-cleanup` },
+      async (fixture) => {
+        await closeOpenClawStateDatabaseAsync();
+        const fault = terminateFirstCronMutationBeforeCommit("cron.releaseReservations");
+        const storePath = fixture.statePath("cron", "jobs.json");
+        const now = Date.now();
+        const futureAt = now + 60_000;
+        const job = createDueIsolatedJob({
+          id: `unknown-${entrypoint}-cleanup`,
+          nowMs: now,
+          nextRunAtMs: now,
+        });
+        const runner = vi.fn(async () => ({ status: "ok" as const }));
+        const state = createCronRegressionState({
+          storePath,
+          nowMs: () => now,
+          defaultAgentId: "main",
+          runIsolatedAgentJob: runner,
+        });
+        let stopObservingCommits: (() => void) | undefined;
+        let captured: { identity: object; receipt: CronRunReceiptHandle } | undefined;
+        const settlements: string[] = [];
+        const policy = entrypoint === "startup" ? "startup-settlement" : "scheduled-ineligible";
+        const attemptedPolicies: string[] = [];
+        const release = admissionMutation.releaseReservedCronRuns;
+        const observed = vi
+          .spyOn(admissionMutation, "releaseReservedCronRuns")
+          .mockImplementation(async (params) => {
+            attemptedPolicies.push(params.policy?.kind ?? "general");
+            if (params.policy?.kind !== policy) {
+              return release(params);
+            }
+            const owner = state.queuedRunReservationsByJobId.get(job.id);
+            if (!captured && owner) {
+              captured = { identity: owner.identity, receipt: { ...owner.runReceipt } };
+              expect(isCronRunReceiptOwnerStale(captured.receipt, now)).toBe(false);
+            }
+            return release({
+              ...params,
+              onSettled(outcome) {
+                settlements.push(outcome);
+                params.onSettled(outcome);
+              },
+            });
+          });
+        try {
+          await saveCronStore(storePath, { version: 1, jobs: [job] });
+          const database = openOpenClawStateDatabase().db;
+          let reservationObserved = false;
+          stopObservingCommits = observeCronStoreCommits(storePath, () => {
+            if (reservationObserved) {
+              return;
+            }
+            const queued = database
+              .prepare(
+                "SELECT 1 FROM cron_jobs WHERE store_key = ? AND job_id = ? AND json_extract(state_json, '$.queuedAtMs') = ?",
+              )
+              .get(cronStoreKey(storePath), job.id, now);
+            if (queued) {
+              reservationObserved = true;
+              if (entrypoint === "startup") {
+                stop(state);
+              } else {
+                // Preserve the queued claim but make the real scheduled activation ineligible.
+                database
+                  .prepare(
+                    "UPDATE cron_jobs SET state_json = json_set(state_json, '$.nextRunAtMs', ?) WHERE store_key = ? AND job_id = ?",
+                  )
+                  .run(futureAt, cronStoreKey(storePath), job.id);
+              }
+            }
+          });
+          const outcome = await (
+            entrypoint === "startup" ? runMissedJobs(state) : onTimer(state)
+          ).then(
+            () => ({ kind: "reported" as const }),
+            (error: unknown) => ({ kind: "rejected" as const, error }),
+          );
+          await fault.waitForExit();
+          expect.soft(attemptedPolicies).toEqual([policy]);
+          expect.soft(fault.attempts).toEqual(["cron.releaseReservations"]);
+          expect(reservationObserved).toBe(true);
+          expect(fault.wasHeld()).toBe(true);
+          expect(settlements).toEqual(["unknown"]);
+          if (outcome.kind !== "rejected") {
+            throw new Error(
+              `${entrypoint} reported success after losing its native cleanup settlement`,
+            );
+          }
+          expect(hasSqliteWorkerOutcomeUnknown(outcome.error)).toBe(true);
+          const original = expectDefined(captured, `${entrypoint} reservation before cleanup`);
+          expect
+            .soft(
+              database
+                .prepare(
+                  "SELECT status, finished_at_ms FROM cron_run_receipts WHERE receipt_id = ?",
+                )
+                .get(original.receipt.receiptId),
+            )
+            .toEqual({ status: "running", finished_at_ms: null });
+          const persisted = (await loadCronStore(storePath)).jobs.find((row) => row.id === job.id);
+          expect.soft(persisted?.state).toMatchObject({
+            queuedAtMs: now,
+            nextRunAtMs: entrypoint === "startup" ? now : futureAt,
+          });
+          expect(persisted?.state.runningAtMs).toBeUndefined();
+          expect(state.queuedRunReservationsByJobId.has(job.id)).toBe(false);
+          expect(isCronRunReceiptOwnerStale(original.receipt, now)).toBe(true);
+          expect(state.runAdmission.active).toBe(0);
+          expect(runner).not.toHaveBeenCalled();
+          expect(
+            readCronRunHistoryPageForTests({ storeKey: cronStoreKey(storePath), jobId: job.id })
+              .entries,
+          ).toEqual([]);
+        } finally {
+          stopObservingCommits?.();
+          observed.mockRestore();
+          await fault.close();
+          if (captured) {
+            admissionMutation.releaseReservationOwnership(state, [
+              { jobId: job.id, reservationIdentity: captured.identity },
+            ]);
+          }
+          stop(state);
+          await state.op;
+        }
+      },
+    );
+  },
+);
+
+it.each(["manual", "startup"] as const)(
+  "retains a committed %s cleanup failure without retrying its reservation",
+  async (entrypoint) => {
+    const { storePath } = opsRegressionFixtures.makeStorePath();
+    const now = Date.now();
+    const futureAt = now + 60_000;
+    const job = createDueIsolatedJob({
+      id: `lost-${entrypoint}-cleanup-reply`,
+      nowMs: now,
+      nextRunAtMs: entrypoint === "manual" ? futureAt : now,
+    });
+    job.state.lastError = "prior occurrence error";
+    await saveCronStore(storePath, { version: 1, jobs: [job] });
+    const runner = vi.fn(async () => ({ status: "ok" as const }));
+    const state = createCronRegressionState({
+      storePath,
+      nowMs: () => now,
+      defaultAgentId: "main",
+      runIsolatedAgentJob: runner,
+    });
+    const database = openOpenClawStateDatabase().db;
+    let receiptId: string | undefined;
+    const stopObservingCommits = observeCronStoreCommits(storePath, () => {
+      if (receiptId) {
+        return;
+      }
+      const queued = database
+        .prepare(
+          "SELECT 1 FROM cron_jobs WHERE store_key = ? AND job_id = ? AND json_extract(state_json, '$.queuedAtMs') = ?",
+        )
+        .get(cronStoreKey(storePath), job.id, now);
+      if (!queued) {
+        return;
+      }
+      const receipt = database
+        .prepare(
+          "SELECT receipt_id FROM cron_run_receipts WHERE store_key = ? AND job_id = ? AND status = 'running'",
+        )
+        .get(cronStoreKey(storePath), job.id);
+      if (typeof receipt?.receipt_id !== "string") {
+        throw new Error("The committed reservation has no running receipt");
+      }
+      receiptId = receipt.receipt_id;
+      if (entrypoint === "manual") {
+        stop(state);
+      } else {
+        // Keep the real reservation but make its occurrence ineligible before startup activation.
+        database
+          .prepare(
+            "UPDATE cron_jobs SET state_json = json_set(state_json, '$.nextRunAtMs', ?) WHERE store_key = ? AND job_id = ?",
+          )
+          .run(futureAt, cronStoreKey(storePath), job.id);
+      }
+    });
+    const reply = loseFirstCronMutationReply("cron.releaseReservations");
+    const pending = (
+      entrypoint === "manual" ? run(state, job.id, "force") : runMissedJobs(state)
+    ).then(
+      () => ({ kind: "reported" }),
+      (error: unknown) => ({ kind: "rejected", error }),
+    );
+    try {
+      expect(await pending).toMatchObject({ kind: "rejected", error: expect.any(Error) });
+      expect(receiptId).toEqual(expect.any(String));
+      expect(reply.wasDropped()).toBe(true);
+      await reply.waitForExit();
+      expect(reply.attempts).toEqual(["cron.releaseReservations"]);
+      expect(
+        database
+          .prepare("SELECT status, error_text FROM cron_run_receipts WHERE receipt_id = ?")
+          .get(receiptId!),
+      ).toEqual({
+        status: "skipped",
+        error_text:
+          entrypoint === "manual"
+            ? "cron manual reservation abandoned before completion"
+            : "cron startup reservation abandoned before completion",
+      });
+      const persisted = (await loadCronStore(storePath)).jobs.find((row) => row.id === job.id);
+      expect(persisted?.state).toMatchObject({
+        nextRunAtMs: futureAt,
+        lastError: "prior occurrence error",
+      });
+      expect(persisted?.state.queuedAtMs).toBeUndefined();
+      expect(persisted?.state.runningAtMs).toBeUndefined();
+      expect(persisted?.state.runningReceiptId).toBeUndefined();
+      expect(state.queuedRunReservationsByJobId.has(job.id)).toBe(false);
+      expect(state.runAdmission.active).toBe(0);
+      expect(runner).not.toHaveBeenCalled();
+      expect(
+        readCronRunHistoryPageForTests({ storeKey: cronStoreKey(storePath), jobId: job.id })
+          .entries,
+      ).toEqual([]);
+    } finally {
+      stopObservingCommits();
+      await pending;
+      await reply.close();
+      stop(state);
+      await state.op;
+    }
+  },
+);
 
 it.each(["reservation", "timer", "startup"] as const)(
   "fences the old %s pass when stop and restart cross ownerless history persistence",
