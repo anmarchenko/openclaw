@@ -29,13 +29,12 @@ const sessionCreatesByContext = new WeakMap<
 
 export function idempotentSessionCreate(handler: GatewayRequestHandler): GatewayRequestHandler {
   return async (request) => {
-    const respond: RespondFn = (ok, payload, error, meta) =>
-      request.respond(
-        ok,
-        ok ? projectSessionFastModeEntryResult(payload, request.client) : payload,
-        error,
-        meta,
-      );
+    const respond: RespondFn = (...args) => {
+      if (args[0] && args.length > 1) {
+        args[1] = projectSessionFastModeEntryResult(args[1], request.client);
+      }
+      request.respond(...args);
+    };
     const idempotencyKey = request.params.idempotencyKey;
     if (typeof idempotencyKey !== "string" || !idempotencyKey) {
       await handler(
