@@ -24,8 +24,6 @@ const addReactionIcon = strokeIcon(svg`<path d="M21 11.5a9 9 0 1 1-8.5-8.5"/>
   <path d="M8 14s1.5 2 4 2 4-2 4-2M16 5h6M19 2v6"/>
   <path d="M9 9h.01M15 9h.01"/>`);
 
-const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
-
 /** Emoji the current user already placed on a message; the pickers show these pressed. */
 export function ownReactionEmoji(
   reactions: readonly MessageReactionSummary[] | undefined,
@@ -325,14 +323,13 @@ class MessageReactionPicker extends OpenClawLitElement {
     this.close();
   }
 
-  /** Accept the first grapheme so a pasted "👍 " or a double insert still works. */
   private applyCustom(): void {
-    const candidate = [...graphemes.segment(this.value.trim())][0]?.segment ?? "";
-    if (candidate && isReactionEmoji(candidate)) {
+    const candidate = this.value.trim();
+    if (isReactionEmoji(candidate)) {
       this.select(candidate);
       return;
     }
-    this.invalid = this.value.trim().length > 0;
+    this.invalid = candidate.length > 0;
   }
 
   private async showCustom(): Promise<void> {

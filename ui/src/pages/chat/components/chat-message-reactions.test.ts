@@ -127,7 +127,7 @@ describe("transcript message reactions", () => {
     expect(onReact).toHaveBeenLastCalledWith("message-1", "🚀", false);
   });
 
-  it("applies a typed emoji as soon as it is complete and rejects text", async () => {
+  it.each(["abc", "👍👀"])("rejects custom input %s and accepts a single emoji", async (value) => {
     const { pickers, onReact } = show();
     const picker = pickers[0]!;
     await picker.updateComplete;
@@ -135,14 +135,15 @@ describe("transcript message reactions", () => {
     root.querySelector<HTMLButtonElement>(".more")!.click();
     await picker.updateComplete;
     const input = root.querySelector<HTMLInputElement>('[aria-label="Emoji"]')!;
-    input.value = "abc";
+    input.value = value;
     input.dispatchEvent(new InputEvent("input", { bubbles: true }));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await picker.updateComplete;
     expect(onReact).not.toHaveBeenCalled();
+    expect(input.value).toBe(value);
     expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(root.querySelector(".hint")?.textContent).toContain("single emoji");
-    input.value = "🦞";
+    input.value = " 🦞 ";
     input.dispatchEvent(new InputEvent("input", { bubbles: true }));
     expect(onReact).toHaveBeenLastCalledWith("message-1", "🦞", false);
   });
