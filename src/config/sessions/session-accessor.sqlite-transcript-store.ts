@@ -39,6 +39,7 @@ import {
   deleteTranscriptEventsInTransaction,
   ensureTranscriptGenerationInTransaction,
   ensureTranscriptSessionRoot,
+  pruneTranscriptReactionsInTransaction,
   readTranscriptGenerationInTransaction,
   readTranscriptMutationStateInTransaction,
   readNextTranscriptSeq,
@@ -391,6 +392,7 @@ export function replaceSqliteTranscriptEventsInTransaction(
   const previousGeneration = readTranscriptGenerationInTransaction(database, resolved.sessionId);
   const deleted = deleteTranscriptEventsInTransaction(database, resolved.sessionId);
   if (events.length === 0) {
+    pruneTranscriptReactionsInTransaction(database, resolved);
     deleteSessionTranscriptIndexInTransaction(database.db, resolved.sessionId);
     if (deleted || previousGeneration) {
       rotateTranscriptGenerationInTransaction(database, resolved.sessionId);
@@ -437,6 +439,7 @@ export function replaceSqliteTranscriptEventsInTransaction(
       seq += 1;
     }
   }
+  pruneTranscriptReactionsInTransaction(database, resolved);
   if (deleted || seq > 0) {
     recordTranscriptReplacementMutation(database, resolved.sessionId, preservedTranscriptUpdatedAt);
     if (rebuildSynchronously) {

@@ -170,11 +170,15 @@ session role permits viewing only cannot react. Everyone who can read the
 session sees its reaction chips, counts, and reactor names, with live updates
 while the session is open.
 
-The agent receives additions and removals as `System:` lines on its next turn,
-using the same event mechanism as channel reactions. Reactions never wake the
-agent or create notifications. They are stored separately from the transcript,
-so reacting does not rewrite messages. Resetting a session starts a new
-transcript instance without the previous instance's reactions.
+The agent receives each committed addition and removal as a separate `System:`
+line on its next turn, using the same event mechanism as channel reactions.
+Adding, removing, and adding the same reaction queues three notices in order;
+repeating an action that changes nothing queues no notice. Reactions never wake
+the agent or create notifications. They are stored separately from the transcript,
+so reacting does not rewrite messages. Permanently removing a message also
+removes its reactions and frees their space in the session's reaction limit.
+Resetting a session starts a new transcript instance without the previous
+instance's reactions.
 
 Reactions on channel-origin prompts are also mirrored to that channel as the
 bot's reaction when the channel supports them. A skipped or failed channel

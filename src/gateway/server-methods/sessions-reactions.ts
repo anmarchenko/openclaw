@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import {
   ErrorCodes,
@@ -407,7 +408,7 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
         withSystemEventOwner(
           {
             sessionKey: target.canonicalKey,
-            contextKey: `control-ui:reaction:${action}:${params.messageId}:${actor.id}:${params.emoji}`,
+            contextKey: `control-ui:reaction:${action}:${params.messageId}:${actor.id}:${params.emoji}:${randomUUID()}`,
           },
           target.agentId,
         ),

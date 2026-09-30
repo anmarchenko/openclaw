@@ -19,6 +19,10 @@ import { SessionWorkStartInvalidatedError } from "./lifecycle.js";
 import { upsertSessionEntryCore } from "./session-accessor.sqlite-entry.js";
 import { copySessionNodeArtifactsForRepair } from "./session-accessor.sqlite-node-artifacts.js";
 import {
+  replaceTranscriptEvents,
+  replaceTranscriptSuffixEventsSync,
+} from "./session-accessor.sqlite-transcript-write.js";
+import {
   listSessionReactions,
   SessionReactionLimitError,
   setSessionReaction,
@@ -140,6 +144,75 @@ describe("session reaction store", () => {
       setSessionReaction(scope, { ...reaction, messageId: "replacement" }),
     ).not.toThrow();
   });
+
+  it.each(["replacement", "suffix", "incremental suffix"] as const)(
+    "prunes deleted-message reactions and frees capacity after transcript %s",
+    async (mutation) => {
+      const sessionId = `transcript-${sessionIndex}`;
+      await upsertSessionEntryCore(scope, { sessionId, updatedAt: 2 });
+      const transcriptScope = { ...scope, sessionId };
+      const removedReaction = { ...reaction, expectedSessionId: sessionId };
+      const events = [
+        { type: "session", id: sessionId, version: 3 },
+        {
+          type: "message",
+          id: "retained",
+          parentId: null,
+          message: { role: "user", content: "Keep this message" },
+        },
+        {
+          type: "message",
+          id: reaction.messageId,
+          parentId: "retained",
+          message: { role: "assistant", content: "Remove this message" },
+        },
+      ];
+      await replaceTranscriptEvents(transcriptScope, events);
+      runOpenClawAgentWriteTransaction((database) => {
+        const db = getNodeSqliteKysely<Pick<DB, "session_reactions">>(database.db);
+        for (let start = 0; start < 4_999; start += 500) {
+          executeSqliteQuerySync(
+            database.db,
+            db.insertInto("session_reactions").values(
+              Array.from({ length: Math.min(500, 4_999 - start) }, (_, offset) => ({
+                session_key: scope.sessionKey,
+                session_id: sessionId,
+                message_id: "retained",
+                emoji: "👍",
+                identity_id: `reader-${start + offset}`,
+                identity_label: null,
+                created_at: 1,
+              })),
+            ),
+          );
+        }
+      }, scope);
+      setSessionReaction(scope, removedReaction);
+      const nextReaction = { ...removedReaction, messageId: "retained", emoji: "👀" };
+      expect(() => setSessionReaction(scope, nextReaction)).toThrow(SessionReactionLimitError);
+
+      const retained = events.slice(0, 2);
+      if (mutation === "replacement") {
+        await replaceTranscriptEvents(transcriptScope, retained);
+      } else {
+        expect(
+          replaceTranscriptSuffixEventsSync(
+            transcriptScope,
+            events,
+            retained,
+            mutation === "incremental suffix" ? 2 : 0,
+          ),
+        ).toBe(true);
+      }
+
+      const reactions = listSessionReactions(scope, { sessionId });
+      expect(reactions[reaction.messageId]).toBeUndefined();
+      expect(reactions.retained).toMatchObject([{ emoji: "👍", count: 4_999 }]);
+      expect(setSessionReaction(scope, nextReaction).changed).toBe(true);
+      await replaceTranscriptEvents(transcriptScope, []);
+      expect(listSessionReactions(scope, { sessionId })).toEqual({});
+    },
+  );
 
   it("rejects stale session instances and clears reactions on replacement and node deletion", async () => {
     setSessionReaction(scope, reaction);

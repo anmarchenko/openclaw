@@ -9,6 +9,7 @@ import { addSessionMember } from "../../config/sessions/session-sharing-store.na
 import { publishSystemEventStoreConfig } from "../../config/sessions/session-store-path.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { MessageActionInput } from "../../infra/outbound/message-action-contracts.js";
 import { publishSystemEventStoreResolver } from "../../infra/system-event-ownership.js";
 import {
   drainSystemEventEntries,
@@ -16,6 +17,7 @@ import {
   resetSystemEventsForTest,
 } from "../../infra/system-events.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
+import { createDeferredCore } from "../../shared/deferred.js";
 import {
   createChannelTestPluginBase,
   createTestRegistry,
@@ -439,7 +441,7 @@ describe("session reaction handlers", () => {
       // (macOS temp roots), which a resolver-less queue never exercises.
       publishSystemEventStoreConfig({});
       onTestFinished(() => publishSystemEventStoreResolver(undefined));
-      for (const remove of [false, true]) {
+      for (const remove of [false, true, false]) {
         const action = remove ? "removed" : "added";
         const reactions = remove
           ? []
@@ -468,29 +470,33 @@ describe("session reaction handlers", () => {
           },
           { sessionKeys: [sessionKey, "main"], agentId: "main" },
         );
-        expect(drainSystemEventEntries(sessionKey)).toMatchObject([
-          {
-            text: `Control UI reaction ${action}: 👍 by Alice on msg ${messageId} from Riley`,
-            contextKey: `control-ui:reaction:${action}:${messageId}:alice:👍`,
-          },
-        ]);
         expect((await call("session.reactions.list", { sessionKey }))[1]).toEqual({
           sessionId,
           reactions: remove ? {} : { [messageId]: reactions },
         });
       }
-      // Repeating the last removal changes nothing, so nothing is announced.
+      const events = drainSystemEventEntries(sessionKey);
+      expect(events.map(({ text }) => text)).toEqual(
+        ["added", "removed", "added"].map(
+          (action) => `Control UI reaction ${action}: 👍 by Alice on msg ${messageId} from Riley`,
+        ),
+      );
+      expect(new Set(events.map(({ contextKey }) => contextKey)).size).toBe(3);
+      // Repeating the last addition changes nothing, so nothing is announced.
       const broadcasts = vi.mocked(requestContext.broadcast).mock.calls.length;
       expect(
         await call(
           "session.reactions.set",
-          { sessionKey: "main", messageId, emoji: "👍", remove: true },
+          { sessionKey: "main", messageId, emoji: "👍" },
           client("alice", "Alice"),
           requestContext,
         ),
       ).toMatchObject([
         true,
-        { reactions: [], mirror: { status: "skipped", reason: "reaction already in that state" } },
+        {
+          reactions: [{ emoji: "👍", count: 1 }],
+          mirror: { status: "skipped", reason: "reaction already in that state" },
+        },
       ]);
       expect(requestContext.broadcast).toHaveBeenCalledTimes(broadcasts);
       expect(peekSystemEventEntries(sessionKey)).toEqual([]);
@@ -586,6 +592,81 @@ describe("session reaction handlers", () => {
     });
   });
 
+  it("refuses a view-capped channel reactor before commit, broadcast, or dispatch", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      registerReactionChannel();
+      const { messageId, config } = await seedChannelMessage();
+      const requestContext = context({ ...config, ...roleConfig("view") });
+      const result = await call(
+        "session.reactions.set",
+        { sessionKey, messageId, emoji: "👍" },
+        client("alice"),
+        requestContext,
+      );
+      expect(result).toMatchObject([false, undefined, { code: "FORBIDDEN" }]);
+      expect((await call("session.reactions.list", { sessionKey }))[1]).toEqual({
+        sessionId,
+        reactions: {},
+      });
+      expect(requestContext.broadcast).not.toHaveBeenCalled();
+      expect(peekSystemEventEntries(sessionKey)).toEqual([]);
+      expect(runMessageAction).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([false, true])(
+    "rechecks reactor authority at channel I/O after commit (revoked: %s)",
+    async (revoked) => {
+      await withOpenClawTestState({ scenario: "minimal" }, async () => {
+        registerReactionChannel();
+        const { messageId, config } = await seedChannelMessage();
+        const requestContext = context(config);
+        const reactor = client("alice");
+        const handoffEntered = createDeferredCore();
+        const releaseHandoff = createDeferredCore();
+        const channelRequest = vi.fn();
+        runMessageAction.mockImplementationOnce(async (input: MessageActionInput) => {
+          handoffEntered.resolve();
+          await releaseHandoff.promise;
+          input.assertDirectAdapterHandoff?.();
+          channelRequest(input.params);
+          return { kind: "action", payload: { ok: true } };
+        });
+        const pending = call(
+          "session.reactions.set",
+          { sessionKey, messageId, emoji: "👍" },
+          reactor,
+          requestContext,
+        );
+        await handoffEntered.promise;
+        try {
+          expect(requestContext.broadcast).toHaveBeenCalledTimes(1);
+          expect((await call("session.reactions.list", { sessionKey }))[1]).toMatchObject({
+            reactions: { [messageId]: [{ emoji: "👍", count: 1 }] },
+          });
+          expect(channelRequest).not.toHaveBeenCalled();
+          if (revoked) {
+            reactor.invalidated = true;
+          }
+        } finally {
+          releaseHandoff.resolve();
+        }
+        const result = await pending;
+        expect(result).toMatchObject([
+          true,
+          {
+            reactions: [{ emoji: "👍", count: 1 }],
+            mirror: revoked
+              ? { status: "failed", reason: "reaction author or session authority changed" }
+              : { status: "delivered" },
+          },
+        ]);
+        expect(channelRequest).toHaveBeenCalledTimes(revoked ? 0 : 1);
+        expect(runMessageAction).toHaveBeenCalledTimes(1);
+      });
+    },
+  );
+
   it("keeps one bot reaction per emoji while any reactor remains, in commit order", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       registerReactionChannel();
@@ -595,8 +676,10 @@ describe("session reaction handlers", () => {
       const firstHeld = new Promise<void>((resolve) => {
         releaseFirst = resolve;
       });
+      const firstEntered = createDeferredCore();
       runMessageAction
         .mockImplementationOnce(async () => {
+          firstEntered.resolve();
           await firstHeld;
           return { kind: "action", payload: { ok: true } };
         })
@@ -610,7 +693,8 @@ describe("session reaction handlers", () => {
         );
       // Alice's add is still in flight at the channel when Bob joins and Alice leaves.
       const aliceAdd = set("alice", false);
-      await vi.waitFor(() => expect(runMessageAction).toHaveBeenCalledTimes(1));
+      await firstEntered.promise;
+      expect(runMessageAction).toHaveBeenCalledTimes(1);
       expect((await set("bob", false))[1]).toMatchObject({
         mirror: { status: "skipped", reason: expect.stringContaining("other reactors") },
       });
