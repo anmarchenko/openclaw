@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { coerceErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/health";
 import { runUtf8CommandWithTimeout } from "openclaw/plugin-sdk/process-runtime";
+import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import {
   isCodexAppServerProxyLaunch,
   resolveCodexPrivateLauncher,
@@ -83,7 +83,9 @@ export async function probeCodexWorkspaceWriteSandbox(params: {
     );
     const argv = [invocation.command, ...invocation.argv];
     command = renderCommand(argv);
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-codex-sandbox-probe-"));
+    const root = await fs.mkdtemp(
+      path.join(resolvePreferredOpenClawTmpDir(), "openclaw-codex-sandbox-probe-"),
+    );
     try {
       const codexHome = path.join(root, "codex-home");
       const cwd = path.join(root, "workspace");

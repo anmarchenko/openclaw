@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/health";
 import { runUtf8CommandWithTimeout, type SpawnResult } from "openclaw/plugin-sdk/process-runtime";
+import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodexAppServerStartOptions } from "./app-server/config.js";
@@ -13,6 +13,7 @@ vi.mock("openclaw/plugin-sdk/process-runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("openclaw/plugin-sdk/process-runtime")>()),
   runUtf8CommandWithTimeout: vi.fn(),
 }));
+vi.mock("openclaw/plugin-sdk/temp-path", () => ({ resolvePreferredOpenClawTmpDir: vi.fn() }));
 vi.mock("./app-server/managed-binary.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./app-server/managed-binary.js")>()),
   resolveManagedCodexAppServerStartOptions: vi.fn(),
@@ -57,7 +58,7 @@ describe("Codex workspace-write sandbox probe", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     root = tempDirs.make("openclaw-codex-probe-test-");
-    vi.spyOn(os, "tmpdir").mockReturnValue(root);
+    vi.mocked(resolvePreferredOpenClawTmpDir).mockReturnValue(root);
     vi.spyOn(process, "platform", "get").mockReturnValue("linux");
     resolveStart.mockImplementation(async (start) =>
       start.commandSource === "managed"
