@@ -156,13 +156,13 @@ describeLive("watched child follow-up yield", () => {
               finalReplies((await history(parentKey)).slice(beforeFollowup), followupMarker)[0],
           );
           expect(reply).toBe(`${followupMarker}\n${followupResult}`);
-          await until("follow-up completion wake committed", () => {
+          await until("follow-up completion wake committed", async () => {
             const completed = listSubagentRunsForRequester(parentKey).find(
               (run) => run.runId === sendReceipt?.runId,
             );
             return completed?.delivery?.status === "delivered" &&
               completed.requesterSettleWake === undefined &&
-              countPendingDescendantRuns(parentKey) === 0
+              (await countPendingDescendantRuns(parentKey, () => {})) === 0
               ? true
               : undefined;
           });

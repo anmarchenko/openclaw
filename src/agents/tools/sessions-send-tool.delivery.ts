@@ -1,7 +1,6 @@
 /** Delivers notifications, new turns, and active-run steering for sessions_send. */
 import crypto from "node:crypto";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { runWithInProcessGatewaySessionMutation } from "../../gateway/server-plugin-in-process-dispatch.js";
 import type { GatewaySessionStoreTarget } from "../../gateway/session-utils-store.types.js";
@@ -20,7 +19,6 @@ import {
 } from "../../sessions/user-turn-transcript.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import type { DeliveryContext } from "../../utils/delivery-context.types.js";
-import { resolveSessionAgentId } from "../agent-scope.js";
 import { resolveActiveEmbeddedRunSessionId } from "../embedded-agent-runner/active-run-projections.js";
 import {
   type EmbeddedAgentQueueMessageOptions,
@@ -88,16 +86,15 @@ export async function notifySessionsSendSession(params: {
 }
 
 function isRunScopedAgentSessionKey(sessionKey: string): boolean {
-  const parsed = parseAgentSessionKey(normalizeOptionalString(sessionKey));
+  const parsed = parseAgentSessionKey(sessionKey);
   return Boolean(parsed && /(?:^|:)run:[^:]+(?::|$)/.test(parsed.rest));
 }
 
 function resolveCronRunScopedFallbackSessionKey(sessionKey: string): string | undefined {
-  const normalizedSessionKey = normalizeOptionalString(sessionKey);
-  if (!normalizedSessionKey || !isCronRunSessionKey(normalizedSessionKey)) {
+  if (!isCronRunSessionKey(sessionKey)) {
     return undefined;
   }
-  const parsed = parseAgentSessionKey(normalizedSessionKey);
+  const parsed = parseAgentSessionKey(sessionKey);
   const fallbackRest = parsed?.rest.match(/^([\s\S]+):run:[^:]+$/)?.[1];
   return parsed && fallbackRest ? `agent:${parsed.agentId}:${fallbackRest}` : undefined;
 }
@@ -354,19 +351,16 @@ function deliveryFailure(params: SessionsSendDeliveryParams, error: unknown) {
 }
 
 export async function createConfiguredAgentMainSession(params: {
-  cfg: OpenClawConfig;
   callGateway: AgentToolGatewayRequestCaller;
-  agentId?: string;
+  agentId: string;
   sessionKey: string;
   requesterSessionKey?: string;
   useTrustedInProcessCreation: boolean;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const targetAgentId =
-    params.agentId ?? resolveSessionAgentId({ config: params.cfg, sessionKey: params.sessionKey });
   try {
     const createParams = {
       key: params.sessionKey,
-      agentId: targetAgentId,
+      agentId: params.agentId,
     };
     if (
       params.useTrustedInProcessCreation &&

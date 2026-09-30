@@ -13,6 +13,7 @@ import {
   captureGatewayToolCallerAssertion,
   getGatewayToolCallerIdentity,
 } from "./gateway-caller-context.js";
+import { runWithGatewayToolCleanupContext } from "./in-process-gateway.js";
 import { prepareSessionsSendFollowup } from "./sessions-send-followup-custody.js";
 import { startSessionsSendReplyFlow } from "./sessions-send-reply-flow.js";
 import {
@@ -190,7 +191,11 @@ export async function dispatchSessionsSendFollowup(
             spawnMode: "session",
             expectsCompletionMessage: true,
           },
-          { assertCurrent, persistence: "worker" },
+          {
+            assertCurrent,
+            assertPublicationCurrent: () => request?.custody.assertCurrent(),
+            persistence: "worker",
+          },
         );
         accepted = { runId: start.runId, childSessionKey, expectsCompletionMessage: true };
       }
@@ -200,13 +205,36 @@ export async function dispatchSessionsSendFollowup(
       }
     }
   } catch (error) {
+    let failure = error;
+    if (start.ok && watchedTurn) {
+      const runId = start.targetDisposition === "steered" ? start.steeredRunId : start.runId;
+      if (runId) {
+        try {
+          const { releaseRequesterTurnClaimForRun } =
+            await import("../subagents/registry/subagent-registry-requester-claim.js");
+          await runWithGatewayToolCleanupContext(() =>
+            releaseRequesterTurnClaimForRun({
+              runId,
+              requesterSessionKey: options.requesterSessionKey,
+              requesterAgentId: options.requesterAgentId,
+              requesterTurnRunId: watchedTurn,
+            }),
+          );
+        } catch (releaseError) {
+          failure = new AggregateError(
+            [error, releaseError],
+            "Accepted child completion could not be released to its requester session.",
+          );
+        }
+      }
+    }
     return {
       start: {
         ok: false as const,
         result: jsonResult({
           runId: start.ok ? start.runId : params.runId,
           status: "error",
-          error: formatErrorMessage(error),
+          error: formatErrorMessage(failure),
           sentBeforeError: true,
           sessionKey: replyContext.displayKey,
         }),

@@ -216,8 +216,8 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
           for (const [row, killReconciliation] of killReconciliationSnapshots) {
             preimages.set(row, { ...row, killReconciliation });
           }
-          const assertRegistrationCurrent = () => {
-            options.assertCurrent?.();
+          const assertPublicationCurrent = () => {
+            options.assertPublicationCurrent?.();
             if (custodyTransferred) {
               completionAuthority?.assertCurrent();
             }
@@ -225,6 +225,10 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
             if (!isAgentEventLifecycleGenerationCurrent(lifecycleGeneration)) {
               throw new Error("Subagent registration changed before worker publication");
             }
+          };
+          const assertRegistrationCurrent = () => {
+            options.assertCurrent?.();
+            assertPublicationCurrent();
           };
           workerOwnsRegistration = true;
           return (async () => {
@@ -235,6 +239,7 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
                 persist: this.options.persistAsyncOrThrow,
                 context: workerContext,
                 assertCurrent: assertRegistrationCurrent,
+                assertPublicationCurrent,
                 onPublished: activateRegistrationLifecycle,
               });
               if (result.publication !== "published") {

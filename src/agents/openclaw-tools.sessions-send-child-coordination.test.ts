@@ -100,6 +100,10 @@ import { createSessionConversationTestRegistry } from "../test-utils/session-con
 import { clearActiveEmbeddedRun, setActiveEmbeddedRun } from "./embedded-agent-runner/runs.js";
 import { createEmbeddedRunHandle } from "./embedded-agent-runner/runs.test-support.js";
 import { createRequesterYieldCallback } from "./openclaw-tools.requester-yield.js";
+import {
+  registerSessionsSendRequesterRetirementTests,
+  type GatewayCall,
+} from "./openclaw-tools.sessions-send-requester-retirement.test-support.js";
 import { observeSessionSendContinuations } from "./openclaw-tools.sessions-timeout.test-support.js";
 import { announceTesting } from "./subagents/announce/subagent-announce-overrides.test-support.js";
 import { onSubagentRegistryPersisted } from "./subagents/registry/subagent-registry-state.js";
@@ -127,11 +131,6 @@ afterAll(() => {
   continuations.restore();
 });
 
-type GatewayCall = {
-  method?: string;
-  params?: Record<string, unknown>;
-  onAccepted?: (payload: unknown) => void;
-};
 type AgentCallParams = {
   extraSystemPrompt?: string;
   inputProvenance?: { sourceSessionKey?: string; sourceRole?: string };
@@ -304,7 +303,7 @@ describe("sessions_send child coordination", () => {
           mode: "steer",
           watch: true,
         });
-        if (timing === "after completion") {
+        if (timing !== "before admission") {
           expect(sent.details).toMatchObject({
             status: "error",
             sentBeforeError: true,
@@ -312,7 +311,11 @@ describe("sessions_send child coordination", () => {
           });
           expect(queueA).toHaveBeenCalledOnce();
           expect(previous.requesterTurnRunId).toBeUndefined();
-          expect(previous.delivery?.status).toBe("delivered");
+          expect(queueB).not.toHaveBeenCalled();
+          expect(getSubagentRunByRunId("steer-B")?.requesterTurnRunId).toBeUndefined();
+          expect(previous.delivery?.status).toBe(
+            timing === "after completion" ? "delivered" : "pending",
+          );
           return;
         }
         expect(sent.details).toMatchObject({
@@ -320,14 +323,10 @@ describe("sessions_send child coordination", () => {
           targetDisposition: "steered",
           delivery: { status: "pending" },
         });
-        const acceptedRun = timing === "before admission" ? "steer-B" : "steer-A";
-        expect(timing === "before admission" ? queueB : queueA).toHaveBeenCalledOnce();
-        expect(timing === "before admission" ? queueA : queueB).not.toHaveBeenCalled();
-        expect(getSubagentRunByRunId(acceptedRun)?.requesterTurnRunId).toBe(requesterTurnRunId);
-        expect(
-          getSubagentRunByRunId(acceptedRun === "steer-A" ? "steer-B" : "steer-A")
-            ?.requesterTurnRunId,
-        ).toBeUndefined();
+        expect(queueB).toHaveBeenCalledOnce();
+        expect(queueA).not.toHaveBeenCalled();
+        expect(getSubagentRunByRunId("steer-B")?.requesterTurnRunId).toBe(requesterTurnRunId);
+        expect(previous.requesterTurnRunId).toBeUndefined();
         const yielded = await createSessionsYieldTool({
           sessionId: "steer-requester",
           onYield: () => {},
@@ -445,7 +444,7 @@ describe("sessions_send child coordination", () => {
         expect(yielded.details).toEqual({ status: "yielded" });
         expect(onYield).toHaveBeenCalledOnce();
         expect(
-          settleRequesterAfterSessionSpawns({
+          await settleRequesterAfterSessionSpawns({
             requesterSessionKey,
             requesterAgentId: "main",
             requesterTurnRunId,
@@ -495,6 +494,14 @@ describe("sessions_send child coordination", () => {
       }
     },
   );
+
+  registerSessionsSendRequesterRetirementTests({
+    config,
+    callGatewayMock,
+    calls,
+    writeEntry,
+    settleSessionWork,
+  });
 
   it.each([
     { direction: "requester", child: true },
