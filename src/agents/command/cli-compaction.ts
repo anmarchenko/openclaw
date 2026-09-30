@@ -77,7 +77,7 @@ type SettingsManagerLike = {
 };
 type CliCompactionDeps = {
   openSessionManager: (target: SessionTranscriptRuntimeTarget) => SessionManagerLike;
-  ensureContextEnginesInitialized: () => void;
+  ensureContextEnginesInitialized: () => Promise<void>;
   resolveContextEngine: (cfg: OpenClawConfig) => Promise<ContextEngine>;
   createPreparedEmbeddedAgentSettingsManager: (params: {
     cwd: string;
@@ -601,7 +601,7 @@ export async function runCliTurnCompactionLifecycle(
     try {
       result = await work.run(async () => {
         if (isNativeHarnessCompactionSession(params.sessionEntry, params.provider)) {
-          cliCompactionDeps.ensureContextEnginesInitialized();
+          await cliCompactionDeps.ensureContextEnginesInitialized();
           resolvedContextEngine = await cliCompactionDeps.resolveContextEngine(params.cfg);
           await applyAutoCompactionGuard(resolvedContextEngine);
           const nativeOutcome = await compactNativeHarnessCliTranscript({
@@ -634,7 +634,7 @@ export async function runCliTurnCompactionLifecycle(
         if (useContextEngineCompaction) {
           assertActive();
           if (!resolvedContextEngine) {
-            cliCompactionDeps.ensureContextEnginesInitialized();
+            await cliCompactionDeps.ensureContextEnginesInitialized();
             resolvedContextEngine = await cliCompactionDeps.resolveContextEngine(params.cfg);
           }
           const contextEngine = resolvedContextEngine;

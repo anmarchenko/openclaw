@@ -16,8 +16,8 @@ import { resetContextEngineRuntimeQuarantineForTests } from "./registry.test-sup
 
 beforeEach(() => resetContextEngineRuntimeQuarantineForTests());
 
-afterEach(() => {
-  resetContextEngineRuntimeQuarantineForTests();
+afterEach(async () => {
+  await resetContextEngineRuntimeQuarantineForTests();
   vi.restoreAllMocks();
 });
 

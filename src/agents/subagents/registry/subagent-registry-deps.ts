@@ -42,7 +42,7 @@ export async function resolveSubagentRegistryContextEngine(
   options?: ResolveContextEngineOptions,
 ) {
   const runtime = await subagentRegistryRuntimeLoader.load();
-  runtime.ensureContextEnginesInitialized();
+  await runtime.ensureContextEnginesInitialized();
   return await runtime.resolveContextEngine(cfg, options);
 }
 

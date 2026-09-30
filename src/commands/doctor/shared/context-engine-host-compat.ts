@@ -233,7 +233,7 @@ async function resolveSelectedContextEngineInfo(params: {
     return { info: { id: engineId, name: engineId }, warnings: [] };
   }
 
-  ensureContextEnginesInitialized();
+  await ensureContextEnginesInitialized();
   let pluginRegistry: PluginRegistry | undefined;
   let inspection: Awaited<ReturnType<typeof acquirePluginRegistryForInspection>> | undefined;
   let engine: ContextEngine | undefined;

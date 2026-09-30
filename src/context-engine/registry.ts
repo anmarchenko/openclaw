@@ -20,6 +20,7 @@ import {
 } from "./compaction-watchdog.js";
 import { contextEngineAbortSignal, isContextEngineAbortRejection } from "./context-engine-abort.js";
 import {
+  clearPersistedContextEngineQuarantineForActivation,
   clearPersistedContextEngineQuarantineForProcess,
   listPersistedContextEngineQuarantines,
   recordPersistedContextEngineQuarantine,
@@ -240,7 +241,7 @@ function wrapResolvedContextEngine(
               // Abort is caller intent, not engine instability; never quarantine for it.
               throw error;
             }
-            recordContextEngineQuarantine({
+            await recordContextEngineQuarantine({
               engineId: metadata.engineId,
               owner: metadata.owner,
               operation: methodName,
@@ -298,13 +299,13 @@ function requireContextEngineOwner(owner: string): string {
   return normalizedOwner;
 }
 
-function recordContextEngineQuarantine(params: {
+async function recordContextEngineQuarantine(params: {
   engineId: string;
   owner?: string;
   operation: string;
   error: unknown;
   defaultEngineId: string;
-}): ContextEngineRuntimeQuarantine {
+}): Promise<ContextEngineRuntimeQuarantine> {
   const existing = contextEngineRegistryState.quarantinedEngines.get(params.engineId);
   if (existing) {
     // First failure wins so logs and diagnostics point at the root cause, not follow-on fallback use.
@@ -320,7 +321,11 @@ function recordContextEngineQuarantine(params: {
   };
   contextEngineRegistryState.quarantinedEngines.set(params.engineId, quarantine);
   try {
-    recordPersistedContextEngineQuarantine(quarantine);
+    await recordPersistedContextEngineQuarantine(quarantine, () => {
+      if (contextEngineRegistryState.quarantinedEngines.get(quarantine.engineId) !== quarantine) {
+        throw new Error("Context engine quarantine was cleared");
+      }
+    });
   } catch {
     // Quarantine behavior must not depend on the best-effort health mirror.
   }
@@ -346,20 +351,28 @@ export async function listContextEngineQuarantines(): Promise<ContextEngineRunti
   return quarantines.concat(persisted.filter(({ engineId }) => !seenEngineIds.has(engineId)));
 }
 
-function clearContextEngineRuntimeQuarantine(engineId: string): void {
+async function clearContextEngineRuntimeQuarantine(
+  engineId: string,
+  assertCurrent: () => void,
+): Promise<void> {
   contextEngineRegistryState.quarantinedEngines.delete(engineId);
-  clearPersistedContextEngineQuarantineForProcess(engineId, process.pid);
+  await clearPersistedContextEngineQuarantineForProcess(engineId, process.pid, () => {
+    assertCurrent();
+    if (contextEngineRegistryState.quarantinedEngines.has(engineId)) {
+      throw new Error("Context engine quarantine changed during recovery");
+    }
+  });
 }
 
 /**
  * Register a context engine implementation under an explicit trusted owner.
  */
-export function registerContextEngineForOwner(
+export async function registerContextEngineForOwner(
   id: string,
   factory: ContextEngineFactory,
   owner: string,
   opts?: RegisterContextEngineForOwnerOptions,
-): ContextEngineRegistrationResult {
+): Promise<ContextEngineRegistrationResult> {
   const targetRegistry = requireActivePluginRegistry();
   const result = registerContextEngineInRegistry(targetRegistry, id, factory, owner, opts);
   if (
@@ -367,7 +380,13 @@ export function registerContextEngineForOwner(
     (opts?.lifecycle ?? "runtime") === "runtime" &&
     getActivePluginRegistry() === targetRegistry
   ) {
-    clearContextEngineRuntimeQuarantine(id);
+    const assertCurrent = () => {
+      if (getActivePluginRegistry() !== targetRegistry) {
+        throw new Error("Context engine registration was superseded");
+      }
+    };
+    // Health cleanup cannot turn the already-applied registration into a refusal.
+    await clearContextEngineRuntimeQuarantine(id, assertCurrent);
   }
   return result;
 }
@@ -414,7 +433,8 @@ export { adoptRuntimeContextEngineRegistrations } from "./registry-adoption.js";
 export function activateContextEngineRegistrations(pluginRegistry: PluginRegistry): void {
   for (const [id, registration] of pluginRegistry.contextEngines) {
     if (registration.lifecycle === "runtime") {
-      clearContextEngineRuntimeQuarantine(id);
+      contextEngineRegistryState.quarantinedEngines.delete(id);
+      clearPersistedContextEngineQuarantineForActivation(id);
     }
   }
 }
@@ -694,7 +714,7 @@ export async function resolveContextEngine(
           `Available engines: ${listContextEngineIds().join(", ") || "(none)"}`,
       );
     }
-    recordContextEngineQuarantine({
+    await recordContextEngineQuarantine({
       engineId,
       operation: "resolve",
       error: "not registered",
@@ -733,7 +753,7 @@ export async function resolveContextEngine(
     if (isDefaultEngine || !operation || isContextEngineAbortRejection(error, abortSignal)) {
       throw error;
     }
-    recordContextEngineQuarantine({
+    await recordContextEngineQuarantine({
       engineId,
       owner: entry.owner,
       operation,

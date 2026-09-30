@@ -2,7 +2,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { expectDefined } from "@openclaw/normalization-core";
 import { CURRENT_SESSION_VERSION } from "openclaw/plugin-sdk/agent-sessions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
@@ -23,7 +22,6 @@ import { getAsyncWorkSignal } from "../../shared/async-work-scope.js";
 import { closeOpenClawAgentDatabasesAsync } from "../../state/openclaw-agent-db.js";
 import { withEnv } from "../../test-utils/env.js";
 import { resolveCliBackendConfig } from "../cli-backends.js";
-import { createModelGenerationFixture } from "../embedded-agent-runner/model.generation-scope.test-support.js";
 import { SessionManager } from "../sessions/session-manager.js";
 import { cliCompactionBackendEntrypoints } from "./cli-compaction-runtime.test-support.js";
 import {
@@ -33,6 +31,7 @@ import {
 } from "./cli-compaction.js";
 import {
   buildContextEngine,
+  createPreparedRuntimeLease,
   systemCompactionHost,
   writeSessionFile,
 } from "./cli-compaction.test-support.js";
@@ -57,33 +56,6 @@ const defaultPreemptiveCompaction = () => ({
   toolResultReducibleChars: 0,
   effectiveReserveTokens: 200,
 });
-
-function createPreparedRuntimeLease(input: {
-  config: OpenClawConfig;
-  agentDir: string;
-  agentId?: string;
-  workspaceDir?: string;
-}) {
-  const prepared = createModelGenerationFixture({
-    config: input.config,
-    label: "cli",
-    agentDir: input.agentDir,
-    workspaceDir: expectDefined(input.workspaceDir, "compaction fixture workspace"),
-  });
-  return {
-    snapshot: {
-      ...prepared.preparedModelRuntime,
-      ...(input.agentId ? { agentId: input.agentId } : {}),
-    },
-    pluginGeneration: {
-      configuredCatalogEntries: [],
-      inlineProviderModels: [],
-      pluginMetadataSnapshot: prepared.metadataSnapshot,
-      pluginRegistry: prepared.pluginRegistry,
-    },
-    [Symbol.asyncDispose]: vi.fn(async () => {}),
-  };
-}
 
 async function prepareCompactionScenario(params: {
   tmpDir: string;
@@ -1238,7 +1210,7 @@ describe("runCliTurnCompactionLifecycle", () => {
       sessionKey: "agent:main:cli",
       sessionEntry: { sessionFile: undefined },
       deps: {
-        ensureContextEnginesInitialized: () => {
+        ensureContextEnginesInitialized: async () => {
           calls.push("ensure");
         },
         resolveContextEngine: async () => {
@@ -1253,6 +1225,9 @@ describe("runCliTurnCompactionLifecycle", () => {
   });
 
   it("bounds a hung CLI context-engine compaction and leaves resume state intact", async () => {
+    const compactStarted = createDeferred();
+    const compactGate = createDeferred();
+    const disposed = createDeferred();
     const scenario = await prepareCompactionScenario({
       suffix: "cli-timeout",
       tmpDir,
@@ -1267,7 +1242,12 @@ describe("runCliTurnCompactionLifecycle", () => {
         ...buildContextEngine({ compactCalls }),
         async compact(compactParams) {
           compactCalls.push(compactParams);
-          return await new Promise(() => {});
+          compactStarted.resolve();
+          await compactGate.promise;
+          return { ok: false, compacted: false };
+        },
+        async dispose() {
+          disposed.resolve();
         },
       }),
     });
@@ -1280,18 +1260,25 @@ describe("runCliTurnCompactionLifecycle", () => {
     const rejection = expect(pending).rejects.toThrow(
       "CLI transcript compaction failed for claude-cli/opus: Compaction timed out",
     );
-    await vi.advanceTimersByTimeAsync(1_000);
-    await rejection;
-    vi.useRealTimers();
+    try {
+      await compactStarted.promise;
+      await vi.advanceTimersByTimeAsync(1_000);
+      await rejection;
 
-    expect(compactCalls).toHaveLength(1);
-    expect(compactCalls[0]?.abortSignal).toBeInstanceOf(AbortSignal);
-    expect(compactCalls[0]?.abortSignal?.aborted).toBe(true);
-    expect(maintenance).not.toHaveBeenCalled();
-    expect(recordCliCompactionInStore).not.toHaveBeenCalled();
-    expect(sessionStore[sessionKey]?.cliSessionBindings?.["claude-cli"]?.sessionId).toBe(
-      "claude-session",
-    );
+      expect(compactCalls).toHaveLength(1);
+      expect(compactCalls[0]?.abortSignal).toBeInstanceOf(AbortSignal);
+      expect(compactCalls[0]?.abortSignal?.aborted).toBe(true);
+      expect(maintenance).not.toHaveBeenCalled();
+      expect(recordCliCompactionInStore).not.toHaveBeenCalled();
+      expect(sessionStore[sessionKey]?.cliSessionBindings?.["claude-cli"]?.sessionId).toBe(
+        "claude-session",
+      );
+    } finally {
+      compactGate.resolve();
+      await pending.catch(() => undefined);
+      await disposed.promise;
+      vi.useRealTimers();
+    }
   });
 
   it.each(cliCompactionBackendEntrypoints.map((entry) => [entry.provider, entry] as const))(

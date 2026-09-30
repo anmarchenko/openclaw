@@ -75,7 +75,7 @@ export async function createContextEngineLogicalTurnLease(params: {
   warn?: (message: string) => void;
 }): Promise<ContextEngineLogicalTurnLease> {
   const { runId, sessionId } = params.identity;
-  ensureContextEnginesInitialized();
+  await ensureContextEnginesInitialized();
   const resolution = await resolveLogicalTurnContextEngines(params.config, {
     agentDir: params.agentDir,
     workspaceDir: params.workspaceDir,
