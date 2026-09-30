@@ -11,10 +11,9 @@ import { isMeetingRealtimeRouteReady, isMeetingTalkBackMode } from "./meeting-mo
 import { normalizeMeetingObservationProvenance } from "./observation-provenance.js";
 import { createMeetingPageScripts } from "./page-script-source.js";
 import type {
-  MeetingBrowserAdapter,
   MeetingBrowserLeaveStep,
-  MeetingManualActionCategory,
   MeetingPlatformAdapter as MeetingPlatformAdapterContract,
+  MeetingPlatformAdapterOptions,
   MeetingPlatformRuntimeMetadata,
 } from "./platform-adapter-contract.js";
 import { registerMeetingPluginCli } from "./plugin-cli.js";
@@ -69,47 +68,6 @@ export interface MeetingPlatformAdapter<
   DialInParams,
   DialInPlan
 > {}
-
-export type MeetingPlatformAdapterOptions<
-  Session,
-  Mode extends string,
-  Health extends MeetingBrowserHealth,
-  Transcript extends MeetingTranscriptSnapshot,
-  CreateParams = never,
-  CreateResult = never,
-  DialInParams = never,
-  DialInPlan = never,
-> = Omit<
-  MeetingPlatformAdapter<
-    Session,
-    Mode,
-    Health,
-    Transcript,
-    CreateParams,
-    CreateResult,
-    DialInParams,
-    DialInPlan
-  >,
-  "agentConsult" | "browser" | "session"
-> & {
-  agentConsult: MeetingPlatformRuntimeMetadata["agentConsult"];
-  browser: Omit<
-    MeetingBrowserAdapter<Mode, Health, Transcript>,
-    "captions" | "classifyManualAction" | "parseLeaveResult" | "parseStatus" | "permissionNotes"
-  > & {
-    captions: Omit<MeetingBrowserAdapter<Mode, Health, Transcript>["captions"], "parseTranscript">;
-    permissionNotes?: MeetingBrowserAdapter<Mode, Health, Transcript>["permissionNotes"];
-  };
-  parsing: {
-    classifyManualActionReason(reason: string): MeetingManualActionCategory;
-    displayName: string;
-    invalidTranscriptMessage: string;
-    malformedStatusMessage: string;
-    malformedTranscriptMessage: string;
-    statusFields?(parsed: Record<string, unknown>): Partial<Health>;
-  };
-  session: MeetingPlatformRuntimeMetadata["session"];
-};
 
 function browserResultString(result: unknown): string | undefined {
   if (!result || typeof result !== "object") {

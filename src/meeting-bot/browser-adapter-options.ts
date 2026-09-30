@@ -1,7 +1,9 @@
 import type { MeetingBrowserAudioCaptureRequest } from "./browser-audio-capture-source.js";
 import { isMeetingTalkBackMode } from "./meeting-modes.js";
-import type { MeetingBrowserStatusScriptParams } from "./platform-adapter-contract.js";
-import type { MeetingPlatformAdapterOptions } from "./platform-adapter.js";
+import type {
+  MeetingBrowserStatusScriptParams,
+  MeetingPlatformAdapterOptions,
+} from "./platform-adapter-contract.js";
 import type { MeetingPluginChromeHealth, MeetingTranscriptSnapshot } from "./session-types.js";
 
 export function createMeetingBrowserAdapterOptions<
