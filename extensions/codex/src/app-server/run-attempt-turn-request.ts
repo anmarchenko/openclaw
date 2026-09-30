@@ -165,7 +165,6 @@ export async function prepareCodexAttemptTurnRequest(
         throw new Error("Codex native model or thread ownership changed during turn start.");
       }
     };
-    // The progress owner represents Auto with a live function; explicit Fast is a boolean.
     const fastMode =
       typeof runtimeParams.fastMode === "function"
         ? runtimeParams.fastMode()
@@ -209,9 +208,7 @@ export async function prepareCodexAttemptTurnRequest(
     });
     const serviceTier = await resolveCodexUltrafastServiceTier({
       enabled:
-        fastMode === "ultrafast" ||
-        (turnAppServer.enableUltrafast === true &&
-          (fastMode === undefined || (typeof runtimeParams.fastMode === "function" && fastMode))),
+        fastMode === "ultrafast" || (turnAppServer.enableUltrafast === true && fastMode !== false),
       serviceTier: turnStartParams.serviceTier,
       model: turnStartParams.model ?? model,
       modelProvider,

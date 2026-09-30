@@ -158,7 +158,25 @@ export function registerCodexFastModeTests({
       fastMode: "ultrafast" as const,
       expected: "priority",
     },
-    { name: "explicit Fast", supported: true, fastMode: true, expected: "priority" },
+    {
+      name: "Fast with existing Ultrafast opt-in",
+      supported: true,
+      fastMode: true,
+      expected: "ultrafast",
+    },
+    {
+      name: "Fast without Ultrafast opt-in",
+      supported: true,
+      fastMode: true,
+      enableUltrafast: false,
+      expected: "priority",
+    },
+    {
+      name: "Fast with unsupported Ultrafast",
+      supported: false,
+      fastMode: true,
+      expected: "priority",
+    },
     { name: "Fast off", supported: true, fastMode: false, expected: null },
     { name: "standalone setting", supported: true, fastMode: undefined, expected: "ultrafast" },
     {
@@ -252,11 +270,11 @@ export function registerCodexFastModeTests({
     },
     { name: "Fast off", fastMode: false, supported: true, baseline: undefined, expected: null },
     {
-      name: "explicit Fast",
+      name: "Fast with existing Ultrafast opt-in",
       fastMode: true,
       supported: true,
       baseline: undefined,
-      expected: "priority",
+      expected: "ultrafast",
     },
     {
       name: "revoked Ultrafast",

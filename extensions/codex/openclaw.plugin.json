@@ -749,7 +749,7 @@
     },
     "appServer.enableUltrafast": {
       "label": "Enable Ultrafast (for supported models)",
-      "help": "Prefer Ultrafast when no shared Fast-mode control is supplied or Fast Auto is active, and the selected model advertises access. Explicit Fast remains priority and Standard remains off.",
+      "help": "Prefer Ultrafast when the shared Fast-mode control is on, active Auto, or unspecified, and the selected model advertises access. Existing opted-in Fast sessions retain this behavior; Standard remains off.",
       "advanced": true
     },
     "appServer.networkProxy": {

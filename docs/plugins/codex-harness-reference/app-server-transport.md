@@ -110,7 +110,7 @@ managed stdio or the local Unix control socket for production workloads.
 | `approvalsReviewer`              | `"user"` or an allowed guardian reviewer               | Use `"auto_review"` to let Codex review native approval prompts when allowed.                                                                                                                                                                                                                                                                                                                                                      |
 | `defaultWorkspaceDir`            | current process directory                              | Workspace used by `/codex bind` when `--cwd` is omitted.                                                                                                                                                                                                                                                                                                                                                                           |
 | `serviceTier`                    | unset                                                  | Native Codex app-server preference only. Any non-empty string passes through for forward compatibility; documented values are `"priority"` and `"flex"`. `null` clears the override, and legacy `"fast"` normalizes to `"priority"`. This is neither the shared Fast-mode setting nor a direct embedded OpenAI setting. A shared Fast run control supersedes it with `priority` or `null`, or decides per model call in auto mode. |
-| `enableUltrafast`                | `false`                                                | Prefer `ultrafast` when no shared Fast-mode run control is supplied or Fast Auto is active, and the authenticated app-server catalog advertises it for the selected native model. Explicit Fast remains `priority`; Standard remains off. Unsupported models and unavailable catalogs keep the baseline tier.                                                                                                                      |
+| `enableUltrafast`                | `false`                                                | Prefer `ultrafast` when the shared Fast-mode control is on, active Auto, or unspecified, and the authenticated app-server catalog advertises it for the selected native model. Standard remains off. Existing opted-in Fast sessions retain this behavior. Unsupported models and unavailable catalogs keep the baseline tier.                                                                                                     |
 | `networkProxy`                   | disabled                                               | Opt into Codex permissions-profile networking for app-server commands. OpenClaw defines the selected `permissions.<profile>.network` config and selects it with `default_permissions` instead of sending `sandbox`.                                                                                                                                                                                                                |
 | `experimental.sandboxExecServer` | `false`                                                | Preview opt-in that registers an OpenClaw sandbox-backed Codex environment with the supported Codex app-server so native Codex execution can run inside the active OpenClaw sandbox.                                                                                                                                                                                                                                               |
 
@@ -156,11 +156,12 @@ The Control UI requires separate authenticated account-discovery evidence before
 showing Ultrafast. The saved preference is not a guarantee of the upstream tier
 honored for the request.
 
-The legacy `appServer.enableUltrafast: true` setting applies when no shared
-Fast-mode run control is supplied or Fast Auto is active. Explicit Fast (`true`) stays
-at `priority`; Standard (`false`) and inactive Auto remain off. A shared
-`"ultrafast"` preference uses the validated tier even when this legacy setting
-is disabled.
+The existing `appServer.enableUltrafast: true` opt-in continues to apply when
+shared Fast (`true`) or Fast Auto is active, or no shared run control is supplied.
+This preserves existing sessions across upgrades. Standard (`false`) and inactive
+Auto remain off. Without that opt-in, Fast requests `priority`; select Ultrafast
+explicitly to request it for one session. A shared `"ultrafast"` preference uses
+the validated tier even when the plugin-wide setting is disabled.
 
 `appServer.networkProxy` is explicit because it changes the Codex sandbox
 contract. When enabled, OpenClaw also sets `features.network_proxy.enabled` and
