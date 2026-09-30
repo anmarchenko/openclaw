@@ -8,11 +8,15 @@ import {
   loadSessionEntryReadOnly,
   patchSessionEntryCore,
   persistSessionTranscriptTurn,
+  SessionTranscriptProjectionUnavailableError,
   upsertSessionEntryCore,
 } from "../config/sessions/session-accessor.js";
+import { seedUnindexedTranscriptForTest } from "../config/sessions/session-accessor.sqlite-import.test-support.js";
+import { isSessionTranscriptIndexReconcileRunning } from "../config/sessions/session-transcript-reconcile.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { GatewayScheduler } from "../infra/gateway-scheduler.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
+import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
 import {
   createGatewaySchedulerClock,
   createTestGatewayScheduler,
@@ -121,6 +125,61 @@ describe("Activity recap admission, refresh, and provider recovery", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     await testState.cleanup();
+  });
+
+  it("rebuilds a dirty imported projection before retrying the recap", async () => {
+    const target = { agentId: "main", key: "agent:main:unindexed-recap" };
+    const transcript = scope(target);
+    const databaseOptions = { agentId: target.agentId, env: testState.env };
+    await seedUnindexedTranscriptForTest({
+      ...transcript,
+      entry: { sessionId: transcript.sessionId, updatedAt: 1 },
+      events: [
+        { type: "session", id: transcript.sessionId, version: 3 },
+        {
+          type: "message",
+          id: "request",
+          parentId: null,
+          message: { role: "user", content: "Repair the import." },
+        },
+        {
+          type: "message",
+          id: "answer",
+          parentId: "request",
+          message: { role: "assistant", content: "Repaired the import." },
+        },
+      ].map((event, seq) => ({
+        session_id: transcript.sessionId,
+        seq,
+        created_at: seq + 1,
+        event_json: JSON.stringify(event),
+      })),
+    });
+    openOpenClawAgentDatabase(databaseOptions)
+      .db.prepare(
+        "UPDATE session_transcript_index_state SET needs_rebuild = 1 WHERE session_id = ?",
+      )
+      .run(transcript.sessionId);
+    expect(() => readActivitySummaryBatch({ scope: transcript })).toThrow(
+      SessionTranscriptProjectionUnavailableError,
+    );
+    expect(isSessionTranscriptIndexReconcileRunning(databaseOptions)).toBe(false);
+
+    const settled = createDeferred<ReturnType<typeof view>>();
+    changed.mockImplementation(() => {
+      const summary = view(target);
+      if (summary?.state === "current" || summary?.state === "unavailable") {
+        settled.resolve(summary);
+      }
+    });
+    service.ensure(target);
+    expect(await settled.promise).toMatchObject({ state: "current", text: result.text });
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(complete.mock.calls[0]![0].prompt).messages).toEqual([
+      "user: Repair the import.",
+      "assistant: Repaired the import.",
+    ]);
+    expect(loadSessionEntryReadOnly(transcript)?.activitySummary?.coveredMessages).toBe(2);
   });
 
   it("does not call the model after a grouped child becomes hidden during preparation", async () => {
