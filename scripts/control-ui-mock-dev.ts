@@ -2414,7 +2414,9 @@ async function createChatPickerScenario(
       {
         self: true,
         id: selfProfile.id,
-        identity: { type: "profile", id: selfProfile.id },
+        // A resolved viewer identity switches direct threads to gutter avatars;
+        // only the reactions fixture emulates an identity-resolving Gateway.
+        ...(fixture === "reactions" ? { identity: { type: "profile", id: selfProfile.id } } : {}),
         name: selfProfile.displayName ?? undefined,
         email: selfProfile.emails[0],
         avatarUrl: `/api/users/${selfProfile.id}/avatar`,
