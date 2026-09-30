@@ -1703,7 +1703,7 @@ jobs:
 
       - &datadog_test_setup
         name: Setup Datadog Test Optimization
-        uses: ./.github/actions/setup-datadog-tests
+        uses: ./.ci-harness/.github/actions/setup-datadog-tests
         with:
           api-key: ${{ secrets.DD_API_KEY }}
           site: ${{ vars.DD_SITE }}
