@@ -1,5 +1,8 @@
 name: CI
 
+# Personal-fork baseline: set OPENCLAW_CI_RUNNER_BACKEND=github in repository variables.
+# Use pull-request CI; the manual main validation tier is restricted to upstream.
+
 on:
   schedule:
     - cron: "23 * * * *"
