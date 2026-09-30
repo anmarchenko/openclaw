@@ -1,5 +1,6 @@
 import type { GatewaySessionRow } from "../../../api/types.ts";
 import type { MessageGroup } from "../../../lib/chat/chat-types.ts";
+import { normalizeMessage } from "../../../lib/chat/message-normalizer.ts";
 import { agentRunFrameActiveStatusParts } from "../chat-agent-run-grouping.ts";
 import {
   agentRunFrameGroups,
@@ -16,7 +17,7 @@ import {
 } from "../chat-thread.ts";
 import { isInterSessionGroup } from "../chat-turn-boundary.ts";
 import { readLiveTerminalRevision } from "../terminal-message-identity.ts";
-import { resolveMessageGroupSenderLabel } from "./chat-message-group-identity.ts";
+import { resolveMessageGroupSenderLabel } from "./chat-message-sender.ts";
 import type { StreamGroupPart } from "./chat-message.ts";
 import { projectChatPositions, type ChatPositionIndex } from "./chat-position-projection.ts";
 import type { LoadedReplySource } from "./chat-reply-preview.ts";
@@ -26,6 +27,7 @@ import type { TranscriptRow } from "./chat-transcript-layout.ts";
 type ChatRenderItem = ReturnType<typeof coalesceAgentRunFrames>[number];
 
 type TranscriptChain = {
+  searchActive: boolean;
   collapsedItems: readonly ChatRenderItem[];
   transcriptItems: readonly ChatRenderItem[];
   /** Active status parts shown inside the preceding reply, keyed by that reply's group. */
@@ -102,7 +104,13 @@ function coalesceInterSessionUpdates(items: ChatRenderItem[]): ChatRenderItem[] 
     pending = [];
   };
   for (const item of items) {
-    if (item.kind !== "group" || !isInterSessionGroup(item) || !item.senderSession?.sessionKey) {
+    if (
+      item.kind !== "group" ||
+      !isInterSessionGroup(item) ||
+      !item.senderSession?.sessionKey ||
+      // Reply targets retain the original group's run and prompt attribution.
+      item.messages.some(({ message }) => normalizeMessage(message).replyTarget)
+    ) {
       flush();
       result.push(item);
       continue;
@@ -211,7 +219,12 @@ export function projectTranscriptChain(
       const transcriptItems = cached.value.transcriptItems.slice();
       collapsedItems[live.owner.collapsedIndex] = owner;
       transcriptItems[live.owner.transcriptIndex] = owner;
-      const value = { collapsedItems, transcriptItems, continuations: cached.value.continuations };
+      const value = {
+        collapsedItems,
+        transcriptItems,
+        continuations: cached.value.continuations,
+        searchActive: cached.value.searchActive,
+      };
       const updatedOwner = { ...live.owner, item: owner };
       const updatedLive = { ...live, item: next, owner: updatedOwner };
       liveChains.set(value, {
@@ -258,7 +271,7 @@ export function projectTranscriptChain(
       continuations.set(previous.key, activeStatusParts);
       return false;
     });
-    return { collapsedItems, transcriptItems, continuations };
+    return { collapsedItems, transcriptItems, continuations, searchActive: options.searchActive };
   };
   const value = build();
   const index = findLiveStreamIndex(chatItems);
@@ -307,6 +320,7 @@ export function projectTranscriptIndex(
       chain.transcriptItems.slice(live.owner.transcriptIndex),
       expandedToolCards,
       new Map(),
+      chain.searchActive,
     );
     const visible = tail.markerIdsByMessageId.has(live.item.key);
     const base = memoize(baseIndexes, live.structuralChain, [...key, visible], () => {
@@ -360,6 +374,7 @@ function buildTranscriptIndex(
     chain.transcriptItems,
     expandedToolCards,
     messageRowKeysById,
+    chain.searchActive,
   );
   // New row keys measure expanded work immediately; existing keys keep their
   // cached height until ResizeObserver reports the changed layout.

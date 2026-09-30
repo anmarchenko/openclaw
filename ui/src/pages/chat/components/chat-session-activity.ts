@@ -4,7 +4,7 @@ import { icons } from "../../../components/icons.ts";
 import type { MessageGroup } from "../../../lib/chat/chat-types.ts";
 import { rawMessageTimestamp } from "../chat-thread-items.ts";
 import { renderForwardedAttribution } from "./chat-forwarded-attribution.ts";
-import type { RenderMessageGroupOptions } from "./chat-message-group.ts";
+import type { RenderMessageGroupOptions } from "./chat-message-group-options.ts";
 import { renderChatTimestamp } from "./chat-message-timestamp.ts";
 import "./chat-session-activity.css";
 
@@ -36,11 +36,18 @@ export function renderInterSessionActivity(
             }
           }}
         >
-          <summary class="chat-inline-disclosure chat-session-activity__summary">
+          <summary
+            class="chat-inline-disclosure chat-session-activity__summary"
+            aria-disabled=${opts.searchResult ? "true" : nothing}
+            tabindex=${opts.searchResult ? "-1" : nothing}
+            @click=${(event: MouseEvent) => {
+              if (opts.searchResult) {
+                event.preventDefault();
+              }
+            }}
+          >
             ${renderForwardedAttribution(group, { ...opts, updateCount: count, linkSource: false })}
-            <span class="chat-session-activity__chevron" aria-hidden="true"
-              >${icons.chevronRight}</span
-            >
+            ${opts.searchResult ? nothing : html`<span class="chat-session-activity__chevron" aria-hidden="true">${icons.chevronRight}</span>`}
           </summary>
           <div class="chat-session-activity__body">
             ${expanded ? renderForwardedAttribution(group, { ...opts, showAvatar: false }) : nothing}

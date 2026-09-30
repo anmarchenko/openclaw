@@ -24,6 +24,7 @@ export function projectChatPositions(
   items: readonly RenderItem[],
   expandedWork: ReadonlyMap<string, boolean>,
   messageRowKeysById: Map<string, string>,
+  searchActive = false,
 ): ChatPositionIndex {
   const markers = new Map<string, ChatPositionMarker>();
   const markerIdsByMessageId = new Map<string, string>();
@@ -44,7 +45,11 @@ export function projectChatPositions(
     messageRowKeysById.set(messageId, rowKey);
   };
   const group = (item: MessageGroup, rowKey: string) => {
-    if (isInterSessionGroup(item) && !expandedWork.get("inter-session:" + item.key)) {
+    if (
+      isInterSessionGroup(item) &&
+      !searchActive &&
+      !expandedWork.get("inter-session:" + item.key)
+    ) {
       return;
     }
     if ((item.role !== "user" && item.role !== "assistant") || item.visibleContent === "none") {

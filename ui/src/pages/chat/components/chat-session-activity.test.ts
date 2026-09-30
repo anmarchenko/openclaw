@@ -1,9 +1,10 @@
 /* @vitest-environment jsdom */
 import { render } from "lit";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildChatItems } from "../chat-thread-build.ts";
 import { resetChatThreadState } from "../chat-thread.ts";
 import { renderMessageGroup } from "./chat-message-group.ts";
+import { createReplyPreviewResolver } from "./chat-reply-preview.ts";
 import { latestTranscriptAnnouncement } from "./chat-transcript-announcement.ts";
 import {
   expandReplyTargetWork,
@@ -144,8 +145,57 @@ describe("inter-session activity", () => {
     expect(container.textContent).not.toContain("Original receipt");
   });
 
+  it("keeps reply-bearing receipts separate and preserves navigation to their original", () => {
+    const reply = update("reply");
+    const messages = [
+      update("first"),
+      { ...reply, __openclaw: { ...reply["__openclaw"], replyToId: "older" } },
+      update("last"),
+    ];
+    const projection = chain(messages);
+    expect(projection.transcriptItems).toHaveLength(3);
+    const group = projection.transcriptItems[1];
+    if (group?.kind !== "group") {
+      throw new Error("expected reply activity group");
+    }
+    const onOpenReply = vi.fn();
+    const resolveReplyPreview = createReplyPreviewResolver(
+      new Map([
+        [
+          "older",
+          {
+            message: {
+              role: "user",
+              content: "Earlier question",
+              __openclaw: { id: "older", senderId: "alice", senderName: "Alice" },
+            },
+            messageId: "older-render",
+            senderLabel: "Alice",
+          },
+        ],
+      ]),
+      { assistantName: "Assistant" },
+    );
+    render(
+      renderMessageGroup(group, {
+        showReasoning: false,
+        isToolMessageExpanded: () => true,
+        resolveReplyPreview,
+        onOpenReply,
+      }),
+      container,
+    );
+    const target = container.querySelector<HTMLButtonElement>(
+      '.chat-reply-attribution button[aria-label="Replying to Alice"]',
+    );
+    expect(target).not.toBeNull();
+    target?.click();
+    expect(onOpenReply).toHaveBeenCalledWith("older");
+  });
+
   it("shows matching text immediately in transcript search", () => {
-    const group = chain([update("search")], true).transcriptItems[0];
+    const projection = chain([update("search")], true);
+    const group = projection.transcriptItems[0];
     if (group?.kind !== "group") {
       throw new Error("expected search group");
     }
@@ -159,5 +209,14 @@ describe("inter-session activity", () => {
     );
     expect(container.querySelector<HTMLDetailsElement>(".chat-session-activity")?.open).toBe(true);
     expect(container.textContent).toContain("END search");
+    const collapsed = new Map([["inter-session:" + group.key, false]]);
+    expect(
+      projectTranscriptIndex(projection, collapsed, { assistantName: "Assistant" }).positionIndex
+        .markers,
+    ).toHaveLength(1);
+    expect(collapsed.get("inter-session:" + group.key)).toBe(false);
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    container.querySelector("summary")?.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
   });
 });
