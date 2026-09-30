@@ -9,14 +9,14 @@ import {
   setSessionReactionInDatabase,
   type SessionReactionWrite,
   type SetSessionReactionParams,
-  type StoredMessageReactionSummary,
 } from "./session-reaction-store.kernel.js";
+import type { StoredMessageReactionSummary } from "./session-reaction-store.types.js";
 
 export {
   SessionReactionLimitError,
   SessionReactionMessageMissingError,
-  type StoredMessageReactionSummary,
 } from "./session-reaction-store.kernel.js";
+export type { StoredMessageReactionSummary } from "./session-reaction-store.types.js";
 
 export function setSessionReaction(
   scope: SessionAccessScope,

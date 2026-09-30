@@ -10,12 +10,7 @@ import type {
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { SessionWorkStartInvalidatedError } from "./lifecycle.js";
 import { readSessionEntryInstanceId } from "./session-accessor.sqlite-entry-identity.js";
-
-export type StoredMessageReactionSummary = {
-  emoji: string;
-  count: number;
-  identities: Array<{ id: string; label?: string }>;
-};
+import type { StoredMessageReactionSummary } from "./session-reaction-store.types.js";
 
 export type SetSessionReactionParams = {
   messageId: string;
