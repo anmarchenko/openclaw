@@ -13,6 +13,8 @@ Set the `DD_API_KEY` Actions secret and the `DD_SITE` repository variable (`data
 
 Set either switch to the literal `true` or `false`. Each Vitest invocation maps its switch to `DD_CIVISIBILITY_ITR_ENABLED`. `false` disables TIA for that service while keeping test reporting. `true` allows TIA when enabled in that service's Datadog Test Optimization settings; it does not override a disabled backend setting. Both services use `DD_ENV=ci`. Service names do not depend on shard, test file, or runner.
 
+For Vitest with dd-trace 6.18.0, the local off switch prevents fetching skippable suites, but the Vitest integration still derives coverage collection and the reported `test.itr.tests_skipping.enabled` tag from backend settings. An enabled tag alone does not prove tests can be skipped. Verify the local configuration and actual selected/skipped suites when validating the switches; use the service settings in Datadog to disable backend TIA and its coverage collection.
+
 For example, set `OPENCLAW_DD_TIA_TESTS=false` and `OPENCLAW_DD_TIA_E2E=true` to disable normal-test TIA and allow E2E TIA independently. Change repository variables for the next run; changing them does not modify an already running process. For a full instrumented training/comparison run, set both to `false`.
 
 ## Integration and scope

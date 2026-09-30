@@ -9,9 +9,10 @@ if (!tracerHome) {
 }
 await import(pathToFileURL(path.join(tracerHome, "register.js")).href);
 
-// dd-trace 6.18.0 proxies ESM builtins. Captured exports break
-// syncBuiltinESMExports(), and its ?iitm URLs cannot be reused in uninstrumented
-// children. Keep builtins native; package loads retain the stock test hooks.
+// Preserve native builtin bindings so syncBuiltinESMExports() updates them.
+// Preserve native builtin URLs so import.meta.resolve() results remain usable
+// in child processes without Datadog. Keep stock hooks for package modules,
+// including Vitest.
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (isBuiltin(specifier)) {
