@@ -1,7 +1,6 @@
 import { inspectSourceUpdateArtifacts } from "../../../scripts/lib/source-update-artifact-preflight.mts";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { createUpdatePreflightFailure } from "../../infra/update-preflight-details.js";
-import { recordUpdateRunPhaseAsync } from "../../infra/update-run-write.async.js";
 import type { UpdateRunnerOptions } from "../../infra/update-runner-types.js";
 import { UpdatePreMutationError, type UpdateCommandOptions } from "./shared.js";
 import type { createUpdateCommandExecutionGuards } from "./update-command-execution-guards.js";
@@ -30,22 +29,14 @@ export async function admitSourceUpdateArtifacts(
 }
 
 export async function recordInspectedGitTarget(
-  run: UpdateCommandOptions["run"],
   target: Parameters<BeforeGitMutation>[0],
+  recordPhase: ReturnType<typeof createUpdateCommandExecutionGuards>["recordPhase"],
   assertCurrent: () => void,
-  captureWriteOptions: ReturnType<typeof createUpdateCommandExecutionGuards>["captureWriteOptions"],
 ): Promise<void> {
   assertCurrent();
-  if (run) {
-    await recordUpdateRunPhaseAsync(
-      run.runId,
-      "staging",
-      {
-        target: { kind: "git", sha: target.sha, version: target.version },
-      },
-      captureWriteOptions(),
-    );
-  }
+  await recordPhase("staging", {
+    target: { kind: "git", sha: target.sha, version: target.version },
+  });
   assertCurrent();
   assertReadableGitTarget(target);
 }

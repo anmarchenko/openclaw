@@ -6,7 +6,6 @@ import type { UpdateStateSchemaVersion } from "../../infra/update-candidate-stat
 import type { UpdateDoctorConfigChange } from "../../infra/update-doctor-config.js";
 import { resolveUpdateFinalizationTimeoutMs } from "../../infra/update-finalization-budget.js";
 import { canResolveRegistryVersionForPackageTarget } from "../../infra/update-global.js";
-import { recordUpdateRunPhaseAsync } from "../../infra/update-run-write.async.js";
 import type { UpdateRunResult } from "../../infra/update-runner-types.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -105,6 +104,7 @@ export async function executeMutableUpdate(
     onStateHandoff,
     admitExecutor,
     captureWriteOptions,
+    recordPhase,
   } = createUpdateCommandExecutionGuards(opts, params.root);
   let retentionInstallTarget = params.packageInstallTarget;
   const prepareMutableUpdate = async (env?: NodeJS.ProcessEnv, activationTimeoutMs?: number) => {
@@ -374,15 +374,8 @@ export async function executeMutableUpdate(
   const validateCandidate = async (root: string) => {
     assertUpdateCommandRecovery(opts);
     const env = ownedManagedUpdateContext?.env ?? opts.run?.env ?? process.env;
-    if (originalRun) {
-      await recordUpdateRunPhaseAsync(
-        originalRun.runId,
-        "validating",
-        undefined,
-        captureWriteOptions(),
-      );
-      assertExecutionCurrent();
-    }
+    await recordPhase("validating");
+    assertExecutionCurrent();
     try {
       if (params.updateInstallKind === "package") {
         // The staged manifest owns schema support, including artifacts without registry metadata.
@@ -532,15 +525,8 @@ export async function executeMutableUpdate(
       await parkForegroundUpdateForActivation(params, assertExecutionCurrent);
       await prepareMutableUpdate(env, activationTimeoutMs);
       assertExecutionCurrent();
-      if (originalRun) {
-        await recordUpdateRunPhaseAsync(
-          originalRun.runId,
-          "activating",
-          undefined,
-          captureWriteOptions(),
-        );
-        assertExecutionCurrent();
-      }
+      await recordPhase("activating");
+      assertExecutionCurrent();
       const publication = {
         roots,
         env,
@@ -650,12 +636,7 @@ export async function executeMutableUpdate(
         devTarget: params.devTarget,
         inspectGitTarget: async (target, installTarget) => {
           retentionInstallTarget = installTarget;
-          await recordInspectedGitTarget(
-            originalRun,
-            target,
-            assertExecutionCurrent,
-            captureWriteOptions,
-          );
+          await recordInspectedGitTarget(target, recordPhase, assertExecutionCurrent);
           assertExecutionCurrent();
           await recheckSchemas(target.schemaVersions);
           if (!gitContextPrepared) {
