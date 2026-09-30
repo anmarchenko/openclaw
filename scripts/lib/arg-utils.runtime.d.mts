@@ -44,6 +44,7 @@ export function classifyBoundedUnsignedDecimal(
   min: number,
   max: number,
 ): BoundedUnsignedDecimalResult;
+export function parseCiBooleanFlag(value: string | undefined, fallback?: boolean): boolean;
 export function parsePermissiveBooleanToken(value: unknown): boolean | undefined;
 export function isOpenEndedTruthyValue(value: string | undefined): boolean;
 export function isStrictAffirmativeValue(value: string | undefined): boolean;

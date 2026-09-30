@@ -7,6 +7,7 @@ import {
   isOpenEndedTruthyValue,
   isStrictAffirmativeValue,
   parseFlagArgs,
+  parseCiBooleanFlag,
   parsePermissiveBooleanToken,
   parseStrictBooleanArg,
   readFlagValue,
@@ -64,6 +65,25 @@ describe("scripts/lib/arg-utils required option arguments", () => {
     expect(() => requireOptionArgument(argv, 0, "--output")).toThrow(
       new Error("--output requires a value"),
     );
+  });
+});
+
+describe("scripts/lib/arg-utils CI Boolean flags", () => {
+  it.each([
+    { input: undefined, fallback: false, expected: false },
+    { input: undefined, fallback: true, expected: true },
+    { input: "", fallback: true, expected: false },
+    { input: " FALSE ", fallback: true, expected: false },
+    { input: " TRUE ", fallback: false, expected: true },
+    { input: "1", fallback: false, expected: true },
+    { input: "0", fallback: true, expected: false },
+    { input: "yes", fallback: false, expected: false },
+    { input: "no", fallback: true, expected: true },
+    { input: "on", fallback: false, expected: false },
+    { input: "off", fallback: true, expected: true },
+    { input: "enabled", fallback: true, expected: true },
+  ])("preserves $input with fallback $fallback", ({ input, fallback, expected }) => {
+    expect(parseCiBooleanFlag(input, fallback)).toBe(expected);
   });
 });
 

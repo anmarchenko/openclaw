@@ -405,6 +405,10 @@ it.concurrent.each([
     };
     const preflightScripts = {
       "scripts/ci-build-manifest.mjs": readFileSync("scripts/ci-build-manifest.mjs", "utf8"),
+      "scripts/lib/arg-utils.runtime.mjs": readFileSync(
+        "scripts/lib/arg-utils.runtime.mjs",
+        "utf8",
+      ),
     };
     const releasePolicy = Object.fromEntries(
       [

@@ -490,8 +490,8 @@ def checkout_harness(sha):
         if kind in ("platform", "linux-node"):
             pathspecs += evidence_scripts
         elif kind == "preflight":
-            pathspecs += ["scripts/ci-build-manifest.mjs", "scripts/lib/release-context.mjs",
-                          "scripts/lib/release-version.mjs"]
+            pathspecs += ["scripts/ci-build-manifest.mjs", "scripts/lib/arg-utils.runtime.mjs",
+                          "scripts/lib/release-context.mjs", "scripts/lib/release-version.mjs"]
         if kind == "platform":
             pathspecs += platform_scripts
         if kind == "linux-node":
