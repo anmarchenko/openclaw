@@ -1,13 +1,12 @@
 // Keep Node's builtin module identities while retaining Datadog's test hooks.
 import { isBuiltin, registerHooks } from "node:module";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const tracerHome = process.env.OPENCLAW_DD_TRACE_HOME;
-if (!tracerHome) {
-  throw new Error("Datadog test preload requires OPENCLAW_DD_TRACE_HOME");
+const tracerRegister = process.env.DD_TRACE_ESM_IMPORT;
+if (!tracerRegister) {
+  throw new Error("Datadog test preload requires DD_TRACE_ESM_IMPORT");
 }
-await import(pathToFileURL(path.join(tracerHome, "register.js")).href);
+await import(pathToFileURL(tracerRegister).href);
 
 // Preserve native builtin bindings so syncBuiltinESMExports() updates them.
 // Preserve native builtin URLs so import.meta.resolve() results remain usable

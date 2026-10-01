@@ -4,30 +4,30 @@ The GitHub-hosted baseline is recorded in [PR #1](https://github.com/anmarchenko
 
 ## Configuration
 
-Set the `DD_API_KEY` Actions secret and the `DD_SITE` repository variable (`datadoghq.com` for US1). External pull requests without the secret run the original uninstrumented tests. A configured key with a missing site fails setup.
+Set the `DD_API_KEY` Actions secret and the `DD_SITE` repository variable (`datadoghq.com` for US1). External pull requests without the secret run the original uninstrumented tests. The site defaults to US1 (`datadoghq.com`).
 
 All supported Node/Vitest lanes use **one service, `openclaw-tests`**, with `DD_ENV=ci`. There is no E2E classification or service selection in the launcher.
 
 The repository variable **`DD_CIVISIBILITY_ITR_ENABLED`** is the single TIA switch, defaulting to `true`. Set it to the literal `false` to disable suite skipping while retaining test reporting. `true` permits skipping when enabled in the service's Datadog settings. Changes apply to the next run. The former `OPENCLAW_DD_TIA_TESTS` and `OPENCLAW_DD_TIA_E2E` variables are no longer read.
 
-For pinned dd-trace 6.18.0 with Vitest, local `false` prevents fetching and selecting skippable suites, but coverage collection and the `test.itr.tests_skipping.enabled` tag still follow backend settings. That tag alone does not prove skipping occurred. Disabling backend TIA also disables its coverage collection.
+In the previously validated dd-trace 6.18.0 Vitest integration, local `false` prevents fetching and selecting skippable suites, but coverage collection and the `test.itr.tests_skipping.enabled` tag still follow backend settings. That tag alone does not prove skipping occurred. Disabling backend TIA also disables its coverage collection.
 
 ## Why the launcher needs a small hook
 
-The CI setup action owns installation and configuration: it installs `dd-trace@6.18.0` in the runner's temporary directory and exports the Datadog settings. Datadog automatically instruments Vitest; no tests are manually wrapped.
+The official `DataDog/test-visibility-github-action` installs `dd-trace@latest` and exports the Datadog settings. There is no custom setup action or pinned tracer version. Datadog automatically instruments Vitest; no tests are manually wrapped.
 
 The existing `resolveVitestTestCommand` adds the CI and ESM preloads to the final Node/Vitest child's `NODE_OPTIONS`, preserving its memory flags and test arguments. Both direct and batch callers forward that environment. OpenClaw overwrites Node options while constructing shard environments, so an earlier job-wide preload would be lost. Build/preparation and Bun commands remain uninstrumented. Vitest workers inherit the preloads before test setup clears `NODE_OPTIONS` from fixture environments.
 
-The [official Datadog action](https://github.com/DataDog/test-visibility-github-action) can install the tracer, but Vitest still needs explicit Node preload configuration. Changing the installer would not remove this final-child hook or the compatibility fixes below.
+The launcher consumes the [official action](https://github.com/DataDog/test-visibility-github-action)'s `DD_TRACE_PACKAGE` and `DD_TRACE_ESM_IMPORT` variables. No installation-path adapter is needed.
 
 ## Compatibility fixes retained
 
 - The small ESM preload imports Datadog's stock loader and preserves native Node builtin identities. Stock builtin proxies broke `syncBuiltinESMExports()` and produced resolved builtin URLs unusable in uninstrumented child processes. Package hooks, including Vitest instrumentation, remain enabled.
-- `DD_TRACE_OPENAI_ENABLED=false` prevents the pinned OpenAI tracing integration from mutating streamed SDK chunks.
-- `DD_TRACE_HTTP_ENABLED=false` preserves Node raw header arrays that the pinned HTTP propagation hook otherwise converts incorrectly.
+- `DD_TRACE_OPENAI_ENABLED=false` prevents OpenAI tracing from mutating streamed SDK chunks.
+- `DD_TRACE_HTTP_ENABLED=false` preserves Node raw header arrays that HTTP propagation otherwise converts incorrectly.
 - `DD_TRACE_OTEL_ENABLED=false` keeps the application's native OpenTelemetry provider and OTLP exporter contract.
 
-These exclusions preserve Vitest reporting and TIA. Datadog early flake detection and automatic retries stay disabled to preserve the comparison workload.
+Standalone probes reproduced all three application-instrumentation failures with `dd-trace@latest` (6.19.0 on 2026-10-01); each passed with its corresponding opt-out. The native builtin-binding probe also still failed with the stock loader. Recheck these workarounds when a tracer release fixes the underlying behavior. These exclusions preserve Vitest reporting and TIA. Datadog early flake detection and automatic retries stay disabled to preserve the comparison workload.
 
 ## Coverage and verification
 

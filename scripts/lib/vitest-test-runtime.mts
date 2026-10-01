@@ -10,9 +10,9 @@ export function resolveVitestTestCommand(
 ): { command: string; args: string[]; env?: NodeJS.ProcessEnv } {
   const runtime = env.OPENCLAW_VITEST_RUNTIME?.trim() || "node";
   if (runtime === "node") {
-    const tracerHome = env.OPENCLAW_DD_TRACE_HOME;
+    const tracerInit = env.DD_TRACE_PACKAGE;
     const cliIndex = args.findIndex((arg) => path.basename(arg) === "vitest.mjs");
-    if (!tracerHome || cliIndex < 0) {
+    if (!env.DD_API_KEY || !tracerInit || !env.DD_TRACE_ESM_IMPORT || cliIndex < 0) {
       return { command: process.execPath, args };
     }
     // Add hooks only at the final spawn, after shard-specific V8 options.
@@ -25,7 +25,7 @@ export function resolveVitestTestCommand(
         NODE_OPTIONS: [
           env.NODE_OPTIONS,
           `--import=${JSON.stringify(new URL("./datadog-test-register.mjs", import.meta.url).href)}`,
-          `--require=${JSON.stringify(path.join(tracerHome, "ci/init.js"))}`,
+          `--require=${JSON.stringify(tracerInit)}`,
         ]
           .filter(Boolean)
           .join(" "),

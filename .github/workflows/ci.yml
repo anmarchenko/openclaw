@@ -100,6 +100,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  DD_CIVISIBILITY_ITR_ENABLED: ${{ vars.DD_CIVISIBILITY_ITR_ENABLED || 'true' }}
+  DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED: "false"
+  DD_CIVISIBILITY_FLAKY_RETRY_ENABLED: "false"
+  # Preserve native application behavior while reporting Vitest tests.
+  DD_TRACE_OPENAI_ENABLED: "false"
+  DD_TRACE_HTTP_ENABLED: "false"
+  DD_TRACE_OTEL_ENABLED: "false"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   IOS_SCREENSHOT_FASTLANE_VERSION: "2.240.1"
   IOS_SCREENSHOT_NODE_VERSION: "24.16.0"
@@ -1703,11 +1710,14 @@ jobs:
 
       - &datadog_test_setup
         name: Setup Datadog Test Optimization
-        uses: ./.ci-harness/.github/actions/setup-datadog-tests
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: DataDog/test-visibility-github-action@1abae93083b69778facd7ee11f89184306c999e6 # v3.2.0
         with:
-          api-key: ${{ secrets.DD_API_KEY }}
-          site: ${{ vars.DD_SITE }}
-          tia: ${{ vars.DD_CIVISIBILITY_ITR_ENABLED || 'true' }}
+          languages: js
+          api_key: ${{ secrets.DD_API_KEY }}
+          site: ${{ vars.DD_SITE || 'datadoghq.com' }}
+          service: openclaw-tests
+          js-tracer-version: latest
 
       - name: Restore dist build cache
         id: dist_build_cache
