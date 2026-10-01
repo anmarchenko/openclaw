@@ -2,6 +2,8 @@ import { durationUnitMs } from "./duration-units.ts";
 
 export type DurationPart = { value: number | bigint; unit: keyof typeof durationUnitMs };
 
+const SINGLE_UNIT_SCALES = ["second", "minute", "hour", "day"] as const;
+
 function resolveDurationParts(ms: number, unitCount: number, showYears = false): DurationPart[] {
   const days = BigInt(Math.trunc(ms / durationUnitMs.day));
   const parts: DurationPart[] = [
@@ -42,7 +44,7 @@ export function resolveCompactDurationParts(ms?: number | null, showYears = fals
 
 export function resolveSingleUnitDurationParts(ms: number): DurationPart[] {
   let scale: number = durationUnitMs.millisecond;
-  for (const unit of ["second", "minute", "hour", "day"] as const) {
+  for (const unit of SINGLE_UNIT_SCALES) {
     const nextScale = durationUnitMs[unit];
     if (Math.round(ms / scale) * scale < nextScale) {
       break;
