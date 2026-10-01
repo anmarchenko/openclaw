@@ -4,7 +4,7 @@ The GitHub-hosted baseline is recorded in [PR #1](https://github.com/anmarchenko
 
 ## Configuration
 
-Set the `DD_API_KEY` Actions secret and the `DD_SITE` repository variable (`datadoghq.com` for US1). External pull requests without the secret run the original uninstrumented tests. The site defaults to US1 (`datadoghq.com`).
+Set the `DD_API_KEY` Actions secret and the `DD_SITE` repository variable (`datadoghq.com` for US1). The site defaults to US1 (`datadoghq.com`).
 
 All supported Node/Vitest lanes use **one service, `openclaw-tests`**, with `DD_ENV=ci`. There is no E2E classification or service selection in the launcher.
 

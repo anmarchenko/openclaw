@@ -12,7 +12,7 @@ export function resolveVitestTestCommand(
   if (runtime === "node") {
     const tracerInit = env.DD_TRACE_PACKAGE;
     const cliIndex = args.findIndex((arg) => path.basename(arg) === "vitest.mjs");
-    if (!env.DD_API_KEY || !tracerInit || !env.DD_TRACE_ESM_IMPORT || cliIndex < 0) {
+    if (!tracerInit || !env.DD_TRACE_ESM_IMPORT || cliIndex < 0) {
       return { command: process.execPath, args };
     }
     // Add hooks only at the final spawn, after shard-specific V8 options.

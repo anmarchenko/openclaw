@@ -1710,7 +1710,6 @@ jobs:
 
       - &datadog_test_setup
         name: Setup Datadog Test Optimization
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: DataDog/test-visibility-github-action@1abae93083b69778facd7ee11f89184306c999e6 # v3.2.0
         with:
           languages: js

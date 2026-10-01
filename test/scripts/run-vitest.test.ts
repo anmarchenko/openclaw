@@ -148,7 +148,6 @@ describe("scripts/run-vitest", () => {
     (tia) => {
       const args = ["node_modules/vitest/vitest.mjs", "run", "--maxWorkers=2"];
       const env = {
-        DD_API_KEY: "synthetic-test-key",
         DD_TRACE_PACKAGE: "/ci tools/dd-trace/ci/init",
         DD_TRACE_ESM_IMPORT: "/ci tools/dd-trace/register.js",
         DD_SERVICE: "openclaw-tests",
@@ -167,7 +166,6 @@ describe("scripts/run-vitest", () => {
 
   it("keeps preparation and Bun uninstrumented even when Datadog is configured", () => {
     const env = {
-      DD_API_KEY: "synthetic-test-key",
       DD_TRACE_PACKAGE: "/tracer/ci/init",
       DD_TRACE_ESM_IMPORT: "/tracer/register.js",
     };
