@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { createTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { listSessionEntriesCore } from "../config/sessions/session-accessor.entry.js";
 import {
   loadSessionEntryReadOnly,
@@ -10,6 +10,7 @@ import {
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "./openclaw-agent-db-contract.js";
 import { withOpenClawAgentDatabaseReadOnly } from "./openclaw-agent-db-readonly.js";
 import {
+  closeOpenClawAgentDatabasesAsync,
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "./openclaw-agent-db.js";
@@ -20,6 +21,7 @@ import {
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import { withExistingOpenClawStateDatabaseReadOnly } from "./openclaw-state-db-readonly.js";
 import {
+  closeOpenClawStateDatabaseAsync,
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
 } from "./openclaw-state-db.js";
@@ -64,7 +66,7 @@ vi.mock("../infra/node-sqlite.js", async (importOriginal) => {
   };
 });
 
-const tempDirs = useAutoCleanupTempDirTracker(afterAll);
+const tempDirs = createTempDirTracker();
 const counts: Array<{
   owner: string;
   userVersion: number;
@@ -72,10 +74,14 @@ const counts: Array<{
   dataVersion: number;
 }> = [];
 
-afterAll(() => {
+afterAll(async () => {
+  // Worker lease cleanup still needs the original databases before their roots are removed.
+  await closeOpenClawAgentDatabasesAsync();
+  await closeOpenClawStateDatabaseAsync();
   closeOpenClawAgentDatabasesForTest();
   closeOpenClawStateDatabaseForTest();
   vi.restoreAllMocks();
+  tempDirs.cleanup();
 });
 
 beforeAll(async () => {
