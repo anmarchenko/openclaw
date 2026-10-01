@@ -50,6 +50,8 @@ runs:
           echo "DD_TRACE_OPENAI_ENABLED=false"
           # HTTP propagation in dd-trace 6.18.0 loses Node's raw header-array fields.
           echo "DD_TRACE_HTTP_ENABLED=false"
+          # Keep the application's OpenTelemetry provider and OTLP exporters native.
+          echo "DD_TRACE_OTEL_ENABLED=false"
           echo "DD_CIVISIBILITY_AGENTLESS_ENABLED=true"
           echo "DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED=false"
           echo "DD_CIVISIBILITY_FLAKY_RETRY_ENABLED=false"
