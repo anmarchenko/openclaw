@@ -7,12 +7,9 @@ inputs:
   site:
     description: Datadog intake site for this key, such as datadoghq.com.
     required: false
-  tia-tests:
-    description: Allow backend TIA selection for normal tests.
+  tia:
+    description: Allow backend TIA selection for all supported Vitest tests.
     default: "true"
-  tia-e2e:
-    description: Allow backend TIA selection for E2E tests (requires coverage validation).
-    default: "false"
 runs:
   using: composite
   steps:
@@ -21,8 +18,7 @@ runs:
       env:
         DD_API_KEY: ${{ inputs.api-key }}
         DD_SITE: ${{ inputs.site }}
-        TIA_TESTS: ${{ inputs.tia-tests }}
-        TIA_E2E: ${{ inputs.tia-e2e }}
+        TIA: ${{ inputs.tia }}
       run: |
         set -euo pipefail
         if [[ -z "$DD_API_KEY" ]]; then
@@ -33,12 +29,10 @@ runs:
           echo "Set the DD_SITE repository variable to the site matching DD_API_KEY." >&2
           exit 1
         fi
-        for switch in "$TIA_TESTS" "$TIA_E2E"; do
-          if [[ "$switch" != true && "$switch" != false ]]; then
-            echo "Datadog TIA switches must be true or false." >&2
-            exit 1
-          fi
-        done
+        if [[ "$TIA" != true && "$TIA" != false ]]; then
+          echo "Datadog TIA switch must be true or false." >&2
+          exit 1
+        fi
         tracer_prefix="$RUNNER_TEMP/openclaw-datadog"
         npm install --prefix "$tracer_prefix" --ignore-scripts --no-save --no-audit --no-fund dd-trace@6.18.0
         {
@@ -46,6 +40,8 @@ runs:
           echo "DD_API_KEY=$DD_API_KEY"
           echo "DD_SITE=$DD_SITE"
           echo "DD_ENV=ci"
+          echo "DD_SERVICE=openclaw-tests"
+          echo "DD_CIVISIBILITY_ITR_ENABLED=$TIA"
           # The OpenAI span aggregator mutates streamed SDK chunks in dd-trace 6.18.0.
           echo "DD_TRACE_OPENAI_ENABLED=false"
           # HTTP propagation in dd-trace 6.18.0 loses Node's raw header-array fields.
@@ -55,6 +51,4 @@ runs:
           echo "DD_CIVISIBILITY_AGENTLESS_ENABLED=true"
           echo "DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED=false"
           echo "DD_CIVISIBILITY_FLAKY_RETRY_ENABLED=false"
-          echo "OPENCLAW_DD_TIA_TESTS=$TIA_TESTS"
-          echo "OPENCLAW_DD_TIA_E2E=$TIA_E2E"
         } >> "$GITHUB_ENV"

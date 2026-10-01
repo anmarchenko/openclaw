@@ -1707,8 +1707,7 @@ jobs:
         with:
           api-key: ${{ secrets.DD_API_KEY }}
           site: ${{ vars.DD_SITE }}
-          tia-tests: ${{ vars.OPENCLAW_DD_TIA_TESTS || 'true' }}
-          tia-e2e: ${{ vars.OPENCLAW_DD_TIA_E2E || 'false' }}
+          tia: ${{ vars.DD_CIVISIBILITY_ITR_ENABLED || 'true' }}
 
       - name: Restore dist build cache
         id: dist_build_cache
@@ -2861,8 +2860,6 @@ jobs:
       fail-fast: false
       max-parallel: ${{ (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && 6 || 4 }}
       matrix: ${{ fromJson(needs.preflight.outputs.qa_smoke_ci_matrix) }}
-    env:
-      OPENCLAW_DD_TEST_KIND: e2e
     steps:
       - *linux_node_checkout_step
       - name: Setup Node environment

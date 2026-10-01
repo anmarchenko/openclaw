@@ -1,34 +1,40 @@
 # Datadog Test Optimization on the personal fork
 
-The GitHub-hosted baseline is recorded in [PR #1](https://github.com/anmarchenko/openclaw/pull/1), including every test job and its duration. The successful baseline used 26h 03m 26s of aggregate runner time and 1h 47m 58s of elapsed time. Keep runner selection and the test matrix unchanged when comparing TIA savings.
+The GitHub-hosted baseline is recorded in [PR #1](https://github.com/anmarchenko/openclaw/pull/1), including every test job and its duration: 26h 03m 26s of aggregate runner execution and 1h 47m 58s elapsed. Keep runner selection and the test matrix unchanged when comparing TIA savings.
 
 ## Configuration
 
-Set the `DD_API_KEY` Actions secret and the `DD_SITE` repository variable (`datadoghq.com` for US1). External pull requests without the secret run the original uninstrumented tests. A configured key with a missing site fails setup instead of silently sending data to the wrong site.
+Set the `DD_API_KEY` Actions secret and the `DD_SITE` repository variable (`datadoghq.com` for US1). External pull requests without the secret run the original uninstrumented tests. A configured key with a missing site fails setup.
 
-| Service (`DD_SERVICE`) | Coverage                                                                                                                | Repository TIA switch   | Default |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- |
-| `openclaw-tests`       | Existing normal Node, tooling, contract, and Control UI test lanes                                                      | `OPENCLAW_DD_TIA_TESTS` | `true`  |
-| `openclaw-e2e`         | Dedicated E2E, real-Gateway UI, browser-extension and QA test-file lanes; dedicated E2E configs invoked by build checks | `OPENCLAW_DD_TIA_E2E`   | `false` |
+All supported Node/Vitest lanes use **one service, `openclaw-tests`**, with `DD_ENV=ci`. There is no E2E classification or service selection in the launcher.
 
-Set either switch to the literal `true` or `false`. Each Vitest invocation maps its switch to `DD_CIVISIBILITY_ITR_ENABLED`. `false` disables TIA for that service while keeping test reporting. `true` allows TIA when enabled in that service's Datadog Test Optimization settings; it does not override a disabled backend setting. Both services use `DD_ENV=ci`. Service names do not depend on shard, test file, or runner.
+The repository variable **`DD_CIVISIBILITY_ITR_ENABLED`** is the single TIA switch, defaulting to `true`. Set it to the literal `false` to disable suite skipping while retaining test reporting. `true` permits skipping when enabled in the service's Datadog settings. Changes apply to the next run. The former `OPENCLAW_DD_TIA_TESTS` and `OPENCLAW_DD_TIA_E2E` variables are no longer read.
 
-For Vitest with dd-trace 6.18.0, the local off switch prevents fetching skippable suites, but the Vitest integration still derives coverage collection and the reported `test.itr.tests_skipping.enabled` tag from backend settings. An enabled tag alone does not prove tests can be skipped. Verify the local configuration and actual selected/skipped suites when validating the switches; use the service settings in Datadog to disable backend TIA and its coverage collection.
+For pinned dd-trace 6.18.0 with Vitest, local `false` prevents fetching and selecting skippable suites, but coverage collection and the `test.itr.tests_skipping.enabled` tag still follow backend settings. That tag alone does not prove skipping occurred. Disabling backend TIA also disables its coverage collection.
 
-For example, set `OPENCLAW_DD_TIA_TESTS=false` and `OPENCLAW_DD_TIA_E2E=true` to disable normal-test TIA and allow E2E TIA independently. Change repository variables for the next run; changing them does not modify an already running process. For a full instrumented training/comparison run, set both to `false`.
+## Why the launcher needs a small hook
 
-## Integration and scope
+The CI setup action owns installation and configuration: it installs `dd-trace@6.18.0` in the runner's temporary directory and exports the Datadog settings. Datadog automatically instruments Vitest; no tests are manually wrapped.
 
-CI installs `dd-trace@6.18.0` in the runner's temporary directory, outside the application's dependencies. The existing Vitest launch owner adds the Datadog ESM and CI preloads to the final child environment after shard-specific Node options have been resolved. The preload preserves native Node builtin module identities: the stock tracer loader proxies them, which breaks `syncBuiltinESMExports()` and produces tracer-specific URLs that cannot be copied into uninstrumented child processes. Builtin ESM proxy instrumentation is bypassed; package modules retain the stock tracer hooks for Vitest test reporting and TIA. Workers inherit the hooks before test setup clears `NODE_OPTIONS`; build and orchestration processes receive no global preload. Both direct and grouped test invocations use the same owner. Automatic Datadog flaky retries and early flake detection are disabled so they do not alter the comparison workload. The OpenAI tracing integration is disabled with `DD_TRACE_OPENAI_ENABLED=false`: its dd-trace 6.18.0 stream aggregator mutates SDK chunks retained by callers. The HTTP tracing integration is also disabled with `DD_TRACE_HTTP_ENABLED=false`: its propagation hook converts Node raw header arrays into objects and loses the intended request headers. The Datadog OpenTelemetry bridge is disabled with `DD_TRACE_OTEL_ENABLED=false`: when the application sets `OTEL_SDK_DISABLED=false`, dd-trace 6.18.0 can replace its provider with spans missing the instrumentation scope required by its OTLP exporter. The application retains its native OpenTelemetry provider and exporters. These exclusions preserve Vitest reporting and TIA while disabling OpenAI/HTTP application tracing and Datadog OpenTelemetry provider replacement.
+The existing `resolveVitestTestCommand` adds the CI and ESM preloads to the final Node/Vitest child's `NODE_OPTIONS`, preserving its memory flags and test arguments. Both direct and batch callers forward that environment. OpenClaw overwrites Node options while constructing shard environments, so an earlier job-wide preload would be lost. Build/preparation and Bun commands remain uninstrumented. Vitest workers inherit the preloads before test setup clears `NODE_OPTIONS` from fixture environments.
 
-The services follow the existing execution lanes, not filename suffixes: some normal Node shards also contain integration-style or `.e2e.test.ts` files. This PR preserves those shard boundaries. It does not claim complete cross-process dependency coverage for either service. Keep TIA disabled for comparisons requiring complete execution until coverage behavior has been validated against representative source edits.
+The [official Datadog action](https://github.com/DataDog/test-visibility-github-action) can install the tracer, but Vitest still needs explicit Node preload configuration. Changing the installer would not remove this final-child hook or the compatibility fixes below.
 
-Vitest browser mode is reported, but dd-trace disables TIA for the whole mixed browser/Node invocation. Node-driven Playwright E2E is different: Chromium and separately spawned Gateway/CLI processes are not covered by the test worker's V8 coverage. E2E TIA therefore defaults off; enabling it is an explicit experiment and is not proof that remote application changes are safely selected. Non-isolated workers may conservatively accumulate coverage and skip fewer tests.
+## Compatibility fixes retained
 
-Bun test processes, custom QA flow scenarios that do not invoke Vitest, native platform jobs, static checks, and non-Vitest build verifiers are not instrumented. Frozen historical targets do not contain this launcher integration. No ddtest scheduling is introduced.
+- The small ESM preload imports Datadog's stock loader and preserves native Node builtin identities. Stock builtin proxies broke `syncBuiltinESMExports()` and produced resolved builtin URLs unusable in uninstrumented child processes. Package hooks, including Vitest instrumentation, remain enabled.
+- `DD_TRACE_OPENAI_ENABLED=false` prevents the pinned OpenAI tracing integration from mutating streamed SDK chunks.
+- `DD_TRACE_HTTP_ENABLED=false` preserves Node raw header arrays that the pinned HTTP propagation hook otherwise converts incorrectly.
+- `DD_TRACE_OTEL_ENABLED=false` keeps the application's native OpenTelemetry provider and OTLP exporter contract.
 
-## Verification and savings
+These exclusions preserve Vitest reporting and TIA. Datadog early flake detection and automatic retries stay disabled to preserve the comparison workload.
 
-Verify individual test and suite events in Datadog for both services, filtered by the PR commit and GitHub run. Session creation alone is insufficient proof of worker instrumentation. Verify TIA settings and actual skipped suites separately; a passing training run with zero skipped tests is not a measured savings result.
+## Coverage and verification
 
-Compare equivalent source changes with TIA off and on, recording selected/skipped tests, test-step time, summed runner execution, queue-inclusive elapsed time, and instrumentation/setup overhead. Compute monetary savings from the runners actually billed; public-repository standard GitHub-hosted runners can have zero direct runner charges. Preserve the full list of test jobs and durations for each comparison run.
+The single TIA switch applies equally to normal and Node-driven E2E tests. Enabling it does not establish complete dependency coverage: Chromium and separately spawned Gateway/CLI processes are not covered by the test worker's V8 coverage. Validate representative application edits before treating skips as safe for those subprocesses. Datadog disables TIA for Vitest browser-mode invocations itself. Non-isolated workers may conservatively accumulate coverage and skip fewer suites.
+
+Bun tests, custom non-Vitest QA flows, native platform jobs, static checks and non-Vitest build verifiers are excluded. Frozen historical targets do not contain this launcher integration. No ddtest scheduling is introduced.
+
+Verify individual worker events for `openclaw-tests`, filtered by CI pipeline ID and PR head (`git.commit.head.sha`). Check actual suite-skip events separately from enabled tags. Historical runs used two services; their results do not prove the unified configuration.
+
+Compare equivalent changes with TIA off and on, recording selected/skipped suites, test-step time, summed assigned runner execution and queue-inclusive elapsed time. Preserve every test-job duration. Calculate monetary savings only from actual billed runner prices; public-repository standard GitHub-hosted runners can have zero direct runner charges.
