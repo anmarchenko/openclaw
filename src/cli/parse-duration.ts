@@ -7,6 +7,8 @@ type DurationMsParseOptions = {
   defaultUnit?: "ms" | "s" | "m" | "h" | "d";
 };
 
+const SINGLE_DURATION_TOKEN = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/;
+
 const DURATION_UNIT_MS = new Map<string, number>([
   ["ms", durationUnitMs.millisecond],
   ["s", durationUnitMs.second],
@@ -49,7 +51,7 @@ export function parseDurationMs(raw: string, opts?: DurationMsParseOptions): num
   }
 
   // Fast path for a single token (supports default unit for bare numbers).
-  const single = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(trimmed);
+  const single = SINGLE_DURATION_TOKEN.exec(trimmed);
   if (single) {
     const value = single[1] ?? "";
     const unit = single[2] ?? opts?.defaultUnit ?? "ms";
