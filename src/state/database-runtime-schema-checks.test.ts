@@ -225,6 +225,6 @@ it("refuses schemas migrated by another process on the next read", () => {
         database.close();
       }
     }
-    closeOpenClawStateDatabaseForTest();
+    // The suite teardown drains agent workers before closing their shared state.
   }
 });
