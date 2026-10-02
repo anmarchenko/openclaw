@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { createTempDirTracker, useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { parseRemoteWorkspaceManifestEnvelope } from "../gateway/worker-environments/workspace-hash-memo.js";
 import { parseWorkerWorkspaceManifest } from "../gateway/worker-environments/workspace-manifest.js";
 import { REMOTE_WORKSPACE_MANIFEST_JS } from "../gateway/worker-environments/workspace-sync-scripts.js";
@@ -20,8 +20,8 @@ import { NodeWorkerWorkspaceRuntime } from "./node-worker-workspace.js";
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => vi.restoreAllMocks());
 
-async function fixture() {
-  const home = tempDirs.make("node-manifest-capture-");
+async function fixture(dirs = tempDirs) {
+  const home = dirs.make("node-manifest-capture-");
   const runtime = new NodeWorkerWorkspaceRuntime({
     root: path.join(home, "node"),
     env: { ...process.env, HOME: home },
@@ -179,13 +179,53 @@ describe("resident node manifest capture", () => {
     ).toBeDefined();
   });
 
-  it("keeps the workspace environment and joins a cancelled Git read before releasing capture", async () => {
-    const { home, workspaceDir } = await fixture();
+  it("keeps the workspace environment and joins a cancelled Git read before releasing capture", async ({
+    signal,
+    onTestFinished,
+  }) => {
+    const dirs = createTempDirTracker();
     const entered = createDeferredCore();
     const release = createDeferredCore();
     const controller = new AbortController();
+    let phase = "fixture acquisition";
+    let failurePhase: string | undefined;
+    let reported = false;
+    let fixtureWork: ReturnType<typeof fixture> | undefined;
+    let capture: Promise<unknown> | undefined;
+    const reportFailure = () => {
+      failurePhase ??= phase;
+      if (!reported) {
+        reported = true;
+        console.error(`[node-workspace-manifest] capture failure during ${failurePhase}`);
+      }
+    };
+    const stop = () => {
+      controller.abort();
+      release.resolve();
+    };
+    const onAbort = () => {
+      reportFailure();
+      stop();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    onTestFinished(async ({ task }) => {
+      if (task.result?.state === "fail" || signal.aborted) {
+        reportFailure();
+      }
+      stop();
+      // A Vitest timeout does not unwind the body. Join its work before removing inputs.
+      await fixtureWork?.catch(() => undefined);
+      await capture;
+      signal.removeEventListener("abort", onAbort);
+      dirs.cleanup();
+    });
+    fixtureWork = fixture(dirs);
+    const { home, workspaceDir } = await fixtureWork;
+    signal.throwIfAborted();
+    phase = "Git admission";
     vi.spyOn(gitExec, "executeGitCommandBuffered").mockImplementation(
       async (cwd, args, options) => {
+        phase = "Git callback validation";
         expect(cwd).toBe(workspaceDir);
         expect(args[0]).toBe("ls-files");
         expect(options?.baseEnv).toMatchObject({
@@ -195,6 +235,7 @@ describe("resident node manifest capture", () => {
         });
         expect(options?.signal).toBeDefined();
         expect(options?.killProcessTree).toBe(true);
+        phase = "Git callback admitted";
         entered.resolve();
         await release.promise;
         return {
@@ -208,7 +249,7 @@ describe("resident node manifest capture", () => {
       },
     );
     let settled = false;
-    const capture = runNodeWorkspaceManifestCapture({
+    capture = runNodeWorkspaceManifestCapture({
       argv: [workspaceDir, "a".repeat(40), "eligible"],
       home,
       maxHashMemoBytes: 60 * 1024,
@@ -229,15 +270,20 @@ describe("resident node manifest capture", () => {
           throw new Error("capture ended before Git admission");
         }),
       ]);
+      phase = "cancellation delivery";
       controller.abort();
       await Promise.resolve();
       expect(settled).toBe(false);
+      phase = "capture settlement after Git release";
       release.resolve();
       expect(await capture).toBeInstanceOf(Error);
+      phase = "manifest verification";
       expect(await fs.readdir(path.join(home, ".openclaw-worker", "manifests"))).toEqual([]);
+    } catch (error) {
+      failurePhase ??= phase;
+      throw error;
     } finally {
-      controller.abort();
-      release.resolve();
+      stop();
       await capture;
     }
   });

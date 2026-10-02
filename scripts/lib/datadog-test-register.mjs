@@ -2,6 +2,10 @@
 import { isBuiltin, registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 
+if (process.env.OPENCLAW_DD_TIA_DIAGNOSTICS === "1") {
+  await import("./datadog-tia-coverage-diagnostics.mjs");
+}
+
 const tracerRegister = process.env.DD_TRACE_ESM_IMPORT;
 if (!tracerRegister) {
   throw new Error("Datadog test preload requires DD_TRACE_ESM_IMPORT");
