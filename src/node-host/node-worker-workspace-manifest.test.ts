@@ -190,8 +190,10 @@ describe("resident node manifest capture", () => {
     let phase = "fixture acquisition";
     let failurePhase: string | undefined;
     let reported = false;
-    let fixtureWork: ReturnType<typeof fixture> | undefined;
-    let capture: Promise<unknown> | undefined;
+    const work: {
+      fixture?: ReturnType<typeof fixture>;
+      capture?: Promise<unknown>;
+    } = {};
     const reportFailure = () => {
       failurePhase ??= phase;
       if (!reported) {
@@ -214,13 +216,13 @@ describe("resident node manifest capture", () => {
       }
       stop();
       // A Vitest timeout does not unwind the body. Join its work before removing inputs.
-      await fixtureWork?.catch(() => undefined);
-      await capture;
+      await work.fixture?.catch(() => undefined);
+      await work.capture;
       signal.removeEventListener("abort", onAbort);
       dirs.cleanup();
     });
-    fixtureWork = fixture(dirs);
-    const { home, workspaceDir } = await fixtureWork;
+    work.fixture = fixture(dirs);
+    const { home, workspaceDir } = await work.fixture;
     signal.throwIfAborted();
     phase = "Git admission";
     vi.spyOn(gitExec, "executeGitCommandBuffered").mockImplementation(
@@ -249,7 +251,7 @@ describe("resident node manifest capture", () => {
       },
     );
     let settled = false;
-    capture = runNodeWorkspaceManifestCapture({
+    const capture = runNodeWorkspaceManifestCapture({
       argv: [workspaceDir, "a".repeat(40), "eligible"],
       home,
       maxHashMemoBytes: 60 * 1024,
@@ -263,6 +265,7 @@ describe("resident node manifest capture", () => {
         return error;
       },
     );
+    work.capture = capture;
     try {
       await Promise.race([
         entered.promise,

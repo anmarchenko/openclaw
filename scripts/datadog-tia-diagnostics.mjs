@@ -41,7 +41,7 @@ if (!DD_API_KEY || !DD_SERVICE || !DD_ENV || !GITHUB_SHA || !GITHUB_REPOSITORY) 
           sourceSuites: source.length,
           uiSuites: ui.length,
           missingLineCoverage: suites.filter(
-            (item) => item.attributes?._is_missing_line_code_coverage,
+            (item) => item.attributes?.["_is_missing_line_code_coverage"],
           ).length,
           sourceSample: source.slice(0, 5).map((item) => item.attributes.suite),
           uiSample: ui.slice(0, 5).map((item) => item.attributes.suite),

@@ -3352,7 +3352,7 @@ jobs:
       - name: Run Node test shard
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-          OPENCLAW_DD_TIA_DIAGNOSTICS: ${{ (matrix.shard_name == 'core-src-security-2' || matrix.shard_name == 'bundle-infra-small-runtime-18') && '1' || '0' }}
+          OPENCLAW_DD_TIA_DIAGNOSTICS: ${{ (matrix.shard_name == 'core-unit-src-security-2' || matrix.shard_name == 'bundle-infra-small-runtime-18') && '1' || '0' }}
           OPENCLAW_E2E_USE_PREBUILT_DIST: ${{ steps.node-test-runtime.outcome == 'success' && matrix.pretest_build_mode == 'private-qa' && '1' || '' }}
           OPENCLAW_CI_TEST_RUNTIME_POLICY: ${{ matrix.test_runtime_policy || 'node' }}
           FROZEN_TARGET: *frozen_target
@@ -3380,7 +3380,7 @@ jobs:
           time -p node --import tsx "$runner"
 
       - name: Diagnose Datadog TIA decision
-        if: always() && (matrix.shard_name == 'core-src-security-2' || matrix.shard_name == 'bundle-infra-small-runtime-18')
+        if: always() && (matrix.shard_name == 'core-unit-src-security-2' || matrix.shard_name == 'bundle-infra-small-runtime-18')
         env:
           NODE_OPTIONS: ""
         run: node scripts/datadog-tia-diagnostics.mjs

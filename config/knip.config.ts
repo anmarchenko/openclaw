@@ -28,6 +28,8 @@ const repositoryScriptEntries = [
   "scripts/ci-build-manifest.mjs!",
   // CI security-fast runs this from its trusted harness checkout.
   "scripts/ci-production-audit.mjs!",
+  // CI invokes the read-only Datadog TIA diagnostic after selected Node shards.
+  "scripts/datadog-tia-diagnostics.mjs!",
   // tsdown builds this private macOS app worker protocol entry by path.
   "src/node-host/mac-worker-entry.ts!",
   // CI imports this selector from its trusted harness inside an inline Node script.
