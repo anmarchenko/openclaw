@@ -15,6 +15,7 @@ import {
   openOpenClawAgentDatabase,
 } from "./openclaw-agent-db.js";
 import {
+  clearOpenClawStateDatabaseOpenFailure,
   openClawStateDatabaseCache,
   recordOpenClawStateDatabaseOpenFailure,
 } from "./openclaw-state-db-cache.js";
@@ -189,9 +190,11 @@ it("refuses schemas migrated by another process on the next read", () => {
     env: { ...process.env, OPENCLAW_STATE_DIR: tempDirs.make("openclaw-schema-migration-") },
   };
   const databases: Array<[string, number]> = [];
+  let statePath: string | undefined;
   try {
     const agent = openOpenClawAgentDatabase(scope);
     const state = openOpenClawStateDatabase(scope);
+    statePath = state.path;
     databases.push(
       [agent.path, OPENCLAW_AGENT_SCHEMA_VERSION + 1],
       [state.path, OPENCLAW_STATE_SCHEMA_VERSION + 1],
@@ -225,6 +228,9 @@ it("refuses schemas migrated by another process on the next read", () => {
         database.close();
       }
     }
-    // The suite teardown drains agent workers before closing their shared state.
+    // Release the synthetic refusal only after restoring the files needed by lease cleanup.
+    if (statePath) {
+      clearOpenClawStateDatabaseOpenFailure(statePath);
+    }
   }
 });
