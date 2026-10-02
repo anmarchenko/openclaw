@@ -849,7 +849,10 @@ export function spawnWatchedVitestProcess({
     : spawnParams;
   const { child, completion: childCompletion } = spawnOwnedVitestProcess({
     ...(testCommand
-      ? { ...testCommand, options: childSpawnParams }
+      ? {
+          ...testCommand,
+          options: { ...childSpawnParams, env: testCommand.env ?? childSpawnParams.env },
+        }
       : createPnpmRunnerSpawnSpec({ pnpmArgs, ...childSpawnParams })),
     homeMode,
   });

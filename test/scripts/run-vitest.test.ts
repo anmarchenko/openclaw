@@ -143,6 +143,41 @@ describe("scripts/run-vitest", () => {
     },
   );
 
+  it.each(["true", "false"])(
+    "preserves CI Datadog settings (TIA=%s) and adds hooks after existing Node options",
+    (tia) => {
+      const args = ["node_modules/vitest/vitest.mjs", "run", "--maxWorkers=2"];
+      const env = {
+        DD_TRACE_PACKAGE: "/ci tools/dd-trace/ci/init",
+        DD_TRACE_ESM_IMPORT: "/ci tools/dd-trace/register.js",
+        DD_SERVICE: "openclaw-tests",
+        DD_CIVISIBILITY_ITR_ENABLED: tia,
+        NODE_OPTIONS: "--max-old-space-size=8192",
+      };
+      const command = resolveVitestTestCommand(args, env);
+      expect(command.args).toEqual(args);
+      expect(command.env).toEqual({
+        ...env,
+        NODE_OPTIONS: `--max-old-space-size=8192 --import=${JSON.stringify(new URL("../../scripts/lib/datadog-test-register.mjs", import.meta.url).href)} --require="/ci tools/dd-trace/ci/init"`,
+      });
+      expect(env.NODE_OPTIONS).toBe("--max-old-space-size=8192");
+    },
+  );
+
+  it("keeps preparation and Bun uninstrumented even when Datadog is configured", () => {
+    const env = {
+      DD_TRACE_PACKAGE: "/tracer/ci/init",
+      DD_TRACE_ESM_IMPORT: "/tracer/register.js",
+    };
+    expect(resolveVitestTestCommand(["scripts/prepare.mts"], env).env).toBeUndefined();
+    expect(
+      resolveVitestTestCommand(["node_modules/vitest/vitest.mjs", "run"], {
+        ...env,
+        OPENCLAW_VITEST_RUNTIME: "bun",
+      }).env,
+    ).toBeUndefined();
+  });
+
   it("rejects an unsupported test runtime before launching a child", () => {
     expect(() =>
       spawnWatchedVitestProcess({

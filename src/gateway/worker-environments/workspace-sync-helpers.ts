@@ -76,7 +76,8 @@ export function workspaceSyncError(result: SpawnResult): Error {
   const detail = redactSensitiveText(result.stderr || result.stdout, {
     mode: "tools",
   })
-    .replace(/\s+/gu, " ")
+    // Preserve spaces inside recorded process identities, including ps lstart day padding.
+    .replace(/[\r\n]+/gu, " ")
     .trim();
   return new Error(
     detail ? `Worker workspace sync failed: ${detail}` : "Worker workspace sync failed",

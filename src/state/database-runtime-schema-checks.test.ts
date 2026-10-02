@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { createTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { listSessionEntriesCore } from "../config/sessions/session-accessor.entry.js";
 import {
   loadSessionEntryReadOnly,
@@ -10,16 +10,19 @@ import {
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "./openclaw-agent-db-contract.js";
 import { withOpenClawAgentDatabaseReadOnly } from "./openclaw-agent-db-readonly.js";
 import {
+  closeOpenClawAgentDatabasesAsync,
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "./openclaw-agent-db.js";
 import {
+  clearOpenClawStateDatabaseOpenFailure,
   openClawStateDatabaseCache,
   recordOpenClawStateDatabaseOpenFailure,
 } from "./openclaw-state-db-cache.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import { withExistingOpenClawStateDatabaseReadOnly } from "./openclaw-state-db-readonly.js";
 import {
+  closeOpenClawStateDatabaseAsync,
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
 } from "./openclaw-state-db.js";
@@ -64,7 +67,7 @@ vi.mock("../infra/node-sqlite.js", async (importOriginal) => {
   };
 });
 
-const tempDirs = useAutoCleanupTempDirTracker(afterAll);
+const tempDirs = createTempDirTracker();
 const counts: Array<{
   owner: string;
   userVersion: number;
@@ -72,10 +75,14 @@ const counts: Array<{
   dataVersion: number;
 }> = [];
 
-afterAll(() => {
+afterAll(async () => {
+  // Worker lease cleanup still needs the original databases before their roots are removed.
+  await closeOpenClawAgentDatabasesAsync();
+  await closeOpenClawStateDatabaseAsync();
   closeOpenClawAgentDatabasesForTest();
   closeOpenClawStateDatabaseForTest();
   vi.restoreAllMocks();
+  tempDirs.cleanup();
 });
 
 beforeAll(async () => {
@@ -183,9 +190,11 @@ it("refuses schemas migrated by another process on the next read", () => {
     env: { ...process.env, OPENCLAW_STATE_DIR: tempDirs.make("openclaw-schema-migration-") },
   };
   const databases: Array<[string, number]> = [];
+  let statePath: string | undefined;
   try {
     const agent = openOpenClawAgentDatabase(scope);
     const state = openOpenClawStateDatabase(scope);
+    statePath = state.path;
     databases.push(
       [agent.path, OPENCLAW_AGENT_SCHEMA_VERSION + 1],
       [state.path, OPENCLAW_STATE_SCHEMA_VERSION + 1],
@@ -219,6 +228,9 @@ it("refuses schemas migrated by another process on the next read", () => {
         database.close();
       }
     }
-    closeOpenClawStateDatabaseForTest();
+    // Release the synthetic refusal only after restoring the files needed by lease cleanup.
+    if (statePath) {
+      clearOpenClawStateDatabaseOpenFailure(statePath);
+    }
   }
 });

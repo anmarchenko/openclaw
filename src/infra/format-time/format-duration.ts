@@ -6,6 +6,9 @@ import {
   resolveCompactDurationParts,
 } from "./format-duration-internal.js";
 
+const ZERO_FRACTION = /\.0+$/;
+const TRAILING_FRACTION_ZEROS = /(\.\d*[1-9])0+$/;
+
 export type FormatDurationSecondsOptions = {
   decimals?: number;
   unit?: "s" | "seconds";
@@ -29,7 +32,7 @@ export function formatDurationSeconds(
   const unit = options.unit ?? "s";
   const seconds = Math.max(0, ms) / 1000;
   const fixed = seconds.toFixed(Math.max(0, decimals));
-  const trimmed = fixed.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+  const trimmed = fixed.replace(ZERO_FRACTION, "").replace(TRAILING_FRACTION_ZEROS, "$1");
   return unit === "seconds" ? `${trimmed} seconds` : `${trimmed}s`;
 }
 

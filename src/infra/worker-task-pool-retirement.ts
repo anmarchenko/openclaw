@@ -170,7 +170,8 @@ export function createWorkerTaskPoolRetirement<Input, Output>({
           if (!areWorkerNativeSectionsSettled(slot.nativeSections)) {
             if (!observingSection) {
               observingSection = true;
-              void waitForWorkerNativeSections(slot.nativeSections)?.then(
+              // A worker may release its last section between the check and waiter creation.
+              void Promise.resolve(waitForWorkerNativeSections(slot.nativeSections)).then(
                 advance,
                 completion.reject,
               );

@@ -9,15 +9,19 @@ const MB = 1024 * 1024;
 const TELEGRAM_DEFAULT_MEDIA_MAX_MB = 100;
 type GeneratedMediaKind = Extract<MediaKind, "audio" | "image" | "video">;
 
+function configuredMegabytesToBytes(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value * MB)
+    : undefined;
+}
+
 /** Returns the configured media cap, falling back to the media-core per-kind default. */
 export function resolveGeneratedMediaMaxBytes(
   cfg: OpenClawConfig | undefined,
   kind: GeneratedMediaKind,
 ) {
   const configured = cfg?.agents?.defaults?.mediaMaxMb;
-  return typeof configured === "number" && Number.isFinite(configured) && configured > 0
-    ? Math.floor(configured * MB)
-    : maxBytesForKind(kind);
+  return configuredMegabytesToBytes(configured) ?? maxBytesForKind(kind);
 }
 
 /** Reads channel/account media caps from raw channel config without requiring typed account schemas. */
@@ -55,7 +59,5 @@ export function resolveOutboundMediaMaxBytes(params: {
     (params.channel?.trim().toLowerCase() === "telegram"
       ? TELEGRAM_DEFAULT_MEDIA_MAX_MB
       : undefined);
-  return typeof limitMb === "number" && Number.isFinite(limitMb) && limitMb > 0
-    ? Math.floor(limitMb * MB)
-    : MEDIA_MAX_BYTES;
+  return configuredMegabytesToBytes(limitMb) ?? MEDIA_MAX_BYTES;
 }

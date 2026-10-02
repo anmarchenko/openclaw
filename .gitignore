@@ -1,4 +1,8 @@
 node_modules
+
+# Datadog official CI action installation artifacts
+/.datadog/
+/install_test_visibility.sh
 **/node_modules/
 .env
 docker-compose.override.yml

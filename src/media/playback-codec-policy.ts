@@ -111,10 +111,11 @@ export function resolveNativePlaybackCodecCompatibility(
     if (probe.audioStreamIndex === undefined || !codec) {
       return undefined;
     }
-    if (/^audio\/(?:x-wav|wav|wave)$/.test(normalizeMimeType(mimeType) ?? "")) {
+    const mime = normalizeMimeType(mimeType);
+    if (/^audio\/(?:x-wav|wav|wave)$/.test(mime ?? "")) {
       return codec === "pcm_s16le" || codec === "pcm_u8";
     }
-    return codec === "mp3" || (normalizeMimeType(mimeType) !== "audio/mpeg" && codec === "aac");
+    return codec === "mp3" || (mime !== "audio/mpeg" && codec === "aac");
   }
 
   const audioCompatible =
