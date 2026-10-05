@@ -1,0 +1,1017 @@
+name: TIA candidate diagnosis
+"on":
+  push:
+    branches:
+      - anmarchenko/tia-job-diagnostics
+permissions:
+  contents: read
+env:
+  DD_CIVISIBILITY_ITR_ENABLED: ${{ vars.DD_CIVISIBILITY_ITR_ENABLED || 'true' }}
+  DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED: "false"
+  DD_CIVISIBILITY_FLAKY_RETRY_ENABLED: "false"
+  DD_TRACE_OPENAI_ENABLED: "false"
+  DD_TRACE_HTTP_ENABLED: "false"
+  DD_TRACE_OTEL_ENABLED: "false"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: 24.21.0
+  DD_GIT_COMMIT_SHA: 1d363e46bf5ca7ad9d41e706cbcdd727a2974b92
+  DD_GIT_BRANCH: anmarchenko/datadog-test-optimization
+  DD_GIT_REPOSITORY_URL: https://github.com/anmarchenko/openclaw.git
+jobs:
+  diagnose:
+    name: diagnose-${{ matrix.lane }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: runtime-config
+            shard: core-runtime-config
+            diagnostic: "0"
+            groups: H4sIAAAAAAAAA23L0Q6CIBSA4Xc53HosEtR8Fecc4sFYCA2wrbXeva26qK2r/+b7+zvo4I1dEnQ9ZEp5d7VfKePms10J36r8JCcYCkgnFefRq5WgAx0i4a+GArJdrV/GM92gg0iOVCI0m3P4x7NEjnQOEUXdIk1To6qWm8NRsIU8RZVt8KhES1JJIWs9sYuKGTkGg5xZr90202uWVSuM5LLhew2P4QkN9n4h5wAAAA==
+          - lane: security2
+            shard: core-unit-src-security-2
+            diagnostic: "1"
+            groups: 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
+    steps:
+      - name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+          CHECKOUT_SHA: 1d363e46bf5ca7ad9d41e706cbcdd727a2974b92
+          WORKFLOW_SHA: 1d363e46bf5ca7ad9d41e706cbcdd727a2974b92
+          CHECKOUT_GIT_COMMITS_JSON: "[]"
+        run: |
+          set -euo pipefail
+          python_command=python3
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python_command=python
+          fi
+          run_owner() {
+            if [ "$RUNNER_OS" = "Linux" ] || [ "$RUNNER_OS" = "Windows" ]; then
+              # Keep trusted code outside the checkout and below Windows argv limits.
+              printf '%s' "$1" > "$RUNNER_TEMP/ci-git-owner.py"
+              exec "$python_command" -I -S "$RUNNER_TEMP/ci-git-owner.py"
+            fi
+            exec "$python_command" -I -S -c "$1"
+          }
+          # Generated from .github/actions/git-owner/owner.py; do not edit here.
+          run_owner 'import base64
+          import builtins
+          import json
+          import os
+          import re
+          import runpy
+          import shutil
+          import signal
+          import subprocess
+          import sys
+          import tempfile
+          import time
+          from types import TracebackType
+
+          linux = os.environ.get("RUNNER_OS", sys.platform) in ("Linux", "linux")
+          fetch_timeout_seconds = 120 if linux else 90
+          cleanup_seconds = 10
+          cancelled = 0
+          closed = False
+          git = shutil.which("git")
+          checkout_environment = {}
+
+
+          def cancel(signum, _frame):
+              global cancelled
+              cancelled = signum
+
+
+          for signame in ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"):
+              if hasattr(signal, signame):
+                  signal.signal(getattr(signal, signame), cancel)
+
+
+          def check_cancelled():
+              if cancelled:
+                  raise SystemExit(128 + cancelled)
+
+
+          # The bootstrap inherits only this Job handle and stdio, joins before spawning Git,
+          # then closes its copy. Even owner death before assignment kills it on that close.
+          windows_api = '\'''\'''\''
+          import ctypes as c
+          from ctypes import wintypes as w
+          import os, subprocess, sys
+          kernel = c.WinDLL("kernel32", use_last_error=True)
+          def checked(value, function, arguments):
+              if not value:
+                  raise c.WinError(c.get_last_error())
+              return value
+          def bind(name, result, *arguments):
+              function = getattr(kernel, name)
+              function.restype, function.argtypes = result, arguments
+              function.errcheck = checked
+              return function
+          close_handle = bind("CloseHandle", w.BOOL, w.HANDLE)
+          '\'''\'''\''
+          if os.name == "nt":
+              exec(windows_api)
+
+              class BasicLimits(c.Structure):
+                  _fields_ = [
+                      ("PerProcessUserTimeLimit", c.c_int64), ("PerJobUserTimeLimit", c.c_int64),
+                      ("LimitFlags", w.DWORD), ("MinimumWorkingSetSize", c.c_size_t),
+                      ("MaximumWorkingSetSize", c.c_size_t), ("ActiveProcessLimit", w.DWORD),
+                      ("Affinity", c.c_size_t), ("PriorityClass", w.DWORD), ("SchedulingClass", w.DWORD),
+                  ]
+
+              class IoCounters(c.Structure):
+                  _fields_ = [(name, c.c_uint64) for name in (
+                      "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                      "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+                  )]
+
+              class ExtendedLimits(c.Structure):
+                  _fields_ = [("BasicLimitInformation", BasicLimits), ("IoInfo", IoCounters)] + [
+                      (name, c.c_size_t) for name in (
+                          "ProcessMemoryLimit", "JobMemoryLimit", "PeakProcessMemoryUsed", "PeakJobMemoryUsed",
+                      )
+                  ]
+
+              class Accounting(c.Structure):
+                  _fields_ = [(name, c.c_int64) for name in (
+                      "TotalUserTime", "TotalKernelTime", "ThisPeriodTotalUserTime", "ThisPeriodTotalKernelTime",
+                  )] + [(name, w.DWORD) for name in (
+                      "TotalPageFaultCount", "TotalProcesses", "ActiveProcesses", "TotalTerminatedProcesses",
+                  )]
+
+              if (c.sizeof(BasicLimits), c.sizeof(ExtendedLimits), c.sizeof(Accounting), Accounting.ActiveProcesses.offset) != (64, 144, 48, 40):
+                  raise RuntimeError("Unsupported Windows Job structure layout")
+
+              create_job = bind("CreateJobObjectW", w.HANDLE, c.c_void_p, w.LPCWSTR)
+              set_job = bind("SetInformationJobObject", w.BOOL, w.HANDLE, c.c_int, c.c_void_p, w.DWORD)
+              query_job = bind("QueryInformationJobObject", w.BOOL, w.HANDLE, c.c_int, c.c_void_p, w.DWORD, c.c_void_p)
+              terminate_job = bind("TerminateJobObject", w.BOOL, w.HANDLE, w.UINT)
+              open_process = bind("OpenProcess", w.HANDLE, w.DWORD, w.BOOL, w.DWORD)
+              in_job = bind("IsProcessInJob", w.BOOL, w.HANDLE, w.HANDLE, c.POINTER(w.BOOL))
+              wait_process = kernel.WaitForSingleObject
+              wait_process.argtypes, wait_process.restype = [w.HANDLE, w.DWORD], w.DWORD
+
+              def job_members(job, deadline):
+                  # PIDs are discovery hints only. Hold query/synchronize handles and verify
+                  # job membership before using them; never signal a process found by PID.
+                  before = Accounting()
+                  query_job(job, 1, c.byref(before), c.sizeof(before), None)
+                  capacity = max(16, before.ActiveProcesses + 1)
+                  while True:
+                      if time.monotonic() >= deadline or capacity > 65536:
+                          raise RuntimeError("Job member census did not complete")
+                      class Members(c.Structure):
+                          _fields_ = [("assigned", w.DWORD), ("count", w.DWORD),
+                                      ("pids", c.c_size_t * capacity)]
+                      members = Members()
+                      try:
+                          query_job(job, 3, c.byref(members), c.sizeof(members), None)
+                          break
+                      except OSError as error:
+                          if error.winerror != 234:  # ERROR_MORE_DATA: retry the census, not cleanup.
+                              raise
+                          capacity *= 2
+                  handles = []
+                  try:
+                      for pid in members.pids[:members.count]:
+                          handle = open_process(0x00100000 | 0x1000, False, pid)
+                          handles.append(handle)
+                          member = w.BOOL()
+                          in_job(handle, job, c.byref(member))
+                          if not member.value:
+                              raise RuntimeError("Job member identity changed during census")
+                      after = Accounting()
+                      query_job(job, 1, c.byref(after), c.sizeof(after), None)
+                      if after.TotalProcesses != before.TotalProcesses:
+                          raise RuntimeError("Job membership grew during census")
+                      return handles, after.TotalProcesses
+                  except BaseException:
+                      for handle in handles:
+                          close_handle(handle)
+                      raise
+              bootstrap = windows_api + '\'''\'''\''
+          job = int(sys.argv[1])
+          assign = bind("AssignProcessToJobObject", w.BOOL, w.HANDLE, w.HANDLE)
+          current = bind("GetCurrentProcess", w.HANDLE)
+          assign(job, current())
+          close_handle(job)
+          sys.exit(subprocess.call(sys.argv[2:], stdin=subprocess.DEVNULL))
+          '\'''\'''\''
+
+
+          def group_signal(pgid, signum, deadline):
+              try:
+                  os.killpg(pgid, signum)
+              except ProcessLookupError:
+                  return False
+              except PermissionError:
+                  # Darwin can refuse signals while members are exiting but not yet zombies.
+                  # Keep those members pending until drain proves termination; never accept a live denial.
+                  states = group_states(pgid, deadline)
+                  if any(not state.startswith("Z") and not (sys.platform == "darwin" and "E" in state)
+                         for state in states):
+                      raise
+                  return any(not state.startswith("Z") for state in states)
+              return True
+
+
+          def group_alive(pgid, deadline):
+              return any(not state.startswith("Z") for state in group_states(pgid, deadline))
+
+
+          def group_states(pgid, deadline):
+              try:
+                  os.killpg(pgid, 0)
+              except ProcessLookupError:
+                  return []
+              except PermissionError:
+                  pass  # EPERM can mean zombie-only; the census must still prove extinction.
+              # Darwin -g selects a group; procps selects its session (a superset because
+              # run_git starts a new session). Pin Darwin'\''s standard, not legacy, -g syntax.
+              try:
+                  result = subprocess.run(
+                      ["ps", "-o", "pgid=,stat=", "-g", str(pgid)], stdin=subprocess.DEVNULL,
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                      env={**os.environ, "COMMAND_MODE": "unix2003"},
+                      timeout=max(0.001, deadline - time.monotonic()),
+                  )
+              except subprocess.TimeoutExpired as error:
+                  print((error.stderr or b"").decode(errors="replace"), end="", file=sys.stderr)
+                  raise
+              if result.stderr:
+                  print(result.stderr, end="", file=sys.stderr)
+              states = []
+              if result.returncode != 1 or result.stdout or result.stderr:
+                  result.check_returncode()
+                  # Validate the complete census before ignoring zombies; Darwin ps can
+                  # report sysctl errors on stderr with exit 0. Neither permits reuse.
+                  if result.stderr or not re.fullmatch(
+                      r"(?:[ \t]*[1-9][0-9]*[ \t]+[RSDTtXZxKWPIU?][<+NLlsEVWX]*[ \t]*\n)+", result.stdout
+                  ):
+                      raise RuntimeError("Invalid process group census")
+                  states = [state for group, state in (line.split() for line in result.stdout.splitlines())
+                            if int(group) == pgid]
+              if states:
+                  return states
+              # Empty selection (exit 1), or a session with only other groups, can race
+              # extinction. Require native ESRCH; a bare status 1 or EPERM proves nothing.
+              try:
+                  os.killpg(pgid, 0)
+              except ProcessLookupError:
+                  return []
+              raise RuntimeError("Process group census missed a present group")
+
+
+          def drain(child, job):
+              deadline = time.monotonic() + cleanup_seconds
+              if os.name == "nt":
+                  # Stop/join even a pre-assignment bootstrap before terminating the Job:
+                  # an empty Job alone cannot prove that no Git will start afterwards.
+                  child.kill()
+                  child.wait(timeout=max(0.001, deadline - time.monotonic()))
+                  handles = []
+                  terminated = False
+                  try:
+                      handles, total = job_members(job, deadline)
+                      terminate_job(job, 1)
+                      terminated = True
+                      accounting = Accounting()
+                      while True:
+                          settled = True
+                          for handle in handles:
+                              status = wait_process(handle, 0)
+                              if status == 258:  # WAIT_TIMEOUT: accounting can reach zero first.
+                                  settled = False
+                              elif status != 0:
+                                  raise c.WinError(c.get_last_error())
+                          query_job(job, 1, c.byref(accounting), c.sizeof(accounting), None)
+                          if accounting.TotalProcesses != total:
+                              raise RuntimeError("Job membership grew during cleanup")
+                          if accounting.ActiveProcesses == 0 and settled:
+                              return
+                          if time.monotonic() >= deadline:
+                              raise RuntimeError("Job cleanup did not complete")
+                          time.sleep(0.05)
+                  finally:
+                      try:
+                          if not terminated:
+                              terminate_job(job, 1)
+                      finally:
+                          for handle in handles:
+                              close_handle(handle)
+              else:
+                  # The group remains ours after leader exit. Reserve half the existing
+                  # cleanup allowance for KILL and extinction verification after TERM.
+                  try:
+                      group_signal(child.pid, signal.SIGTERM, deadline)
+                      kill_at = deadline - cleanup_seconds / 2
+                      while True:
+                          child.poll()
+                          if not group_alive(child.pid, deadline):
+                              child.wait(timeout=max(0.001, deadline - time.monotonic()))
+                              return
+                          if time.monotonic() >= kill_at:
+                              group_signal(child.pid, signal.SIGKILL, deadline)
+                          if time.monotonic() >= deadline:
+                              raise RuntimeError("Process group cleanup did not complete")
+                          time.sleep(0.05)
+                  except Exception:
+                      group_signal(child.pid, signal.SIGKILL, deadline)
+                      # KILL queues termination; a leader wait cannot join descendants.
+                      # Count zombies conservatively here, but never reset the allowance or retry.
+                      while time.monotonic() < deadline:
+                          child.poll()
+                          if not group_signal(child.pid, 0, deadline):
+                              break
+                          time.sleep(0.05)
+                      child.wait(timeout=max(0.001, deadline - time.monotonic()))
+                      raise
+
+
+          class FetchTimeout(Exception):
+              pass
+
+
+          class GitFailure(Exception):
+              def __init__(self, code):
+                  self.code = code
+
+
+          def git_lock_files(directory):
+              git_dir = os.path.join(os.path.realpath(directory), ".git")
+              if not os.path.lexists(git_dir):
+                  return set()
+              if not os.path.isdir(git_dir) or os.path.realpath(git_dir) != git_dir:
+                  raise RuntimeError("Checkout Git directory is not physical")
+              def scan_error(error):
+                  raise error
+              locks = set()
+              for root, directories, files in os.walk(git_dir, onerror=scan_error):
+                  directories[:] = [name for name in directories
+                                    if os.path.realpath(os.path.join(root, name)) == os.path.join(root, name)]
+                  locks.update(os.path.join(root, name) for name in files if name.endswith(".lock"))
+              return locks
+
+
+          def git_auth_environment(remote, token):
+              # Git'\''s promisor fetch inherits this process-only config from checkout.
+              # Reject redirects: http.<url> matching does not re-scope redirected requests.
+              count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+              if count < 0:
+                  raise ValueError("Invalid Git environment configuration count")
+              header = f"http.{remote}.extraheader"
+              authorization = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+              settings = [(header, ""), (header, f"AUTHORIZATION: basic {authorization}"),
+                          (f"http.{remote}.followRedirects", "false")]
+              environment = {"GIT_CONFIG_COUNT": str(count + len(settings)), "GIT_TERMINAL_PROMPT": "0"}
+              for index, (key, value) in enumerate(settings, count):
+                  environment[f"GIT_CONFIG_KEY_{index}"] = key
+                  environment[f"GIT_CONFIG_VALUE_{index}"] = value
+              return environment
+
+
+          def run_git(directory, *arguments, timeout=None, stdout=None, stderr=None, env=None,
+                      reclaim_locks=False):
+              global closed
+              if closed:
+                  raise RuntimeError("Git owner is closed")
+              check_cancelled()
+              if git is None:
+                  raise RuntimeError("Git unavailable")
+              # Process ownership alone does not grant metadata ownership: generic callers
+              # may use linked worktrees. Only exclusive checkout fetches reclaim locks.
+              previous_locks = git_lock_files(directory) if reclaim_locks else None
+              command = [git, "-C", directory, *arguments]
+              job = None
+              child = None
+              timed_out = False
+              deadline = time.monotonic() + timeout if timeout is not None else None
+              try:
+                  environment = ({**os.environ, **checkout_environment, **(env or {})}
+                                 if checkout_environment or env is not None else None)
+                  options = {"stdin": subprocess.DEVNULL, "stdout": stdout, "stderr": stderr,
+                             "env": environment}
+                  if os.name == "nt":
+                      job = create_job(None, None)
+                      limits = ExtendedLimits()
+                      limits.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE; no breakaway.
+                      set_job(job, 9, c.byref(limits), c.sizeof(limits))
+                      os.set_handle_inheritable(job, True)
+                      startup = subprocess.STARTUPINFO()
+                      startup.lpAttributeList = {"handle_list": [job]}
+                      options.update(startupinfo=startup, close_fds=True)
+                      # The selected checkout must not inject Python startup code into its owner.
+                      command = [sys.executable, "-I", "-S", "-c", bootstrap, str(job), *command]
+                  else:
+                      options["start_new_session"] = True
+                  # Signal handlers only latch cancellation, so Popen cannot lose ownership
+                  # between process creation and saving its handle/group for cleanup.
+                  child = subprocess.Popen(command, **options)
+                  if job is not None:
+                      os.set_handle_inheritable(job, False)
+                  while child.poll() is None and not cancelled:
+                      if deadline is not None and time.monotonic() >= deadline:
+                          timed_out = True
+                          raise FetchTimeout()
+                      time.sleep(0.05)
+              finally:
+                  # Failed inspection/cleanup permanently fences this policy process. Only
+                  # verified extinction permits another command, even after a caught error.
+                  closed = True
+                  try:
+                      if child is not None:
+                          drain(child, job)
+                          if previous_locks is not None and (timed_out or cancelled or child.returncode):
+                              # Forced termination skips Git'\''s lockfile cleanup. This checkout is exclusive;
+                              # reclaim only newly created locks after tree extinction, never existing locks.
+                              for lock in sorted(git_lock_files(directory) - previous_locks):
+                                  os.unlink(lock)
+                  finally:
+                      if job is not None:
+                          close_handle(job)
+                  closed = False
+                  # Run even while a timeout is unwinding: cancellation received during
+                  # draining outranks it, but failed cleanup above still outranks both.
+                  check_cancelled()
+              if child.returncode:
+                  raise GitFailure(child.returncode if child.returncode > 0 else 128 - child.returncode)
+
+
+          def backoff(seconds):
+              retry_at = time.monotonic() + seconds
+              while time.monotonic() < retry_at:
+                  check_cancelled()
+                  time.sleep(0.05)
+
+
+          def fetch(directory, *refs, prune=False, max_attempts=3, depth=1,
+                    blobless=False, retry_failures=False, retry_codes=()):
+              for attempt in range(1, max_attempts + 1):
+                  try:
+                      run_git(directory, "-c", "protocol.version=2", "fetch", "--no-tags",
+                              *(["--prune"] if prune else []), "--no-recurse-submodules", f"--depth={depth}",
+                              *(["--filter=blob:none"] if blobless else []), "origin", *refs,
+                              timeout=fetch_timeout_seconds, reclaim_locks=True)
+                      return
+                  except (FetchTimeout, GitFailure) as error:
+                      check_cancelled()
+                      retryable = isinstance(error, FetchTimeout) or retry_failures or error.code in retry_codes
+                      if not retryable or attempt == max_attempts:
+                          raise
+                      print(f"::warning::checkout fetch failed on attempt {attempt}; retrying", flush=True)
+                      backoff(5)
+
+
+          def git_output(directory, *arguments, timeout=None, env=None):
+              with tempfile.TemporaryFile() as output:
+                  run_git(directory, *arguments, timeout=timeout, env=env, stdout=output)
+                  output.seek(0)
+                  return output.read().decode("utf-8", errors="surrogateescape")
+
+
+          def resolve_ref(ref):
+              return git_output(workspace, "rev-parse", ref).strip()
+
+
+          def checkout_selected_ref():
+              ref = os.environ["CHECKOUT_REF"]
+              fallback = os.environ["CHECKOUT_FALLBACK_REF"]
+              manual = os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch"
+              requested = ref if kind == "preflight" and re.fullmatch("[0-9a-f]{40}", ref) else None
+              # Prefer the event ref for an exact manual SHA, but detect a ref that moved in the queue.
+              if requested and manual and ref == fallback and os.environ.get("CHECKOUT_EVENT_REF"):
+                  ref = os.environ["CHECKOUT_EVENT_REF"]
+
+              def fetch_ref(value):
+                  fetch(workspace, f"+{value}:refs/remotes/origin/checkout", prune=True,
+                        depth=1 if kind == "preflight" else 2, retry_codes=(124, 137))
+
+              try:
+                  fetch_ref(ref)
+              except GitFailure as error:
+                  if error.code in (124, 137) or not manual or os.environ["CHECKOUT_REF"] == fallback:
+                      raise
+                  print("::warning::workflow_dispatch target_ref is unavailable; falling back to head SHA", flush=True)
+                  fetch_ref(fallback)
+              if requested:
+                  resolved = resolve_ref("refs/remotes/origin/checkout")
+                  if resolved != requested and ref != requested:
+                      print("::notice::checkout ref moved; fetching requested SHA", flush=True)
+                      fetch_ref(requested)
+                      resolved = resolve_ref("refs/remotes/origin/checkout")
+                  if resolved != requested:
+                      print("::error::checkout ref did not resolve to the requested SHA", file=sys.stderr)
+                      raise GitFailure(1)
+              if kind == "preflight":
+                  # Diff-base callers need parent commits/trees, not their blobs.
+                  try:
+                      fetch(workspace, resolve_ref("refs/remotes/origin/checkout"), prune=True,
+                            depth=2, blobless=True, retry_failures=True)
+                  except (FetchTimeout, GitFailure):
+                      raise GitFailure(1)
+              run_git(workspace, "checkout", "--detach", "refs/remotes/origin/checkout")
+
+
+          def checkout_harness(sha):
+              action = ".github/actions/setup-node-env/action.yml"
+              node_setup_scripts = ("scripts/lib/pnpm-lockfile-documents.mjs",)
+              evidence_scripts = ("scripts/ios-screenshot-evidence.mjs", "scripts/lib/direct-run.mjs", "scripts/ci-static-step.sh")
+              platform_scripts = ("scripts/lib/swift-toolchain.sh",)
+              upgrade_scripts = ("scripts/lib/release-upgrade-baseline.mjs", "scripts/lib/release-version.mjs")
+              # The manifest builder runs from the harness and imports these siblings by file-relative paths.
+              preflight_scripts = (
+                  "scripts/ci-build-manifest.mjs",
+                  "scripts/lib/release-context.mjs",
+                  "scripts/lib/release-version.mjs",
+              )
+              npm_lock_scripts = (
+                  "scripts/ci-npm-lock-admission.mjs",
+                  "scripts/generate-npm-package-lock.mjs",
+                  "scripts/generate-npm-package-lock.mts",
+                  "scripts/changed-lanes.mts",
+                  "scripts/lib/merge-head-diff-base.mjs",
+              )
+              if kind == "linux-node" and not os.path.isfile(os.path.join(workspace, action)):
+                  raise GitFailure(1)
+              harness = os.path.join(workspace, ".ci-harness")
+              # This owner creates the harness, not candidate source. Keep strict source-status
+              # checks useful without hiding tracked edits or similarly named nested paths.
+              exclude = os.path.join(workspace, git_output(workspace, "rev-parse", "--git-path", "info/exclude").strip())
+              os.makedirs(os.path.dirname(exclude), exist_ok=True)
+              with open(exclude, "a+b") as output:
+                  output.seek(0)
+                  if output.read().splitlines()[-1:] != [b"/.ci-harness/"]:
+                      output.write(b"\n/.ci-harness/\n")
+              os.makedirs(harness, exist_ok=True)
+              if sha == os.environ["WORKFLOW_SHA"]:
+                  # Export the workflow revision from the freshly populated index, replacing
+                  # retained harness files without updating the index or trusting later edits.
+                  pathspecs = [".github/actions", *node_setup_scripts]
+                  if kind in ("platform", "linux-node"):
+                      pathspecs += evidence_scripts
+                  elif kind == "preflight":
+                      pathspecs += preflight_scripts
+                  if kind == "platform":
+                      pathspecs += platform_scripts
+                  if kind == "linux-node":
+                      pathspecs += (*upgrade_scripts, *npm_lock_scripts)
+                  paths = git_output(workspace, "ls-files", "-z", "--", *pathspecs).split("\0")[:-1]
+                  run_git(workspace, "checkout-index", "--force", f"--prefix={harness}/", "--", *paths)
+              else:
+                  run_git(harness, "init", harness)
+                  run_git(harness, "remote", "add", "origin", remote)
+                  sparse_paths = ["/.github/actions/", *(f"/{path}" for path in node_setup_scripts)]
+                  if kind in ("platform", "linux-node"):
+                      sparse_paths += [f"/{path}" for path in evidence_scripts]
+                  if kind == "platform":
+                      sparse_paths += [f"/{path}" for path in platform_scripts]
+                  if kind == "linux-node":
+                      sparse_paths += [f"/{path}" for path in (*upgrade_scripts, *npm_lock_scripts)]
+                  # Rooted non-cone patterns keep the kind-owned workflow files exact.
+                  # Sparse first, then blob-less avoids downloading a second repository snapshot.
+                  run_git(harness, "sparse-checkout", "set", "--no-cone", *sparse_paths)
+                  fetch(harness, f"+{os.environ['\''WORKFLOW_SHA'\'']}:refs/remotes/origin/ci-harness",
+                        max_attempts=1, blobless=True)
+                  # Checkout now materializes the sparse blobs over the network, so it carries the
+                  # fetch deadline instead of running unbounded like a local checkout.
+                  run_git(harness, "checkout", "--force", "--detach", os.environ["WORKFLOW_SHA"],
+                          timeout=fetch_timeout_seconds)
+              if not os.path.isfile(os.path.join(harness, action)):
+                  raise GitFailure(1)
+              check_cancelled()
+
+
+          def checkout():
+              check_cancelled()
+              prerequisites = json.loads(os.environ.get("CHECKOUT_GIT_COMMITS_JSON", "null")) if kind == "linux-node" else None
+              if prerequisites is None:
+                  prerequisites = []
+              if not isinstance(prerequisites, list) or any(
+                  not isinstance(commit, str) or not re.fullmatch("[0-9a-f]{40}", commit)
+                  for commit in prerequisites
+              ):
+                  raise ValueError("Invalid immutable test prerequisite commits")
+              if reset:
+                  os.makedirs(workspace, exist_ok=True)
+                  # Every earlier Git group has been drained before deleting its workspace.
+                  subprocess.run(["find", workspace, "-mindepth", "1", "-maxdepth", "1",
+                                  "-exec", "rm", "-rf", "{}", "+"], check=True)
+              run_git(workspace, "init", workspace)
+              if kind in ("linux-node", "android"):
+                  run_git(workspace, "config", "--global", "--add", "safe.directory", workspace)
+              run_git(workspace, "config", "gc.auto", "0")
+              run_git(workspace, "remote", "add", "origin", remote)
+              if kind in ("preflight", "manual"):
+                  checkout_selected_ref()
+                  if kind == "preflight" and resolve_ref("HEAD") == os.environ["WORKFLOW_SHA"]:
+                      checkout_harness(os.environ["WORKFLOW_SHA"])
+                  return
+              target = "refs/remotes/origin/ci-target" if kind in ("linux-node", "android") else "refs/remotes/origin/checkout"
+              sha = "refs/heads/main" if kind == "clawhub" else os.environ["CHECKOUT_SHA"]
+              refs = [f"+{sha}:{target}"]
+              base = os.environ.get("CHECKOUT_BASE_SHA") if kind == "linux-node" else None
+              if base:
+                  refs.append(f"+{base}:refs/remotes/origin/ci-ratchet-base")
+              # Fetch full reader objects with the authenticated checkout, before its
+              # credential scope ends and test workers create historical worktrees.
+              refs.extend(prerequisites)
+              fetch(workspace, *refs, prune=True, max_attempts=1 if reset else 3,
+                    retry_codes=(124, 137) if kind == "skills" else ())
+              run_git(workspace, "checkout", *(["--force"] if reset else []), "--detach",
+                      sha if kind in ("linux-node", "android") else target)
+              if kind == "android":
+                  if not os.access(os.path.join(workspace, "apps/android/gradlew"), os.X_OK):
+                      raise GitFailure(1)
+                  return
+              if kind in ("clawhub", "skills"):
+                  return
+              checkout_harness(sha)
+
+
+          def main():
+              global kind, workspace, remote, reset
+              if len(sys.argv) > 1:
+                  if sys.argv[1] == "--policy":
+                      # The caller supplies trusted policy bytes; imports share this exact
+                      # owner and its terminal lifecycle state, never a second supervisor.
+                      sys.modules["ci_git_owner"] = sys.modules[__name__]
+                      try:
+                          if sys.argv[2] == "-":
+                              exec(compile(sys.stdin.read(), "<git-policy>", "exec"), {"__name__": "__main__"})
+                          else:
+                              runpy.run_path(sys.argv[2], run_name="__main__")
+                      finally:
+                          if closed:
+                              raise RuntimeError("Git owner is closed")
+                          check_cancelled()
+                      return
+                  if sys.argv[1] not in ("--git", "--checkout-git"):
+                      raise ValueError("Unknown Git owner command")
+                  run_git(os.getcwd(), *sys.argv[3:], timeout=float(sys.argv[2]) or None,
+                          reclaim_locks=sys.argv[1] == "--checkout-git")
+                  return
+              if git is None:
+                  raise RuntimeError("Git unavailable")
+              kind = os.environ.get("CHECKOUT_KIND", "linux-node" if linux else "platform")
+              if kind == "prepare":
+                  raise SystemExit(0)
+              workspace = os.environ["GITHUB_WORKSPACE"]
+              remote = f"https://github.com/{os.environ['\''CHECKOUT_REPO'\'']}.git"
+              # The workflow'\''s token is repository-bound; never lend it to a sibling checkout.
+              token = os.environ.pop("CHECKOUT_TOKEN", "")
+              if token and os.environ["CHECKOUT_REPO"] == os.environ.get("GITHUB_REPOSITORY"):
+                  checkout_environment.update(git_auth_environment(remote, token))
+              del token
+              if kind == "clawhub":
+                  workspace = os.path.join(workspace, "clawhub-source")
+              reset = kind in ("linux-node", "android", "clawhub")
+              label = "ClawHub checkout" if kind == "clawhub" else "checkout"
+              started_at = time.monotonic()
+              try:
+                  for attempt in range(1, 6 if reset else 2):
+                      try:
+                          checkout()
+                          if reset:
+                              print(f"{label} attempt {attempt}/5 succeeded", flush=True)
+                          if kind == "clawhub":
+                              print(f"{label} completed in {int(time.monotonic() - started_at)}s", flush=True)
+                          raise SystemExit(0)
+                      except (FetchTimeout, GitFailure) as error:
+                          # Only command failures are retryable. Ownership/inspection errors
+                          # escape to the fail-closed boundary below, never workspace deletion.
+                          check_cancelled()
+                          if not reset:
+                              raise SystemExit(124 if isinstance(error, FetchTimeout) else error.code)
+                          print(f"::warning::{label} attempt {attempt}/5 failed", flush=True)
+                          backoff(attempt * 5)
+                  print(f"{label} failed after 5 attempts", file=sys.stderr)
+                  raise SystemExit(1)
+              finally:
+                  checkout_environment.clear()
+
+
+          def terminal_diagnostic(error, owner_code):
+              # Code identity, not a filename supplied by policy, proves source provenance.
+              codes = {id(owner_code): owner_code}
+              pending = [owner_code]
+              while pending:
+                  for value in pending.pop().co_consts:
+                      if type(value) is type(owner_code):
+                          codes[id(value)] = value
+                          pending.append(value)
+              names = {value: value.__name__ for value in vars(builtins).values()
+                       if isinstance(value, type) and issubclass(value, BaseException)}
+              names.update({FetchTimeout: "FetchTimeout", GitFailure: "GitFailure"})
+              records, seen, via = [], set(), "terminal"
+              while error is not None and id(error) not in seen and len(records) < 4:
+                  seen.add(id(error))
+                  record = {"type": names.get(type(error), "unknown"), "via": via}
+                  for field in ("errno", "winerror"):
+                      value = getattr(error, field, None)
+                      if type(value) is int and -(2 ** 31) <= value < 2 ** 32:
+                          record[field] = value
+                  frames, trace = [], error.__traceback__
+                  # Bound traversal as well as output; malformed metadata cannot stall exit.
+                  for _ in range(256):
+                      if trace is None:
+                          break
+                      if type(trace) is not TracebackType:
+                          raise TypeError
+                      frame, code = trace.tb_frame, trace.tb_frame.f_code
+                      if frame.f_globals is globals() and id(code) in codes and 0 < trace.tb_lineno < 2 ** 31:
+                          frames.append({"function": code.co_name[:64], "line": trace.tb_lineno})
+                          frames = frames[-6:]
+                      trace = trace.tb_next
+                  record["owner_frames"] = frames
+                  if trace is not None:
+                      record["traceback_truncated"] = 1
+                  records.append(record)
+                  cause = error.__cause__
+                  error, via = (cause, "cause") if cause is not None else (error.__context__, "context")
+              return records
+
+
+          if __name__ == "__main__":
+              exit_code, terminal_error = 0, None
+              try:
+                  main()
+              except FetchTimeout:
+                  exit_code = 124
+              except GitFailure as error:
+                  exit_code = error.code
+              except Exception as error:
+                  exit_code, terminal_error = 125, error
+              # Leave the handler before diagnostics or exit can raise: older Python'\''s
+              # implicit exception chaining can loop on an already-cyclic context.
+              if terminal_error is not None:
+                  name, diagnostic = "unknown", "unavailable"
+                  try:
+                      records = terminal_diagnostic(terminal_error, sys._getframe().f_code)
+                      diagnostic = json.dumps(records, separators=(",", ":"))
+                      name = records[0]["type"]
+                  except BaseException:
+                      pass  # Diagnostics must never replace the authoritative terminal exit.
+                  try:
+                      print(f"::error::Git ownership/setup failed ({name}); refusing reuse or retry", file=sys.stderr)
+                      print(f"[ci-git-owner] diagnostic={diagnostic}", file=sys.stderr)
+                  except BaseException:
+                      pass
+              raise SystemExit(exit_code)
+          '
+          # End generated CI Git owner.
+      - name: Setup Node environment
+        uses: ./.ci-harness/.github/actions/setup-node-env
+        with:
+          semantic-checks: "true"
+          cache-mode: restore
+          node-version: 24.x
+          install-bun: "false"
+          dependency-cache: "false"
+          vitest-fs-cache: "true"
+          vitest-worker-cache: "false"
+          node-compile-cache: "true"
+      - name: Setup Datadog Test Optimization
+        uses: DataDog/test-visibility-github-action@1abae93083b69778facd7ee11f89184306c999e6
+        with:
+          languages: js
+          api_key: ${{ secrets.DD_API_KEY }}
+          service: openclaw-tests
+          js-tracer-version: latest
+      - name: Build Node test runtime
+        id: node-test-runtime
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+          OPENCLAW_BUILD_PRIVATE_QA: "0"
+          VITEST: "1"
+        run: pnpm build qaRuntime
+      - name: Configure Node test resources
+        env:
+          PREDICTED_TEST_SECONDS: ""
+          SHARD_PLAN_CONCURRENCY: ""
+          FROZEN_TARGET: "false"
+          RUNNER_ENVIRONMENT: github-hosted
+          RUNSON_JOB: "false"
+        run: |
+          cores="$(nproc)"
+          if [ "$RUNSON_JOB" = "true" ]; then
+            workers=2
+          elif [ "$SHARD_PLAN_CONCURRENCY" != "1" ]; then
+            workers=2
+          elif [ "$cores" -ge 12 ]; then
+            workers=6
+          elif [ "$cores" -ge 6 ]; then
+            workers=4
+          else
+            workers=3
+          fi
+          if [[ "$RUNSON_JOB" != "true" && "$RUNNER_ENVIRONMENT" == "self-hosted" && "$FROZEN_TARGET" != "true" && "$SHARD_PLAN_CONCURRENCY" == "1" ]]; then
+            workers="$(CI_LEGACY_WORKERS="$workers" node --input-type=module <<'JS'
+          import { isConstrainedCiCheckHost } from './scripts/lib/local-check-runtime.mts';
+          import { detectVitestHostInfo, resolveLocalVitestScheduling } from './scripts/lib/vitest-local-scheduling.mts';
+          const host = detectVitestHostInfo();
+          const constrained = isConstrainedCiCheckHost({
+            logicalCpuCount: host.cpuCount,
+            totalMemoryBytes: host.totalMemoryBytes,
+          });
+          console.log(constrained ? process.env.CI_LEGACY_WORKERS : resolveLocalVitestScheduling(process.env, host).maxWorkers);
+          JS
+            )"
+          fi
+          if [ "$workers" -gt "$cores" ]; then
+            workers="$cores"
+          fi
+          echo "detected cores=$cores plan_concurrency=${SHARD_PLAN_CONCURRENCY:-default} predicted_test_seconds=${PREDICTED_TEST_SECONDS:-unknown} -> workers=$workers"
+          echo "OPENCLAW_VITEST_MAX_WORKERS=$workers" >> "$GITHUB_ENV"
+      - name: Start allowlisted response capture outside checkout
+        env:
+          NODE_OPTIONS: ""
+        shell: bash
+        run: |
+          set -euo pipefail
+          capture="$RUNNER_TEMP/tia-capture"
+          mkdir -p "$capture"
+          cat > "$RUNNER_TEMP/tia-capture-proxy.mjs" <<'CAPTURE_PROXY'
+          // Transparent, loopback-only observer. Never persist request headers or raw bodies.
+          import http from 'node:http';
+          import https from 'node:https';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          import zlib from 'node:zlib';
+          import { pathToFileURL } from 'node:url';
+
+          const LIMIT = 32 * 1024 * 1024;
+          const SKIP = '/api/v2/ci/tests/skippable';
+          const SETTINGS = '/api/v2/libraries/tests/services/setting';
+          const HOP = new Set(['host', 'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
+          const IDENTITY = ['test_level', 'service', 'env', 'repository_url', 'sha', 'branch'];
+          const CONFIG = ['os.platform', 'os.version', 'os.architecture', 'runtime.name', 'runtime.version'];
+          const TOGGLES = ['itr_enabled', 'tests_skipping', 'code_coverage', 'require_git', 'efd_enabled'];
+          function select(object, keys) {
+            return Object.fromEntries(keys.filter(k => ['string', 'number', 'boolean'].includes(typeof object?.[k])).map(k => [k, object[k]]));
+          }
+          function headers(input) {
+            const excluded = new Set([...HOP, ...(input.connection || '').toLowerCase().split(',').map(x => x.trim())]);
+            return Object.fromEntries(Object.entries(input).filter(([key]) => !excluded.has(key.toLowerCase())));
+          }
+          function collector(stream) {
+            let size = 0;
+            const chunks = [];
+            stream.on('data', chunk => {
+              size += chunk.length;
+              if (size <= LIMIT) chunks.push(chunk);
+              else chunks.length = 0;
+            });
+            return () => {
+              if (size > LIMIT) throw new Error('capture_limit');
+              return Buffer.concat(chunks);
+            };
+          }
+          function decode(body, encoding) {
+            const decoded = encoding === 'gzip' ? zlib.gunzipSync(body, { maxOutputLength: LIMIT }) : body;
+            return JSON.parse(decoded.toString('utf8'));
+          }
+          function officialTarget(requestPath) {
+            const pathname = requestPath.split('?')[0];
+            if (!pathname.startsWith('/api/v2/')) return null;
+            const host = pathname === '/api/v2/citestcycle' ? 'citestcycle-intake.datadoghq.com'
+              : pathname === '/api/v2/citestcov' ? 'citestcov-intake.datadoghq.com'
+              : pathname === '/api/v2/cicovreprt' ? 'ci-intake.datadoghq.com'
+              : 'api.datadoghq.com';
+            return { transport: https, hostname: host, port: 443 };
+          }
+          export function createCaptureServer(directory, targetForPath = officialTarget) {
+            fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+            function save(row) {
+              fs.writeFileSync(path.join(directory, `${Date.now()}-${crypto.randomUUID()}.json`), JSON.stringify(row, null, 2), { mode: 0o600 });
+            }
+            const server = http.createServer((req, res) => {
+              const target = targetForPath(req.url);
+              if (!target || req.method !== 'POST') { res.writeHead(404).end(); return; }
+              const observed = [SKIP, SETTINGS].includes(req.url);
+              const requestBody = observed ? collector(req) : null;
+              const started = new Date().toISOString();
+              const upstream = target.transport.request({
+                hostname: target.hostname, port: target.port, path: req.url,
+                method: req.method, headers: headers(req.headers), timeout: 30000,
+              }, reply => {
+                const responseBody = observed ? collector(reply) : null;
+                res.writeHead(reply.statusCode, headers(reply.headers));
+                reply.pipe(res);
+                if (observed) reply.on('end', () => {
+                  const base = { endpoint: req.url, started, completed: new Date().toISOString(), status: reply.statusCode };
+                  try {
+                    const request = decode(requestBody(), req.headers['content-encoding']);
+                    const raw = responseBody();
+                    const response = decode(raw, reply.headers['content-encoding']);
+                    const attrs = request.data?.attributes;
+                    const row = { ...base, request: { ...select(attrs, IDENTITY), configurations: select(attrs?.configurations, CONFIG), hasCustomConfiguration: attrs?.configurations?.custom != null }, responseSha256: crypto.createHash('sha256').update(raw).digest('hex') };
+                    if (req.url === SKIP) {
+                      if (!Array.isArray(response.data)) throw new Error('invalid_response');
+                      row.correlationId = typeof response.meta?.correlation_id === 'string' ? response.meta.correlation_id : null;
+                      row.candidates = response.data.filter(x => x.type === 'suite').map(x => ({ suite: x.attributes?.suite, missingLineCoverage: x.attributes?._is_missing_line_code_coverage === true })).filter(x => typeof x.suite === 'string');
+                      row.totalItems = response.data.length;
+                    } else row.settings = select(response.data?.attributes, TOGGLES);
+                    save(row);
+                  } catch { try { save({ ...base, captureError: 'unable_to_decode_allowlisted_fields' }); } catch {} }
+                });
+                reply.on('error', () => res.destroy());
+              });
+              upstream.on('timeout', () => upstream.destroy());
+              upstream.on('error', () => {
+                if (observed) { try { save({ endpoint: req.url, started, transportError: true }); } catch {} }
+                if (!res.headersSent) res.writeHead(502).end(); else res.destroy();
+              });
+              req.on('aborted', () => upstream.destroy());
+              req.on('error', () => upstream.destroy());
+              req.pipe(upstream);
+            });
+            return server;
+          }
+          if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+            const directory = process.argv[2];
+            if (!directory || !path.isAbsolute(directory)) throw new Error('absolute_capture_directory_required');
+            const server = createCaptureServer(directory);
+            server.listen(0, '127.0.0.1', () => {
+              fs.writeFileSync(path.join(directory, 'ready.json'), JSON.stringify({ url: `http://127.0.0.1:${server.address().port}`, observer: 'allowlisted-passthrough-v1' }));
+            });
+          }
+          CAPTURE_PROXY
+          node "$RUNNER_TEMP/tia-capture-proxy.mjs" "$capture" > "$RUNNER_TEMP/tia-observer.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/tia-observer.pid"
+          for _ in $(seq 1 50); do
+            test -f "$capture/ready.json" && break
+            sleep 0.1
+          done
+          python3 - <<'CAPTURE_READY'
+          import json,os,subprocess
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'tia-capture'
+          ready=json.loads((p/'ready.json').read_text())
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('DD_CIVISIBILITY_AGENTLESS_URL='+ready['url']+'\n')
+          identity={'tested_sha':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'workflow_sha':os.environ['GITHUB_SHA'],'node':subprocess.check_output(['node','--version'],text=True).strip(),'expected_candidate_sha':os.environ['DD_GIT_COMMIT_SHA'],'git_branch_override':os.environ['DD_GIT_BRANCH']}
+          package=os.environ.get('DD_TRACE_PACKAGE','')
+          package_path=Path(package).parent.parent/'package.json'
+          if package and package_path.is_file():identity['tracer_version']=json.loads(package_path.read_text()).get('version')
+          (p/'identity.json').write_text(json.dumps(identity,indent=2))
+          CAPTURE_READY
+      - name: Run Node test shard
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+          OPENCLAW_DD_TIA_DIAGNOSTICS: ${{ matrix.diagnostic }}
+          OPENCLAW_E2E_USE_PREBUILT_DIST: ""
+          OPENCLAW_CI_TEST_RUNTIME_POLICY: bun-compatible
+          FROZEN_TARGET: "false"
+          RUNNER_ENVIRONMENT: github-hosted
+          OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: ${{ matrix.groups }}
+          OPENCLAW_NODE_TEST_GROUPS_JSON: ""
+          OPENCLAW_NODE_TEST_CONFIGS_JSON: "null"
+          OPENCLAW_NODE_TEST_ENV_JSON: "null"
+          OPENCLAW_NODE_TEST_INCLUDE_PATTERNS_JSON: "null"
+          OPENCLAW_NODE_TEST_TARGETS_JSON: "null"
+          OPENCLAW_NODE_TEST_VITEST_ARGS_JSON: "[]"
+          OPENCLAW_VITEST_SHARD_NAME: ${{ matrix.shard }}
+          OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS: "300000"
+          OPENCLAW_NODE_TEST_PLAN_CONCURRENCY: ""
+          OPENCLAW_NODE_TEST_PLAN_CONTINUE_ON_FAILURE: "0"
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner="scripts/ci-run-node-test-shard.mts"
+          if [[ ! -f "$runner" ]]; then
+            runner=".ci-workflow/${runner}"
+            [[ -f "$runner" ]]
+          fi
+          time -p node --import tsx "$runner"
+      - name: Check candidate capture
+        if: ${{ always() }}
+        env:
+          NODE_OPTIONS: ""
+        shell: bash
+        run: |
+          python3 - <<'CHECK_CAPTURE'
+          import json,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'tia-capture'
+          rows=[json.loads(f.read_text()) for f in p.glob('*.json')]
+          candidates=[x for x in rows if x.get('endpoint')=='/api/v2/ci/tests/skippable' and x.get('status')==200 and 'candidates' in x]
+          print('Captured successful skippable responses:',len(candidates))
+          for x in candidates:
+           print(json.dumps({'sha':x['request'].get('sha'),'entries':len(x['candidates']),'correlationId':x['correlationId']}))
+          assert candidates, 'No successful actual skippable response captured'
+          assert all(x['request'].get('sha')==os.environ['DD_GIT_COMMIT_SHA'] for x in candidates), 'Candidate identity differs from tested merge'
+          CHECK_CAPTURE
+      - name: Upload allowlisted candidate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tia-candidates-${{ matrix.lane }}
+          path: ${{ runner.temp }}/tia-capture/*.json
+          if-no-files-found: error
+          retention-days: 14
