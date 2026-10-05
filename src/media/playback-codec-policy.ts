@@ -2,6 +2,8 @@ import type { MediaKind } from "@openclaw/media-core/constants";
 import { normalizeMimeType } from "@openclaw/media-core/mime";
 import type { PlaybackMediaProbeResult } from "./media-probe.js";
 
+const WAV_MIME_TYPE_PATTERN = /^audio\/(?:x-wav|wav|wave)$/;
+
 export type PlaybackMediaKind = Extract<MediaKind, "audio" | "video">;
 export type PlaybackMode = "native" | "transcode";
 
@@ -112,7 +114,7 @@ export function resolveNativePlaybackCodecCompatibility(
       return undefined;
     }
     const mime = normalizeMimeType(mimeType);
-    if (/^audio\/(?:x-wav|wav|wave)$/.test(mime ?? "")) {
+    if (WAV_MIME_TYPE_PATTERN.test(mime ?? "")) {
       return codec === "pcm_s16le" || codec === "pcm_u8";
     }
     return codec === "mp3" || (mime !== "audio/mpeg" && codec === "aac");
