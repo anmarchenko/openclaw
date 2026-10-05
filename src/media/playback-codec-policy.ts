@@ -3,6 +3,7 @@ import { normalizeMimeType } from "@openclaw/media-core/mime";
 import type { PlaybackMediaProbeResult } from "./media-probe.js";
 
 const WAV_MIME_TYPE_PATTERN = /^audio\/(?:x-wav|wav|wave)$/;
+const PORTABLE_VIDEO_PROFILES = new Set(["baseline", "constrained baseline", "main", "high"]);
 
 export type PlaybackMediaKind = Extract<MediaKind, "audio" | "video">;
 export type PlaybackMode = "native" | "transcode";
@@ -130,11 +131,7 @@ export function resolveNativePlaybackCodecCompatibility(
         : undefined;
   let videoCompatible: boolean | undefined;
   if (probe.videoCodec && probe.videoStreamIndex !== undefined) {
-    const portableProfile =
-      probe.videoProfile === "baseline" ||
-      probe.videoProfile === "constrained baseline" ||
-      probe.videoProfile === "main" ||
-      probe.videoProfile === "high";
+    const portableProfile = PORTABLE_VIDEO_PROFILES.has(probe.videoProfile ?? "");
     const portablePixelFormat =
       probe.videoPixelFormat === "yuv420p" || probe.videoPixelFormat === "yuvj420p";
     videoCompatible =
