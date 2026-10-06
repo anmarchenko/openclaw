@@ -1,7 +1,7 @@
 name: CI
 
 # Personal-fork baseline: set OPENCLAW_CI_RUNNER_BACKEND=github in repository variables.
-# Use pull-request CI; the manual main validation tier is restricted to upstream.
+# Use branch-push CI so TIA coverage belongs to commits retained in branch ancestry.
 
 on:
   schedule:
@@ -78,12 +78,10 @@ on:
         default: ""
         type: string
   push:
-    branches: [main]
+    branches: [main, anmarchenko/datadog-test-optimization]
     paths-ignore:
       - "**/*.md"
       - "docs/**"
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
 
 permissions:
   contents: read
