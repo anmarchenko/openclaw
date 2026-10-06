@@ -1,0 +1,1116 @@
+name: TIA direct response diagnosis
+"on":
+  push:
+    branches:
+      - anmarchenko/tia-direct-response-diagnostic
+permissions:
+  contents: read
+env:
+  DD_CIVISIBILITY_ITR_ENABLED: ${{ vars.DD_CIVISIBILITY_ITR_ENABLED || 'true' }}
+  DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED: "false"
+  DD_CIVISIBILITY_FLAKY_RETRY_ENABLED: "false"
+  DD_TRACE_OPENAI_ENABLED: "false"
+  DD_TRACE_HTTP_ENABLED: "false"
+  DD_TRACE_OTEL_ENABLED: "false"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: 24.21.0
+  DD_GIT_COMMIT_SHA: 14d7ec43af48017657cfdd142fe9f3bddd529baa
+  DD_GIT_BRANCH: anmarchenko/datadog-test-optimization
+  DD_GIT_REPOSITORY_URL: https://github.com/anmarchenko/openclaw.git
+jobs:
+  diagnose:
+    name: diagnose-${{ matrix.lane }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: runtime18
+            shard: bundle-infra-small-runtime-18
+            diagnostic: "0"
+            groups: H4sIAAAAAAAC/33PO27DMAyA4asE8hr6ocqK21N0D4KAlWlXqEwFohwgKHr3Kk6GTp3I4f8I8PitXOTJz6LedkeVSXJz9X9G7XlKWD+iOos67XfKswvrSO+YMyV+UEmu2drmkqIjESC+1tuJp5JPTOOZcaEC1MfKYyDYCMiCIUBaOfuFoBtUycvqeT5/0e2eJwqEQjCtJfzXVlJSl2MCa+DVtnZA1C9Gm2ompoTZR4ZD31uNRtvBtdUFU4YO4gRd9Xztbk3f2R4PehpbUj+nXzxED20rAQAA
+            inventory:
+              '["src/infra/package-dist-content-inventory.test.ts", "src/infra/package-dist-inventory.test.ts", "src/infra/package-json.test.ts",
+              "src/infra/package-lifecycle.ownership.test.ts", "src/infra/package-lifecycle.test.ts", "src/infra/package-local-overrides.modes.test.ts",
+              "src/infra/package-local-overrides.mutations.test.ts", "src/infra/package-local-overrides.publication.test.ts",
+              "src/infra/package-local-overrides.test.ts", "src/infra/package-tag.test.ts", "src/infra/package-update-activation-durability.test.ts",
+              "src/infra/package-update-activation-journal.test.ts", "src/infra/package-update-activation-lifetime.test.ts",
+              "src/infra/package-update-activation-recovery-command.test.ts", "src/infra/package-update-activation-released.test.ts",
+              "src/infra/package-update-doctor-advisory.test.ts", "src/infra/package-update-filesystem.test.ts", "src/infra/package-update-lifecycle.test.ts",
+              "src/infra/package-update-overrides.e2e.test.ts", "src/infra/package-update-permissions.test.ts", "src/infra/package-update-publication-boundary.test.ts",
+              "src/infra/package-update-publication-durability.test.ts", "src/infra/package-update-self-replay.e2e.test.ts",
+              "src/infra/package-update-steps.native-transaction.test.ts", "src/infra/package-update-steps.pnpm11-guard.test.ts",
+              "src/infra/package-update-steps.recovery.test.ts", "src/infra/package-update-steps.source-checkout.test.ts", "src/infra/package-update-steps.staging.test.ts",
+              "src/infra/package-update-steps.test.ts", "src/infra/package-update-steps.transaction.test.ts", "src/infra/package-update-swap.bounds.test.ts",
+              "src/infra/package-update-swap.freebsd.test.ts", "src/infra/package-update-swap.integrity.test.ts", "src/infra/package-update-swap.ownership.test.ts",
+              "src/infra/package-update-swap.test.ts", "src/infra/package-update-utils.test.ts", "src/infra/ports-format.test.ts",
+              "src/infra/ports-inspect-cancellation.test.ts", "src/infra/ports-inspect.env.test.ts", "src/infra/ports-lsof.test.ts",
+              "src/infra/ports-probe.test.ts", "src/infra/ports-scoped-inspection.test.ts", "src/infra/ports.test.ts", "src/infra/process-env.test.ts",
+              "src/infra/process-respawn.test.ts", "src/infra/restart-coordinator.test.ts", "src/infra/restart-handoff.test.ts",
+              "src/infra/restart-intent.test.ts", "src/infra/restart-sentinel.test.ts", "src/infra/restart-sentinel.update-result.test.ts",
+              "src/infra/restart-stale-pids.authority.test.ts", "src/infra/restart-stale-pids.cwd.test.ts", "src/infra/restart-stale-pids.escalation.test.ts",
+              "src/infra/restart-stale-pids.liveness.test.ts", "src/infra/restart-stale-pids.test.ts", "src/infra/restart-suspension.test.ts",
+              "src/infra/restart.authorization.test.ts", "src/infra/restart.deferral-timeout.test.ts", "src/infra/restart.monotonic-clock.test.ts",
+              "src/infra/restart.test.ts", "src/infra/run-node-static-assets.test.ts", "src/infra/run-node.live-dist.test.ts",
+              "src/infra/run-node.runtime-postbuild.test.ts", "src/infra/run-node.test.ts"]'
+            selected: src/infra/process-env.test.ts
+            testPattern: preserves exact POSIX keys and the existing Path fallback
+          - lane: security2
+            shard: core-unit-src-security-2
+            diagnostic: "0"
+            groups: H4sIAAAAAAAC/3XPS27CQAyA4augybZOQggN9BTdI4TMjCcdERxkO0io4u4ML6mbrrz5flve/Do/cky9uq/ZxhmpVef0Z5QTJwMVXz5daeq2HzOX2A9ToG80I+FnnVXlkc+oVcZqyKblY8kr0h+UsGM8Uvb5sBC814OSnyTZBRqXpaVj4n53oMtdCg2EShCnYYD/skKz8jYKNE0HXY1dE+K+DZ9d0ROToKWRoV3Xvm5X+7BcU3FCMZjDGGFevB56xIuAYbH0EXHVuuv2BpqM67ElAQAA
+            inventory:
+              '["src/audit/audit-event-writer.lifecycle.test.ts", "src/audit/execution-identity-admission.test.ts",
+              "src/audit/message-audit-events.test.ts", "src/boards/board-layout.test.ts", "src/canvas/constants.test.ts", "src/canvas/widget-script-syntax.test.ts",
+              "src/canvas/widget-tool.prompt.test.ts", "src/canvas/wrap.test.ts", "src/chat/tool-call-grouping.test.ts", "src/claws/cron-update.test.ts",
+              "src/claws/openclaw-profile.test.ts", "src/claws/path-containment.test.ts", "src/claws/provenance-runtime-read.test.ts",
+              "src/claws/read-only-state-compat.test.ts", "src/claws/schema.test.ts", "src/claws/tool-profile-consent.test.ts",
+              "src/claws/update-plan-readiness.test.ts", "src/context-engine/host-compat.test.ts", "src/context-engine/registry.logical-turn-resources.test.ts",
+              "src/decisions/diagnostics.test.ts", "src/docker-build-cache.test.ts", "src/dockerfile.test.ts", "src/docs/cloud-workers-config.test.ts",
+              "src/docs/plugin-doc-examples.test.ts", "src/entry.respawn-diagnostics.test.ts", "src/fleet/backup.runtime.test.ts",
+              "src/fleet/service-support.runtime.test.ts", "src/flows/doctor-acp-agent-model-check.test.ts", "src/flows/doctor-core-browser-residue-check.test.ts",
+              "src/flows/doctor-core-checks.runtime.bundled.test.ts", "src/flows/doctor-core-platform-notes.test.ts", "src/flows/doctor-gateway-exec-credential.test.ts",
+              "src/flows/doctor-health-contribution-runners.config.auth-cleanup.test.ts", "src/flows/doctor-health-contributions.auth-import-order.test.ts",
+              "src/flows/doctor-health-contributions.windows-cloud-state.test.ts", "src/flows/doctor-health.plugin-load.test.ts",
+              "src/flows/doctor-health.update-scope.test.ts", "src/flows/doctor-plugin-install-config-write.test.ts", "src/flows/doctor-repair-flow.test.ts",
+              "src/flows/doctor-tool-schema-frames.test.ts", "src/flows/doctor-whatsapp-responsiveness.flow.test.ts", "src/image-generation/runtime.resources.test.ts",
+              "src/library.test.ts", "src/llm/ai-transport-host.test.ts", "src/llm/providers/stream-wrappers/anthropic-cache-control-payload.test.ts",
+              "src/llm/providers/stream-wrappers/minimax.test.ts", "src/llm/providers/stream-wrappers/reasoning-effort-utils.test.ts",
+              "src/llm/stream.sync-host.test.ts", "src/llm/utils/oauth/abort.test.ts", "src/llm/utils/retry.test.ts", "src/mcp/channel-bridge.test.ts",
+              "src/mcp/plugin-tools-handlers.cancel.test.ts", "src/mcp/plugin-tools-registration.test.ts", "src/media-generation/runtime-shared.test.ts",
+              "src/meeting-bot/audio-base64.test.ts", "src/meeting-bot/browser-controller.test.ts", "src/meeting-bot/configured-node-host.test.ts",
+              "src/meeting-bot/node-invoke-policy.test.ts", "src/meeting-bot/platform-adapter.provenance.test.ts", "src/meeting-bot/realtime-engine.continuous.test.ts",
+              "src/meeting-bot/realtime-node-audio-transport.test.ts", "src/meeting-bot/session-runtime.participation.test.ts",
+              "src/meeting-bot/session-transcript-store.test.ts", "src/memory-host-sdk/dreaming.test.ts", "src/model-catalog/pricing.test.ts",
+              "src/model-catalog/remote-overlay.test.ts", "src/model-picker/apply-session-model-selection-placement.test.ts",
+              "src/music-generation/provider-assets.test.ts", "src/node-host/auto-update-compatibility.test.ts", "src/node-host/claude-skill-session.test.ts",
+              "src/node-host/desktop-stream-command.test.ts", "src/node-host/gateway-platform-identity.test.ts", "src/node-host/invoke-system-run-allowlist.test.ts",
+              "src/node-host/invoke-workspace.test.ts", "src/node-host/linux-node-plugin.integration.test.ts", "src/node-host/mcp.recovery.test.ts",
+              "src/node-host/node-worker-bundle-installer.test.ts", "src/node-host/node-worker-output.test.ts", "src/node-host/node-worker-supervisor.settlement.test.ts",
+              "src/node-host/node-worker-transfer-client.lifetime.test.ts", "src/node-host/node-worker-upload-snapshot.test.ts",
+              "src/node-host/node-worker-workspace-manifest.test.ts", "src/node-host/node-worker-workspace-quiescence.test.ts",
+              "src/node-host/plugin-exec-policy.test.ts", "src/node-host/pty-command.test.ts", "src/node-host/runner.shutdown.test.ts",
+              "src/node-host/runtime.computer.test.ts", "src/node-host/runtime.worker-hosting.test.ts", "src/node-host/with-timeout.test.ts",
+              "src/pairing/pairing-messages.test.ts", "src/pairing/setup-code.control-ui.test.ts", "src/plugin-state/plugin-blob-store.eviction.test.ts",
+              "src/projects/project-clone-registration.test.ts", "src/projects/project-source-env.test.ts", "src/proxy-capture/coverage.test.ts",
+              "src/proxy-capture/runtime.admission.test.ts", "src/proxy-capture/store-readonly.test.ts", "src/runtime.test.ts",
+              "src/sessions/background-session-result.test.ts", "src/sessions/session-diff-baseline-files.test.ts", "src/sessions/session-lifecycle-admission.pending.test.ts",
+              "src/sessions/session-participant-recording.test.ts", "src/sessions/stored-model-overrides.test.ts", "src/skills/discovery/chat-commands.remote-menu.test.ts",
+              "src/skills/discovery/status-bundled-warning.test.ts", "src/skills/library/bundle.test.ts", "src/skills/lifecycle/clawhub-uninstall.test.ts",
+              "src/skills/lifecycle/install-download.test.ts", "src/skills/lifecycle/skill-change-hook.test.ts", "src/skills/lifecycle/upload-store-commit.test.ts",
+              "src/skills/loading/bundled-dir.test.ts", "src/skills/loading/plugin-skill-read.test.ts", "src/skills/loading/skill-path-containment.test.ts",
+              "src/skills/loading/workspace-bundled-allowlist.test.ts", "src/skills/loading/workspace-skill-loader.test.ts",
+              "src/skills/loading/workspace-skill-remote.test.ts", "src/skills/runtime/cron-snapshot.test.ts", "src/skills/runtime/refresh-file-stability.test.ts",
+              "src/skills/runtime/refresh.capacity.test.ts", "src/skills/runtime/refresh.missing-root.integration.test.ts",
+              "src/skills/runtime/refresh.structural-change.test.ts", "src/skills/runtime/refresh.windows.test.ts", "src/skills/runtime/remote-skills.test.ts",
+              "src/skills/runtime/resources.workspace.test.ts", "src/skills/runtime/session-snapshot.test.ts", "src/skills/security/repository-skill-content.test.ts",
+              "src/snapshot/git-backup-codec.test.ts", "src/snapshot/local-repository-directory-identity.test.ts", "src/snapshot/local-repository.windows.test.ts",
+              "src/state/agent-deletion-journal.fence.test.ts", "src/state/local-onboarding-state.test.ts", "src/state/openclaw-agent-canonical-validation-receipt.test.ts",
+              "src/state/openclaw-agent-db-module-identity.test.ts", "src/state/openclaw-agent-db-readonly-scope.test.ts", "src/state/openclaw-agent-db-registry.test.ts",
+              "src/state/openclaw-agent-db-validation-cache.test.ts", "src/state/openclaw-agent-db.cache-eviction.test.ts",
+              "src/state/openclaw-agent-db.integrity-cache.test.ts", "src/state/openclaw-agent-db.open-timing.test.ts", "src/state/openclaw-agent-db.registration-commit.test.ts",
+              "src/state/openclaw-agent-label-index.test.ts", "src/state/openclaw-agent-project-column.test.ts", "src/state/openclaw-agent-standing-intents-schema.admission.test.ts",
+              "src/state/openclaw-database-maintenance.test.ts", "src/state/openclaw-database-paths.windows.test.ts", "src/state/openclaw-database-preflight.artifacts.test.ts",
+              "src/state/openclaw-database-preflight.lifecycle.test.ts", "src/state/openclaw-database-preflight.startup-prepared.test.ts",
+              "src/state/openclaw-database-verify.test.ts", "src/state/openclaw-schema-retirements.test.ts", "src/state/openclaw-state-db-binding-targets.test.ts",
+              "src/state/openclaw-state-db-cache.idle.test.ts", "src/state/openclaw-state-db-first-use-column-strict-migration.test.ts",
+              "src/state/openclaw-state-db-legacy-backfills.test.ts", "src/state/openclaw-state-db-pending-admission.test.ts",
+              "src/state/openclaw-state-db-publication-authority.test.ts", "src/state/openclaw-state-db-readonly.error-mapping.test.ts",
+              "src/state/openclaw-state-db-readonly.retained.test.ts", "src/state/openclaw-state-db-readonly.source-identity.test.ts",
+              "src/state/openclaw-state-db-resource-scope.test.ts", "src/state/openclaw-state-db-schema-helpers.test.ts", "src/state/openclaw-state-db.corruption-recovery.test.ts",
+              "src/state/openclaw-state-db.runtime-fence.test.ts", "src/state/openclaw-state-lease-async.maintenance.test.ts",
+              "src/state/openclaw-state-lease-heartbeat.lifetime.test.ts", "src/state/openclaw-state-lease-native-admission.test.ts",
+              "src/state/openclaw-state-lease-worker.transaction-group.test.ts", "src/state/openclaw-state-read-worker.bun.test.ts",
+              "src/state/openclaw-state-read-worker.settlement.test.ts", "src/state/openclaw-state-read.quarantine-cleanup.test.ts",
+              "src/state/openclaw-state-snapshot-leases.test.ts", "src/state/openclaw-state-worker-error.test.ts", "src/state/openclaw-state.worker.settlement.test.ts",
+              "src/state/sqlite-nocow.test.ts", "src/state/user-model-accounts.test.ts", "src/state/user-profile-list.resident.test.ts",
+              "src/state/user-profiles-tailscale-login.test.ts", "src/status/agent-runtime-label.test.ts", "src/status/status-model-auth.test.ts",
+              "src/status/status-text.model.test.ts", "src/system-agent/agent-turn.test.ts", "src/system-agent/assistant-timeout.test.ts",
+              "src/system-agent/chat-turn-router.approval.test.ts", "src/system-agent/chat-wizard-host.test.ts", "src/system-agent/config-write-validation.test.ts",
+              "src/system-agent/inference-fallback.test.ts", "src/system-agent/new-agent-welcome.test.ts", "src/system-agent/operations-plugin-reads.test.ts",
+              "src/system-agent/operations.doctor.test.ts", "src/system-agent/operations.setup.test.ts", "src/system-agent/plugin-artifact.test.ts",
+              "src/system-agent/setup-app-recommendations.test.ts", "src/system-agent/setup-inference-auth-options.test.ts",
+              "src/system-agent/setup-inference-turn.test.ts", "src/system-agent/verified-inference.test.ts", "src/talk/agent-consult-tool.test.ts",
+              "src/talk/agent-target.test.ts", "src/talk/audio-output-port.test.ts", "src/talk/client-voice-confirmation.test.ts",
+              "src/talk/client-voice-session.digest-retry.test.ts", "src/talk/consult-question.test.ts", "src/talk/exact-speech-protocol.test.ts",
+              "src/talk/logging.test.ts", "src/talk/provider-resolver.test.ts", "src/talk/session-log-runtime.test.ts", "src/talk/session-runtime.test.ts",
+              "src/talk/turn-context-tracker.test.ts", "src/test-helpers/temp-dir.test.ts", "src/test-utils/openclaw-test-state.auth.test.ts",
+              "src/test-utils/repo-files.test.ts", "src/trajectory/command-export.test.ts", "src/transcripts/config.test.ts",
+              "src/transcripts/summary.test.ts", "src/tts/tts-audio-store.test.ts", "src/tts/tts-entry-delivery.test.ts", "src/tts/tts-runtime-fallbacks.test.ts",
+              "src/tts/tts-runtime-routing.test.ts", "src/video-generation/capability-overlays.test.ts", "src/web-fetch/content-extractors.runtime.test.ts",
+              "src/web-search/runtime-execution.test.ts", "src/worker/computer-observation.runtime.test.ts", "src/worker/inference-stream.runtime.test.ts",
+              "src/worker/node-supervisor-protocol.test.ts", "src/worker/transcript-message.test.ts", "src/worker/worker-connection.test.ts",
+              "src/worker/worker-rpc-clients.test.ts", "src/worker/worker.runtime-imports.test.ts"]'
+            selected: src/canvas/constants.test.ts
+            testPattern: keeps document auth scoped to the stable Canvas path
+    steps:
+      - name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+          CHECKOUT_SHA: 14d7ec43af48017657cfdd142fe9f3bddd529baa
+          WORKFLOW_SHA: 14d7ec43af48017657cfdd142fe9f3bddd529baa
+          CHECKOUT_GIT_COMMITS_JSON: "[]"
+        run: |
+          set -euo pipefail
+          python_command=python3
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python_command=python
+          fi
+          run_owner() {
+            if [ "$RUNNER_OS" = "Linux" ] || [ "$RUNNER_OS" = "Windows" ]; then
+              # Keep trusted code outside the checkout and below Windows argv limits.
+              printf '%s' "$1" > "$RUNNER_TEMP/ci-git-owner.py"
+              exec "$python_command" -I -S "$RUNNER_TEMP/ci-git-owner.py"
+            fi
+            exec "$python_command" -I -S -c "$1"
+          }
+          # Generated from .github/actions/git-owner/owner.py; do not edit here.
+          run_owner 'import base64
+          import builtins
+          import json
+          import os
+          import re
+          import runpy
+          import shutil
+          import signal
+          import subprocess
+          import sys
+          import tempfile
+          import time
+          from types import TracebackType
+
+          linux = os.environ.get("RUNNER_OS", sys.platform) in ("Linux", "linux")
+          fetch_timeout_seconds = 120 if linux else 90
+          cleanup_seconds = 10
+          cancelled = 0
+          closed = False
+          git = shutil.which("git")
+          checkout_environment = {}
+
+
+          def cancel(signum, _frame):
+              global cancelled
+              cancelled = signum
+
+
+          for signame in ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"):
+              if hasattr(signal, signame):
+                  signal.signal(getattr(signal, signame), cancel)
+
+
+          def check_cancelled():
+              if cancelled:
+                  raise SystemExit(128 + cancelled)
+
+
+          # The bootstrap inherits only this Job handle and stdio, joins before spawning Git,
+          # then closes its copy. Even owner death before assignment kills it on that close.
+          windows_api = '\'''\'''\''
+          import ctypes as c
+          from ctypes import wintypes as w
+          import os, subprocess, sys
+          kernel = c.WinDLL("kernel32", use_last_error=True)
+          def checked(value, function, arguments):
+              if not value:
+                  raise c.WinError(c.get_last_error())
+              return value
+          def bind(name, result, *arguments):
+              function = getattr(kernel, name)
+              function.restype, function.argtypes = result, arguments
+              function.errcheck = checked
+              return function
+          close_handle = bind("CloseHandle", w.BOOL, w.HANDLE)
+          '\'''\'''\''
+          if os.name == "nt":
+              exec(windows_api)
+
+              class BasicLimits(c.Structure):
+                  _fields_ = [
+                      ("PerProcessUserTimeLimit", c.c_int64), ("PerJobUserTimeLimit", c.c_int64),
+                      ("LimitFlags", w.DWORD), ("MinimumWorkingSetSize", c.c_size_t),
+                      ("MaximumWorkingSetSize", c.c_size_t), ("ActiveProcessLimit", w.DWORD),
+                      ("Affinity", c.c_size_t), ("PriorityClass", w.DWORD), ("SchedulingClass", w.DWORD),
+                  ]
+
+              class IoCounters(c.Structure):
+                  _fields_ = [(name, c.c_uint64) for name in (
+                      "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                      "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+                  )]
+
+              class ExtendedLimits(c.Structure):
+                  _fields_ = [("BasicLimitInformation", BasicLimits), ("IoInfo", IoCounters)] + [
+                      (name, c.c_size_t) for name in (
+                          "ProcessMemoryLimit", "JobMemoryLimit", "PeakProcessMemoryUsed", "PeakJobMemoryUsed",
+                      )
+                  ]
+
+              class Accounting(c.Structure):
+                  _fields_ = [(name, c.c_int64) for name in (
+                      "TotalUserTime", "TotalKernelTime", "ThisPeriodTotalUserTime", "ThisPeriodTotalKernelTime",
+                  )] + [(name, w.DWORD) for name in (
+                      "TotalPageFaultCount", "TotalProcesses", "ActiveProcesses", "TotalTerminatedProcesses",
+                  )]
+
+              if (c.sizeof(BasicLimits), c.sizeof(ExtendedLimits), c.sizeof(Accounting), Accounting.ActiveProcesses.offset) != (64, 144, 48, 40):
+                  raise RuntimeError("Unsupported Windows Job structure layout")
+
+              create_job = bind("CreateJobObjectW", w.HANDLE, c.c_void_p, w.LPCWSTR)
+              set_job = bind("SetInformationJobObject", w.BOOL, w.HANDLE, c.c_int, c.c_void_p, w.DWORD)
+              query_job = bind("QueryInformationJobObject", w.BOOL, w.HANDLE, c.c_int, c.c_void_p, w.DWORD, c.c_void_p)
+              terminate_job = bind("TerminateJobObject", w.BOOL, w.HANDLE, w.UINT)
+              open_process = bind("OpenProcess", w.HANDLE, w.DWORD, w.BOOL, w.DWORD)
+              in_job = bind("IsProcessInJob", w.BOOL, w.HANDLE, w.HANDLE, c.POINTER(w.BOOL))
+              wait_process = kernel.WaitForSingleObject
+              wait_process.argtypes, wait_process.restype = [w.HANDLE, w.DWORD], w.DWORD
+
+              def job_members(job, deadline):
+                  # PIDs are discovery hints only. Hold query/synchronize handles and verify
+                  # job membership before using them; never signal a process found by PID.
+                  before = Accounting()
+                  query_job(job, 1, c.byref(before), c.sizeof(before), None)
+                  capacity = max(16, before.ActiveProcesses + 1)
+                  while True:
+                      if time.monotonic() >= deadline or capacity > 65536:
+                          raise RuntimeError("Job member census did not complete")
+                      class Members(c.Structure):
+                          _fields_ = [("assigned", w.DWORD), ("count", w.DWORD),
+                                      ("pids", c.c_size_t * capacity)]
+                      members = Members()
+                      try:
+                          query_job(job, 3, c.byref(members), c.sizeof(members), None)
+                          break
+                      except OSError as error:
+                          if error.winerror != 234:  # ERROR_MORE_DATA: retry the census, not cleanup.
+                              raise
+                          capacity *= 2
+                  handles = []
+                  try:
+                      for pid in members.pids[:members.count]:
+                          handle = open_process(0x00100000 | 0x1000, False, pid)
+                          handles.append(handle)
+                          member = w.BOOL()
+                          in_job(handle, job, c.byref(member))
+                          if not member.value:
+                              raise RuntimeError("Job member identity changed during census")
+                      after = Accounting()
+                      query_job(job, 1, c.byref(after), c.sizeof(after), None)
+                      if after.TotalProcesses != before.TotalProcesses:
+                          raise RuntimeError("Job membership grew during census")
+                      return handles, after.TotalProcesses
+                  except BaseException:
+                      for handle in handles:
+                          close_handle(handle)
+                      raise
+              bootstrap = windows_api + '\'''\'''\''
+          job = int(sys.argv[1])
+          assign = bind("AssignProcessToJobObject", w.BOOL, w.HANDLE, w.HANDLE)
+          current = bind("GetCurrentProcess", w.HANDLE)
+          assign(job, current())
+          close_handle(job)
+          sys.exit(subprocess.call(sys.argv[2:], stdin=subprocess.DEVNULL))
+          '\'''\'''\''
+
+
+          def group_signal(pgid, signum, deadline):
+              try:
+                  os.killpg(pgid, signum)
+              except ProcessLookupError:
+                  return False
+              except PermissionError:
+                  # Darwin can refuse signals while members are exiting but not yet zombies.
+                  # Keep those members pending until drain proves termination; never accept a live denial.
+                  states = group_states(pgid, deadline)
+                  if any(not state.startswith("Z") and not (sys.platform == "darwin" and "E" in state)
+                         for state in states):
+                      raise
+                  return any(not state.startswith("Z") for state in states)
+              return True
+
+
+          def group_alive(pgid, deadline):
+              return any(not state.startswith("Z") for state in group_states(pgid, deadline))
+
+
+          def group_states(pgid, deadline):
+              try:
+                  os.killpg(pgid, 0)
+              except ProcessLookupError:
+                  return []
+              except PermissionError:
+                  pass  # EPERM can mean zombie-only; the census must still prove extinction.
+              # Darwin -g selects a group; procps selects its session (a superset because
+              # run_git starts a new session). Pin Darwin'\''s standard, not legacy, -g syntax.
+              try:
+                  result = subprocess.run(
+                      ["ps", "-o", "pgid=,stat=", "-g", str(pgid)], stdin=subprocess.DEVNULL,
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                      env={**os.environ, "COMMAND_MODE": "unix2003"},
+                      timeout=max(0.001, deadline - time.monotonic()),
+                  )
+              except subprocess.TimeoutExpired as error:
+                  print((error.stderr or b"").decode(errors="replace"), end="", file=sys.stderr)
+                  raise
+              if result.stderr:
+                  print(result.stderr, end="", file=sys.stderr)
+              states = []
+              if result.returncode != 1 or result.stdout or result.stderr:
+                  result.check_returncode()
+                  # Validate the complete census before ignoring zombies; Darwin ps can
+                  # report sysctl errors on stderr with exit 0. Neither permits reuse.
+                  if result.stderr or not re.fullmatch(
+                      r"(?:[ \t]*[1-9][0-9]*[ \t]+[RSDTtXZxKWPIU?][<+NLlsEVWX]*[ \t]*\n)+", result.stdout
+                  ):
+                      raise RuntimeError("Invalid process group census")
+                  states = [state for group, state in (line.split() for line in result.stdout.splitlines())
+                            if int(group) == pgid]
+              if states:
+                  return states
+              # Empty selection (exit 1), or a session with only other groups, can race
+              # extinction. Require native ESRCH; a bare status 1 or EPERM proves nothing.
+              try:
+                  os.killpg(pgid, 0)
+              except ProcessLookupError:
+                  return []
+              raise RuntimeError("Process group census missed a present group")
+
+
+          def drain(child, job):
+              deadline = time.monotonic() + cleanup_seconds
+              if os.name == "nt":
+                  # Stop/join even a pre-assignment bootstrap before terminating the Job:
+                  # an empty Job alone cannot prove that no Git will start afterwards.
+                  child.kill()
+                  child.wait(timeout=max(0.001, deadline - time.monotonic()))
+                  handles = []
+                  terminated = False
+                  try:
+                      handles, total = job_members(job, deadline)
+                      terminate_job(job, 1)
+                      terminated = True
+                      accounting = Accounting()
+                      while True:
+                          settled = True
+                          for handle in handles:
+                              status = wait_process(handle, 0)
+                              if status == 258:  # WAIT_TIMEOUT: accounting can reach zero first.
+                                  settled = False
+                              elif status != 0:
+                                  raise c.WinError(c.get_last_error())
+                          query_job(job, 1, c.byref(accounting), c.sizeof(accounting), None)
+                          if accounting.TotalProcesses != total:
+                              raise RuntimeError("Job membership grew during cleanup")
+                          if accounting.ActiveProcesses == 0 and settled:
+                              return
+                          if time.monotonic() >= deadline:
+                              raise RuntimeError("Job cleanup did not complete")
+                          time.sleep(0.05)
+                  finally:
+                      try:
+                          if not terminated:
+                              terminate_job(job, 1)
+                      finally:
+                          for handle in handles:
+                              close_handle(handle)
+              else:
+                  # The group remains ours after leader exit. Reserve half the existing
+                  # cleanup allowance for KILL and extinction verification after TERM.
+                  try:
+                      group_signal(child.pid, signal.SIGTERM, deadline)
+                      kill_at = deadline - cleanup_seconds / 2
+                      while True:
+                          child.poll()
+                          if not group_alive(child.pid, deadline):
+                              child.wait(timeout=max(0.001, deadline - time.monotonic()))
+                              return
+                          if time.monotonic() >= kill_at:
+                              group_signal(child.pid, signal.SIGKILL, deadline)
+                          if time.monotonic() >= deadline:
+                              raise RuntimeError("Process group cleanup did not complete")
+                          time.sleep(0.05)
+                  except Exception:
+                      group_signal(child.pid, signal.SIGKILL, deadline)
+                      # KILL queues termination; a leader wait cannot join descendants.
+                      # Count zombies conservatively here, but never reset the allowance or retry.
+                      while time.monotonic() < deadline:
+                          child.poll()
+                          if not group_signal(child.pid, 0, deadline):
+                              break
+                          time.sleep(0.05)
+                      child.wait(timeout=max(0.001, deadline - time.monotonic()))
+                      raise
+
+
+          class FetchTimeout(Exception):
+              pass
+
+
+          class GitFailure(Exception):
+              def __init__(self, code):
+                  self.code = code
+
+
+          def git_lock_files(directory):
+              git_dir = os.path.join(os.path.realpath(directory), ".git")
+              if not os.path.lexists(git_dir):
+                  return set()
+              if not os.path.isdir(git_dir) or os.path.realpath(git_dir) != git_dir:
+                  raise RuntimeError("Checkout Git directory is not physical")
+              def scan_error(error):
+                  raise error
+              locks = set()
+              for root, directories, files in os.walk(git_dir, onerror=scan_error):
+                  directories[:] = [name for name in directories
+                                    if os.path.realpath(os.path.join(root, name)) == os.path.join(root, name)]
+                  locks.update(os.path.join(root, name) for name in files if name.endswith(".lock"))
+              return locks
+
+
+          def git_auth_environment(remote, token):
+              # Git'\''s promisor fetch inherits this process-only config from checkout.
+              # Reject redirects: http.<url> matching does not re-scope redirected requests.
+              count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+              if count < 0:
+                  raise ValueError("Invalid Git environment configuration count")
+              header = f"http.{remote}.extraheader"
+              authorization = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+              settings = [(header, ""), (header, f"AUTHORIZATION: basic {authorization}"),
+                          (f"http.{remote}.followRedirects", "false")]
+              environment = {"GIT_CONFIG_COUNT": str(count + len(settings)), "GIT_TERMINAL_PROMPT": "0"}
+              for index, (key, value) in enumerate(settings, count):
+                  environment[f"GIT_CONFIG_KEY_{index}"] = key
+                  environment[f"GIT_CONFIG_VALUE_{index}"] = value
+              return environment
+
+
+          def run_git(directory, *arguments, timeout=None, stdout=None, stderr=None, env=None,
+                      reclaim_locks=False):
+              global closed
+              if closed:
+                  raise RuntimeError("Git owner is closed")
+              check_cancelled()
+              if git is None:
+                  raise RuntimeError("Git unavailable")
+              # Process ownership alone does not grant metadata ownership: generic callers
+              # may use linked worktrees. Only exclusive checkout fetches reclaim locks.
+              previous_locks = git_lock_files(directory) if reclaim_locks else None
+              command = [git, "-C", directory, *arguments]
+              job = None
+              child = None
+              timed_out = False
+              deadline = time.monotonic() + timeout if timeout is not None else None
+              try:
+                  environment = ({**os.environ, **checkout_environment, **(env or {})}
+                                 if checkout_environment or env is not None else None)
+                  options = {"stdin": subprocess.DEVNULL, "stdout": stdout, "stderr": stderr,
+                             "env": environment}
+                  if os.name == "nt":
+                      job = create_job(None, None)
+                      limits = ExtendedLimits()
+                      limits.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE; no breakaway.
+                      set_job(job, 9, c.byref(limits), c.sizeof(limits))
+                      os.set_handle_inheritable(job, True)
+                      startup = subprocess.STARTUPINFO()
+                      startup.lpAttributeList = {"handle_list": [job]}
+                      options.update(startupinfo=startup, close_fds=True)
+                      # The selected checkout must not inject Python startup code into its owner.
+                      command = [sys.executable, "-I", "-S", "-c", bootstrap, str(job), *command]
+                  else:
+                      options["start_new_session"] = True
+                  # Signal handlers only latch cancellation, so Popen cannot lose ownership
+                  # between process creation and saving its handle/group for cleanup.
+                  child = subprocess.Popen(command, **options)
+                  if job is not None:
+                      os.set_handle_inheritable(job, False)
+                  while child.poll() is None and not cancelled:
+                      if deadline is not None and time.monotonic() >= deadline:
+                          timed_out = True
+                          raise FetchTimeout()
+                      time.sleep(0.05)
+              finally:
+                  # Failed inspection/cleanup permanently fences this policy process. Only
+                  # verified extinction permits another command, even after a caught error.
+                  closed = True
+                  try:
+                      if child is not None:
+                          drain(child, job)
+                          if previous_locks is not None and (timed_out or cancelled or child.returncode):
+                              # Forced termination skips Git'\''s lockfile cleanup. This checkout is exclusive;
+                              # reclaim only newly created locks after tree extinction, never existing locks.
+                              for lock in sorted(git_lock_files(directory) - previous_locks):
+                                  os.unlink(lock)
+                  finally:
+                      if job is not None:
+                          close_handle(job)
+                  closed = False
+                  # Run even while a timeout is unwinding: cancellation received during
+                  # draining outranks it, but failed cleanup above still outranks both.
+                  check_cancelled()
+              if child.returncode:
+                  raise GitFailure(child.returncode if child.returncode > 0 else 128 - child.returncode)
+
+
+          def backoff(seconds):
+              retry_at = time.monotonic() + seconds
+              while time.monotonic() < retry_at:
+                  check_cancelled()
+                  time.sleep(0.05)
+
+
+          def fetch(directory, *refs, prune=False, max_attempts=3, depth=1,
+                    blobless=False, retry_failures=False, retry_codes=()):
+              for attempt in range(1, max_attempts + 1):
+                  try:
+                      run_git(directory, "-c", "protocol.version=2", "fetch", "--no-tags",
+                              *(["--prune"] if prune else []), "--no-recurse-submodules", f"--depth={depth}",
+                              *(["--filter=blob:none"] if blobless else []), "origin", *refs,
+                              timeout=fetch_timeout_seconds, reclaim_locks=True)
+                      return
+                  except (FetchTimeout, GitFailure) as error:
+                      check_cancelled()
+                      retryable = isinstance(error, FetchTimeout) or retry_failures or error.code in retry_codes
+                      if not retryable or attempt == max_attempts:
+                          raise
+                      print(f"::warning::checkout fetch failed on attempt {attempt}; retrying", flush=True)
+                      backoff(5)
+
+
+          def git_output(directory, *arguments, timeout=None, env=None):
+              with tempfile.TemporaryFile() as output:
+                  run_git(directory, *arguments, timeout=timeout, env=env, stdout=output)
+                  output.seek(0)
+                  return output.read().decode("utf-8", errors="surrogateescape")
+
+
+          def resolve_ref(ref):
+              return git_output(workspace, "rev-parse", ref).strip()
+
+
+          def checkout_selected_ref():
+              ref = os.environ["CHECKOUT_REF"]
+              fallback = os.environ["CHECKOUT_FALLBACK_REF"]
+              manual = os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch"
+              requested = ref if kind == "preflight" and re.fullmatch("[0-9a-f]{40}", ref) else None
+              # Prefer the event ref for an exact manual SHA, but detect a ref that moved in the queue.
+              if requested and manual and ref == fallback and os.environ.get("CHECKOUT_EVENT_REF"):
+                  ref = os.environ["CHECKOUT_EVENT_REF"]
+
+              def fetch_ref(value):
+                  fetch(workspace, f"+{value}:refs/remotes/origin/checkout", prune=True,
+                        depth=1 if kind == "preflight" else 2, retry_codes=(124, 137))
+
+              try:
+                  fetch_ref(ref)
+              except GitFailure as error:
+                  if error.code in (124, 137) or not manual or os.environ["CHECKOUT_REF"] == fallback:
+                      raise
+                  print("::warning::workflow_dispatch target_ref is unavailable; falling back to head SHA", flush=True)
+                  fetch_ref(fallback)
+              if requested:
+                  resolved = resolve_ref("refs/remotes/origin/checkout")
+                  if resolved != requested and ref != requested:
+                      print("::notice::checkout ref moved; fetching requested SHA", flush=True)
+                      fetch_ref(requested)
+                      resolved = resolve_ref("refs/remotes/origin/checkout")
+                  if resolved != requested:
+                      print("::error::checkout ref did not resolve to the requested SHA", file=sys.stderr)
+                      raise GitFailure(1)
+              if kind == "preflight":
+                  # Diff-base callers need parent commits/trees, not their blobs.
+                  try:
+                      fetch(workspace, resolve_ref("refs/remotes/origin/checkout"), prune=True,
+                            depth=2, blobless=True, retry_failures=True)
+                  except (FetchTimeout, GitFailure):
+                      raise GitFailure(1)
+              run_git(workspace, "checkout", "--detach", "refs/remotes/origin/checkout")
+
+
+          def checkout_harness(sha):
+              action = ".github/actions/setup-node-env/action.yml"
+              node_setup_scripts = ("scripts/lib/pnpm-lockfile-documents.mjs",)
+              evidence_scripts = ("scripts/ios-screenshot-evidence.mjs", "scripts/lib/direct-run.mjs", "scripts/ci-static-step.sh")
+              platform_scripts = ("scripts/lib/swift-toolchain.sh",)
+              upgrade_scripts = ("scripts/lib/release-upgrade-baseline.mjs", "scripts/lib/release-version.mjs")
+              # The manifest builder runs from the harness and imports these siblings by file-relative paths.
+              preflight_scripts = (
+                  "scripts/ci-build-manifest.mjs",
+                  "scripts/lib/release-context.mjs",
+                  "scripts/lib/release-version.mjs",
+              )
+              npm_lock_scripts = (
+                  "scripts/ci-npm-lock-admission.mjs",
+                  "scripts/generate-npm-package-lock.mjs",
+                  "scripts/generate-npm-package-lock.mts",
+                  "scripts/changed-lanes.mts",
+                  "scripts/lib/merge-head-diff-base.mjs",
+              )
+              if kind == "linux-node" and not os.path.isfile(os.path.join(workspace, action)):
+                  raise GitFailure(1)
+              harness = os.path.join(workspace, ".ci-harness")
+              # This owner creates the harness, not candidate source. Keep strict source-status
+              # checks useful without hiding tracked edits or similarly named nested paths.
+              exclude = os.path.join(workspace, git_output(workspace, "rev-parse", "--git-path", "info/exclude").strip())
+              os.makedirs(os.path.dirname(exclude), exist_ok=True)
+              with open(exclude, "a+b") as output:
+                  output.seek(0)
+                  if output.read().splitlines()[-1:] != [b"/.ci-harness/"]:
+                      output.write(b"\n/.ci-harness/\n")
+              os.makedirs(harness, exist_ok=True)
+              if sha == os.environ["WORKFLOW_SHA"]:
+                  # Export the workflow revision from the freshly populated index, replacing
+                  # retained harness files without updating the index or trusting later edits.
+                  pathspecs = [".github/actions", *node_setup_scripts]
+                  if kind in ("platform", "linux-node"):
+                      pathspecs += evidence_scripts
+                  elif kind == "preflight":
+                      pathspecs += preflight_scripts
+                  if kind == "platform":
+                      pathspecs += platform_scripts
+                  if kind == "linux-node":
+                      pathspecs += (*upgrade_scripts, *npm_lock_scripts)
+                  paths = git_output(workspace, "ls-files", "-z", "--", *pathspecs).split("\0")[:-1]
+                  run_git(workspace, "checkout-index", "--force", f"--prefix={harness}/", "--", *paths)
+              else:
+                  run_git(harness, "init", harness)
+                  run_git(harness, "remote", "add", "origin", remote)
+                  sparse_paths = ["/.github/actions/", *(f"/{path}" for path in node_setup_scripts)]
+                  if kind in ("platform", "linux-node"):
+                      sparse_paths += [f"/{path}" for path in evidence_scripts]
+                  if kind == "platform":
+                      sparse_paths += [f"/{path}" for path in platform_scripts]
+                  if kind == "linux-node":
+                      sparse_paths += [f"/{path}" for path in (*upgrade_scripts, *npm_lock_scripts)]
+                  # Rooted non-cone patterns keep the kind-owned workflow files exact.
+                  # Sparse first, then blob-less avoids downloading a second repository snapshot.
+                  run_git(harness, "sparse-checkout", "set", "--no-cone", *sparse_paths)
+                  fetch(harness, f"+{os.environ['\''WORKFLOW_SHA'\'']}:refs/remotes/origin/ci-harness",
+                        max_attempts=1, blobless=True)
+                  # Checkout now materializes the sparse blobs over the network, so it carries the
+                  # fetch deadline instead of running unbounded like a local checkout.
+                  run_git(harness, "checkout", "--force", "--detach", os.environ["WORKFLOW_SHA"],
+                          timeout=fetch_timeout_seconds)
+              if not os.path.isfile(os.path.join(harness, action)):
+                  raise GitFailure(1)
+              check_cancelled()
+
+
+          def checkout():
+              check_cancelled()
+              prerequisites = json.loads(os.environ.get("CHECKOUT_GIT_COMMITS_JSON", "null")) if kind == "linux-node" else None
+              if prerequisites is None:
+                  prerequisites = []
+              if not isinstance(prerequisites, list) or any(
+                  not isinstance(commit, str) or not re.fullmatch("[0-9a-f]{40}", commit)
+                  for commit in prerequisites
+              ):
+                  raise ValueError("Invalid immutable test prerequisite commits")
+              if reset:
+                  os.makedirs(workspace, exist_ok=True)
+                  # Every earlier Git group has been drained before deleting its workspace.
+                  subprocess.run(["find", workspace, "-mindepth", "1", "-maxdepth", "1",
+                                  "-exec", "rm", "-rf", "{}", "+"], check=True)
+              run_git(workspace, "init", workspace)
+              if kind in ("linux-node", "android"):
+                  run_git(workspace, "config", "--global", "--add", "safe.directory", workspace)
+              run_git(workspace, "config", "gc.auto", "0")
+              run_git(workspace, "remote", "add", "origin", remote)
+              if kind in ("preflight", "manual"):
+                  checkout_selected_ref()
+                  if kind == "preflight" and resolve_ref("HEAD") == os.environ["WORKFLOW_SHA"]:
+                      checkout_harness(os.environ["WORKFLOW_SHA"])
+                  return
+              target = "refs/remotes/origin/ci-target" if kind in ("linux-node", "android") else "refs/remotes/origin/checkout"
+              sha = "refs/heads/main" if kind == "clawhub" else os.environ["CHECKOUT_SHA"]
+              refs = [f"+{sha}:{target}"]
+              base = os.environ.get("CHECKOUT_BASE_SHA") if kind == "linux-node" else None
+              if base:
+                  refs.append(f"+{base}:refs/remotes/origin/ci-ratchet-base")
+              # Fetch full reader objects with the authenticated checkout, before its
+              # credential scope ends and test workers create historical worktrees.
+              refs.extend(prerequisites)
+              fetch(workspace, *refs, prune=True, max_attempts=1 if reset else 3,
+                    retry_codes=(124, 137) if kind == "skills" else ())
+              run_git(workspace, "checkout", *(["--force"] if reset else []), "--detach",
+                      sha if kind in ("linux-node", "android") else target)
+              if kind == "android":
+                  if not os.access(os.path.join(workspace, "apps/android/gradlew"), os.X_OK):
+                      raise GitFailure(1)
+                  return
+              if kind in ("clawhub", "skills"):
+                  return
+              checkout_harness(sha)
+
+
+          def main():
+              global kind, workspace, remote, reset
+              if len(sys.argv) > 1:
+                  if sys.argv[1] == "--policy":
+                      # The caller supplies trusted policy bytes; imports share this exact
+                      # owner and its terminal lifecycle state, never a second supervisor.
+                      sys.modules["ci_git_owner"] = sys.modules[__name__]
+                      try:
+                          if sys.argv[2] == "-":
+                              exec(compile(sys.stdin.read(), "<git-policy>", "exec"), {"__name__": "__main__"})
+                          else:
+                              runpy.run_path(sys.argv[2], run_name="__main__")
+                      finally:
+                          if closed:
+                              raise RuntimeError("Git owner is closed")
+                          check_cancelled()
+                      return
+                  if sys.argv[1] not in ("--git", "--checkout-git"):
+                      raise ValueError("Unknown Git owner command")
+                  run_git(os.getcwd(), *sys.argv[3:], timeout=float(sys.argv[2]) or None,
+                          reclaim_locks=sys.argv[1] == "--checkout-git")
+                  return
+              if git is None:
+                  raise RuntimeError("Git unavailable")
+              kind = os.environ.get("CHECKOUT_KIND", "linux-node" if linux else "platform")
+              if kind == "prepare":
+                  raise SystemExit(0)
+              workspace = os.environ["GITHUB_WORKSPACE"]
+              remote = f"https://github.com/{os.environ['\''CHECKOUT_REPO'\'']}.git"
+              # The workflow'\''s token is repository-bound; never lend it to a sibling checkout.
+              token = os.environ.pop("CHECKOUT_TOKEN", "")
+              if token and os.environ["CHECKOUT_REPO"] == os.environ.get("GITHUB_REPOSITORY"):
+                  checkout_environment.update(git_auth_environment(remote, token))
+              del token
+              if kind == "clawhub":
+                  workspace = os.path.join(workspace, "clawhub-source")
+              reset = kind in ("linux-node", "android", "clawhub")
+              label = "ClawHub checkout" if kind == "clawhub" else "checkout"
+              started_at = time.monotonic()
+              try:
+                  for attempt in range(1, 6 if reset else 2):
+                      try:
+                          checkout()
+                          if reset:
+                              print(f"{label} attempt {attempt}/5 succeeded", flush=True)
+                          if kind == "clawhub":
+                              print(f"{label} completed in {int(time.monotonic() - started_at)}s", flush=True)
+                          raise SystemExit(0)
+                      except (FetchTimeout, GitFailure) as error:
+                          # Only command failures are retryable. Ownership/inspection errors
+                          # escape to the fail-closed boundary below, never workspace deletion.
+                          check_cancelled()
+                          if not reset:
+                              raise SystemExit(124 if isinstance(error, FetchTimeout) else error.code)
+                          print(f"::warning::{label} attempt {attempt}/5 failed", flush=True)
+                          backoff(attempt * 5)
+                  print(f"{label} failed after 5 attempts", file=sys.stderr)
+                  raise SystemExit(1)
+              finally:
+                  checkout_environment.clear()
+
+
+          def terminal_diagnostic(error, owner_code):
+              # Code identity, not a filename supplied by policy, proves source provenance.
+              codes = {id(owner_code): owner_code}
+              pending = [owner_code]
+              while pending:
+                  for value in pending.pop().co_consts:
+                      if type(value) is type(owner_code):
+                          codes[id(value)] = value
+                          pending.append(value)
+              names = {value: value.__name__ for value in vars(builtins).values()
+                       if isinstance(value, type) and issubclass(value, BaseException)}
+              names.update({FetchTimeout: "FetchTimeout", GitFailure: "GitFailure"})
+              records, seen, via = [], set(), "terminal"
+              while error is not None and id(error) not in seen and len(records) < 4:
+                  seen.add(id(error))
+                  record = {"type": names.get(type(error), "unknown"), "via": via}
+                  for field in ("errno", "winerror"):
+                      value = getattr(error, field, None)
+                      if type(value) is int and -(2 ** 31) <= value < 2 ** 32:
+                          record[field] = value
+                  frames, trace = [], error.__traceback__
+                  # Bound traversal as well as output; malformed metadata cannot stall exit.
+                  for _ in range(256):
+                      if trace is None:
+                          break
+                      if type(trace) is not TracebackType:
+                          raise TypeError
+                      frame, code = trace.tb_frame, trace.tb_frame.f_code
+                      if frame.f_globals is globals() and id(code) in codes and 0 < trace.tb_lineno < 2 ** 31:
+                          frames.append({"function": code.co_name[:64], "line": trace.tb_lineno})
+                          frames = frames[-6:]
+                      trace = trace.tb_next
+                  record["owner_frames"] = frames
+                  if trace is not None:
+                      record["traceback_truncated"] = 1
+                  records.append(record)
+                  cause = error.__cause__
+                  error, via = (cause, "cause") if cause is not None else (error.__context__, "context")
+              return records
+
+
+          if __name__ == "__main__":
+              exit_code, terminal_error = 0, None
+              try:
+                  main()
+              except FetchTimeout:
+                  exit_code = 124
+              except GitFailure as error:
+                  exit_code = error.code
+              except Exception as error:
+                  exit_code, terminal_error = 125, error
+              # Leave the handler before diagnostics or exit can raise: older Python'\''s
+              # implicit exception chaining can loop on an already-cyclic context.
+              if terminal_error is not None:
+                  name, diagnostic = "unknown", "unavailable"
+                  try:
+                      records = terminal_diagnostic(terminal_error, sys._getframe().f_code)
+                      diagnostic = json.dumps(records, separators=(",", ":"))
+                      name = records[0]["type"]
+                  except BaseException:
+                      pass  # Diagnostics must never replace the authoritative terminal exit.
+                  try:
+                      print(f"::error::Git ownership/setup failed ({name}); refusing reuse or retry", file=sys.stderr)
+                      print(f"[ci-git-owner] diagnostic={diagnostic}", file=sys.stderr)
+                  except BaseException:
+                      pass
+              raise SystemExit(exit_code)
+          '
+          # End generated CI Git owner.
+      - name: Setup Node environment
+        uses: ./.ci-harness/.github/actions/setup-node-env
+        with:
+          semantic-checks: "true"
+          cache-mode: restore
+          node-version: 24.x
+          install-bun: "false"
+          dependency-cache: "false"
+          vitest-fs-cache: "true"
+          vitest-worker-cache: "false"
+          node-compile-cache: "true"
+      - name: Setup Datadog Test Optimization
+        uses: DataDog/test-visibility-github-action@1abae93083b69778facd7ee11f89184306c999e6
+        with:
+          languages: js
+          api_key: ${{ secrets.DD_API_KEY }}
+          service: openclaw-tests
+          js-tracer-version: latest
+      - name: Build Node test runtime
+        id: node-test-runtime
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+          OPENCLAW_BUILD_PRIVATE_QA: "0"
+          VITEST: "1"
+        run: pnpm build qaRuntime
+      - name: Configure Node test resources
+        env:
+          PREDICTED_TEST_SECONDS: ""
+          SHARD_PLAN_CONCURRENCY: ""
+          FROZEN_TARGET: "false"
+          RUNNER_ENVIRONMENT: github-hosted
+          RUNSON_JOB: "false"
+        run: |
+          cores="$(nproc)"
+          if [ "$RUNSON_JOB" = "true" ]; then
+            workers=2
+          elif [ "$SHARD_PLAN_CONCURRENCY" != "1" ]; then
+            workers=2
+          elif [ "$cores" -ge 12 ]; then
+            workers=6
+          elif [ "$cores" -ge 6 ]; then
+            workers=4
+          else
+            workers=3
+          fi
+          if [[ "$RUNSON_JOB" != "true" && "$RUNNER_ENVIRONMENT" == "self-hosted" && "$FROZEN_TARGET" != "true" && "$SHARD_PLAN_CONCURRENCY" == "1" ]]; then
+            workers="$(CI_LEGACY_WORKERS="$workers" node --input-type=module <<'JS'
+          import { isConstrainedCiCheckHost } from './scripts/lib/local-check-runtime.mts';
+          import { detectVitestHostInfo, resolveLocalVitestScheduling } from './scripts/lib/vitest-local-scheduling.mts';
+          const host = detectVitestHostInfo();
+          const constrained = isConstrainedCiCheckHost({
+            logicalCpuCount: host.cpuCount,
+            totalMemoryBytes: host.totalMemoryBytes,
+          });
+          console.log(constrained ? process.env.CI_LEGACY_WORKERS : resolveLocalVitestScheduling(process.env, host).maxWorkers);
+          JS
+            )"
+          fi
+          if [ "$workers" -gt "$cores" ]; then
+            workers="$cores"
+          fi
+          echo "detected cores=$cores plan_concurrency=${SHARD_PLAN_CONCURRENCY:-default} predicted_test_seconds=${PREDICTED_TEST_SECONDS:-unknown} -> workers=$workers"
+          echo "OPENCLAW_VITEST_MAX_WORKERS=$workers" >> "$GITHUB_ENV"
+      - name: Install direct response observer outside checkout
+        shell: bash
+        env:
+          NODE_OPTIONS: ""
+          ORIGINAL_INVENTORY: ${{ matrix.inventory }}
+          SELECTED_FILE: ${{ matrix.selected }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tia-direct-capture"
+          cat > "$RUNNER_TEMP/tia-direct-observe.cjs" <<'OBSERVER'
+          'use strict';
+          // Diagnostic observer: no transport, timeout, request, response, or selection changes.
+          const Module = require('node:module');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const { threadId } = require('node:worker_threads');
+          const directory = process.env.OPENCLAW_CANDIDATE_CAPTURE;
+          const originalLoad = Module._load;
+          const wrappers = new WeakMap();
+          const SKIP = '/api/v2/ci/tests/skippable';
+          const SETTINGS = '/api/v2/libraries/tests/services/setting';
+          const select = (object, keys) => Object.fromEntries(keys.filter(k => ['string','number','boolean'].includes(typeof object?.[k])).map(k => [k, object[k]]));
+          function save(row) {
+            try {
+              if (!directory || !path.isAbsolute(directory)) return;
+              fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+              fs.writeFileSync(path.join(directory, `${Date.now()}-${process.pid}-${threadId}-${crypto.randomUUID()}.json`), JSON.stringify({pid:process.pid,threadId,...row}), {mode:0o600});
+            } catch { /* Observation cannot interrupt tests or the tracer callback. */ }
+          }
+          function identity(input) {
+            return {...select(input,['test_level','service','env','repository_url','sha','branch']), configurations:select(input?.configurations,['os.platform','os.version','os.architecture','runtime.name','runtime.version']), hasCustomConfiguration: input?.configurations?.custom != null};
+          }
+          function failure(error) { return error ? {...select(error,['code','name']), present:true} : null; }
+          let debugCount = 0;
+          function safeDebug(message) {
+            // Debug is enabled, but never publish arbitrary request headers, spans, or environment.
+            if (typeof message === 'string' && /^(Number of received skippable suites: \d+|Received \d+ skippable suite candidates; excluded \d+ because line coverage is missing; \d+ remain\.|All \d+ skippable suite candidates were excluded: coverage upload is enabled but line coverage is missing\.)$/.test(message) && debugCount++ < 30) {
+              save({kind:'debug',message});
+              process.stderr.write(`[tia-debug] ${message}\n`);
+            }
+          }
+          Module._load = function(request, parent, isMain) {
+            const exported = Reflect.apply(originalLoad, this, arguments);
+            if (!exported || !['function','object'].includes(typeof exported)) return exported;
+            let resolved;
+            try { resolved = Module._resolveFilename(request,parent,isMain).replaceAll('\\','/'); } catch { return exported; }
+            if (!resolved.includes('/dd-trace/src/')) return exported;
+            if (wrappers.has(exported)) return wrappers.get(exported);
+            if (resolved.endsWith('/dd-trace/src/log/writer.js')) {
+              const originalConfigure = exported.configure;
+              const observed = {...exported,configure(enabled,level,logger) {
+                return originalConfigure.call(this,enabled,level,{debug:safeDebug,info:safeDebug,warn:safeDebug,error:safeDebug});
+              }};
+              wrappers.set(exported,observed);return observed;
+            }
+            if (resolved.endsWith('/dd-trace/src/ci-visibility/requests/request.js') && typeof exported === 'function') {
+              const observed = function(data,options,callback) {
+                if (![SKIP,SETTINGS].includes(options?.path)) return Reflect.apply(exported,this,arguments);
+                const started = new Date().toISOString();
+                const endpoint = options.path;
+                let requestIdentity = {};
+                try { requestIdentity = identity(JSON.parse(data).data?.attributes); } catch {}
+                save({kind:'request-start',endpoint,started,request:requestIdentity,timeout:options.timeout});
+                return exported.call(this,data,options,function(error,response,status) {
+                  try {
+                    const row = {kind:'response',endpoint,started,completed:new Date().toISOString(),request:requestIdentity,status,error:failure(error)};
+                    if (!error && typeof response === 'string') {
+                      row.responseSha256 = crypto.createHash('sha256').update(response).digest('hex');
+                      const parsed = JSON.parse(response);
+                      if (endpoint === SKIP) {
+                        row.correlationId = typeof parsed.meta?.correlation_id === 'string' ? parsed.meta.correlation_id : null;
+                        const items = Array.isArray(parsed.data) ? parsed.data : [];
+                        row.totalItems = items.length;
+                        row.truncated = items.length > 50000;
+                        row.candidates = items.slice(0,50000).filter(x=>x.type==='suite' && typeof x.attributes?.suite==='string').map(x=>({suite:x.attributes.suite,missingLineCoverage:x.attributes._is_missing_line_code_coverage===true}));
+                      } else row.settings = select(parsed.data?.attributes,['itr_enabled','tests_skipping','code_coverage','require_git','efd_enabled']);
+                    }
+                    save(row);
+                  } catch { save({kind:'capture-error',endpoint,started}); }
+                  return Reflect.apply(callback,this,arguments);
+                });
+              };
+              wrappers.set(exported,observed);return observed;
+            }
+            if (resolved.endsWith('/dd-trace/src/ci-visibility/intelligent-test-runner/get-skippable-suites.js') && typeof exported.getSkippableSuites === 'function') {
+              const observed = {...exported,getSkippableSuites(options,callback) {
+                return exported.getSkippableSuites.call(this,options,function(error,suites,correlationId) {
+                  try { save({kind:'consumed-candidates',completed:new Date().toISOString(),request:identity(options),options:select(options,['testLevel','isCoverageReportUploadEnabled','isLineCoverageSupported']),error:failure(error),correlationId:typeof correlationId==='string'?correlationId:null,total:Array.isArray(suites)?suites.length:null,truncated:Array.isArray(suites)&&suites.length>50000,suites:Array.isArray(suites)?suites.slice(0,50000).filter(x=>typeof x==='string'):[]}); } catch {}
+                  return Reflect.apply(callback,this,arguments);
+                });
+              }};
+              wrappers.set(exported,observed);return observed;
+            }
+            return exported;
+          };
+          save({kind:'observer-loaded',node:process.version,debugEnabled:process.env.DD_TRACE_DEBUG==='1'});
+          OBSERVER
+          python3 - <<'IDENTITY'
+          import json,os,subprocess
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'tia-direct-capture'
+          package=Path(os.environ['DD_TRACE_PACKAGE']).parent.parent/'package.json'
+          identity={'tested_sha':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'expected_sha':os.environ['DD_GIT_COMMIT_SHA'],'node':subprocess.check_output(['node','--version'],text=True).strip(),'tracer_version':json.loads(package.read_text())['version'],'original_inventory':json.loads(os.environ['ORIGINAL_INVENTORY']),'selected_file':os.environ['SELECTED_FILE']}
+          (p/'identity.json').write_text(json.dumps(identity))
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('OPENCLAW_CANDIDATE_CAPTURE='+str(p)+'\n')
+          IDENTITY
+      - name: Run Node test shard
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192 --require=${{ runner.temp }}/tia-direct-observe.cjs
+          OPENCLAW_DD_TIA_DIAGNOSTICS: ${{ matrix.diagnostic }}
+          OPENCLAW_E2E_USE_PREBUILT_DIST: ""
+          OPENCLAW_CI_TEST_RUNTIME_POLICY: bun-compatible
+          FROZEN_TARGET: "false"
+          RUNNER_ENVIRONMENT: github-hosted
+          OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: ${{ matrix.groups }}
+          OPENCLAW_NODE_TEST_GROUPS_JSON: ""
+          OPENCLAW_NODE_TEST_CONFIGS_JSON: "null"
+          OPENCLAW_NODE_TEST_ENV_JSON: "null"
+          OPENCLAW_NODE_TEST_INCLUDE_PATTERNS_JSON: "null"
+          OPENCLAW_NODE_TEST_TARGETS_JSON: "null"
+          OPENCLAW_NODE_TEST_VITEST_ARGS_JSON: '["--testNamePattern", "${{ matrix.testPattern }}"]'
+          OPENCLAW_VITEST_SHARD_NAME: ${{ matrix.shard }}
+          OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS: "300000"
+          OPENCLAW_NODE_TEST_PLAN_CONCURRENCY: ""
+          OPENCLAW_NODE_TEST_PLAN_CONTINUE_ON_FAILURE: "0"
+          DD_TRACE_DEBUG: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner="scripts/ci-run-node-test-shard.mts"
+          if [[ ! -f "$runner" ]]; then
+            runner=".ci-workflow/${runner}"
+            [[ -f "$runner" ]]
+          fi
+          time -p node --import tsx "$runner"
+      - name: Compare actual response with full original job inventory
+        if: ${{ always() }}
+        shell: bash
+        env:
+          NODE_OPTIONS: ""
+        run: |
+          python3 - <<'ANALYZE'
+          import json,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'tia-direct-capture'
+          identity=json.loads((p/'identity.json').read_text())
+          selected=set(identity['original_inventory'])
+          rows=[json.loads(f.read_text()) for f in p.glob('*.json') if f.name!='identity.json']
+          responses=[x for x in rows if x.get('kind')=='response' and x.get('endpoint')=='/api/v2/ci/tests/skippable']
+          consumed=[x for x in rows if x.get('kind')=='consumed-candidates']
+          summary={'identity':identity,'responses':[],'consumed':[]}
+          for row in responses:
+           candidates={x['suite'] for x in row.get('candidates',[])}
+           summary['responses'].append({k:row.get(k) for k in ['pid','threadId','status','error','request','started','completed','correlationId','truncated']})
+           summary['responses'][-1].update(candidateCount=len(candidates),originalInventoryCount=len(selected),matches=sorted(selected&candidates),selectedFileIsCandidate=identity['selected_file'] in candidates,normalizedMatches=sorted(selected&{x.removeprefix('./').replace('\\','/') for x in candidates}))
+          for row in consumed:
+           candidates=set(row['suites'])
+           summary['consumed'].append({k:row.get(k) for k in ['pid','threadId','total','error','options','correlationId','truncated']})
+           summary['consumed'][-1].update(matches=sorted(selected&candidates),selectedFileIsCandidate=identity['selected_file'] in candidates)
+          (p/'summary.json').write_text(json.dumps(summary,indent=2))
+          print(json.dumps(summary,indent=2))
+          assert identity['tested_sha']==identity['expected_sha']
+          assert responses, 'No observed candidate request completion: inspect observer/preload evidence'
+          assert consumed, 'No observed tracer selection callback'
+          assert not any(x.get('truncated') for x in responses+consumed)
+          assert all(x.get('request',{}).get('sha')==identity['expected_sha'] for x in responses)
+          ANALYZE
+      - name: Upload allowlisted candidate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tia-direct-${{ matrix.lane }}
+          path: ${{ runner.temp }}/tia-direct-capture/*.json
+          if-no-files-found: error
+          retention-days: 14
