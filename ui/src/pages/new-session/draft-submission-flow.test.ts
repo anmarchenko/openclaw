@@ -221,6 +221,9 @@ describe("DraftSubmissionFlow", () => {
         { profileId: "profile-alex", start: 0, end: 5 },
       ]);
       stubObjectUrls("blob:accepted-note");
+      expect(new URL("/telemetry", "https://example.test").href).toBe(
+        "https://example.test/telemetry",
+      );
       flow.attachmentDraft.replace([registerTextPayload("accepted-note")]);
 
       const submission = flow.submit();
