@@ -11,6 +11,7 @@ import {
   createRunningNarrationController,
   runningRow,
 } from "../test-helpers/app-sidebar-session-narration.ts";
+import { reportPendingFakeTimers } from "../test-helpers/pending-fake-timer-diagnostics.ts";
 import {
   SidebarSessionNarrationController,
   type SidebarNarrationSyncInput,
@@ -54,8 +55,10 @@ function releaseFixture(
 }
 
 describe("sidebar narration subscription retries", () => {
+  let baselineTimerCount = 0;
   beforeEach(() => {
     vi.useFakeTimers();
+    baselineTimerCount = vi.getTimerCount();
     vi.setSystemTime(10_000);
   });
   afterEach(() => {
@@ -124,7 +127,16 @@ describe("sidebar narration subscription retries", () => {
       controller.sync(removed);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(source.unsubscribeMessages).toHaveBeenCalledOnce();
-      expect(vi.getTimerCount()).toBe(0);
+      try {
+        expect(vi.getTimerCount()).toBe(0);
+      } catch (error) {
+        reportPendingFakeTimers(baselineTimerCount, {
+          scope: "sidebar-narration",
+          assertion: "terminal-release",
+          expectedCount: 0,
+        });
+        throw error;
+      }
       controller.disconnect();
     },
   );
@@ -180,7 +192,16 @@ describe("sidebar narration subscription retries", () => {
     controller.sync({ ...input, rows: [] });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(wireKeys.size).toBe(0);
-    expect(vi.getTimerCount()).toBe(0);
+    try {
+      expect(vi.getTimerCount()).toBe(0);
+    } catch (error) {
+      reportPendingFakeTimers(baselineTimerCount, {
+        scope: "sidebar-narration",
+        assertion: "reacquisition-cleanup",
+        expectedCount: 0,
+      });
+      throw error;
+    }
     controller.disconnect();
   });
 
@@ -208,7 +229,16 @@ describe("sidebar narration subscription retries", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(wireKeys.size).toBe(1);
       expect(request).toHaveBeenCalledTimes(timedOut ? 3 : 2);
-      expect(vi.getTimerCount()).toBe(0);
+      try {
+        expect(vi.getTimerCount()).toBe(0);
+      } catch (error) {
+        reportPendingFakeTimers(baselineTimerCount, {
+          scope: "sidebar-narration",
+          assertion: "in-flight-release",
+          expectedCount: 0,
+        });
+        throw error;
+      }
       server.failure = null;
       controller.disconnect();
       await vi.advanceTimersByTimeAsync(0);
@@ -277,7 +307,16 @@ describe("sidebar narration subscription retries", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(source.unsubscribeMessages).toHaveBeenCalledTimes(2);
     expect(wireKeys.size).toBe(0);
-    expect(vi.getTimerCount()).toBe(0);
+    try {
+      expect(vi.getTimerCount()).toBe(0);
+    } catch (error) {
+      reportPendingFakeTimers(baselineTimerCount, {
+        scope: "sidebar-narration",
+        assertion: "overdue-release",
+        expectedCount: 0,
+      });
+      throw error;
+    }
     controller.disconnect();
   });
 
@@ -343,7 +382,16 @@ describe("sidebar narration subscription retries", () => {
     }
     await vi.advanceTimersByTimeAsync(0);
     expect(request).toHaveBeenCalledTimes(6);
-    expect(vi.getTimerCount()).toBe(6);
+    try {
+      expect(vi.getTimerCount()).toBe(6);
+    } catch (error) {
+      reportPendingFakeTimers(baselineTimerCount, {
+        scope: "sidebar-narration",
+        assertion: "acquisition-backoff",
+        expectedCount: 6,
+      });
+      throw error;
+    }
 
     for (const delay of [250, 500, 1_000, 2_000, 4_000, 8_000, 15_000, 15_000]) {
       const attempts = request.mock.calls.length;
@@ -396,7 +444,16 @@ describe("sidebar narration subscription retries", () => {
       "sessions.messages.unsubscribe",
       "sessions.messages.subscribe",
     ]);
-    expect(vi.getTimerCount()).toBe(0);
+    try {
+      expect(vi.getTimerCount()).toBe(0);
+    } catch (error) {
+      reportPendingFakeTimers(baselineTimerCount, {
+        scope: "sidebar-narration",
+        assertion: "timeout-compensation",
+        expectedCount: 0,
+      });
+      throw error;
+    }
     controller.disconnect();
     await vi.advanceTimersByTimeAsync(0);
     expect(request).toHaveBeenCalledTimes(4);
@@ -447,7 +504,16 @@ describe("sidebar narration subscription retries", () => {
     visibility("visible");
     await vi.advanceTimersByTimeAsync(60_000);
     expect(source.subscribeMessages).toHaveBeenCalledOnce();
-    expect(vi.getTimerCount()).toBe(0);
+    try {
+      expect(vi.getTimerCount()).toBe(0);
+    } catch (error) {
+      reportPendingFakeTimers(baselineTimerCount, {
+        scope: "sidebar-narration",
+        assertion: "terminal-acquisition",
+        expectedCount: 0,
+      });
+      throw error;
+    }
     visibility("hidden");
     visibility("visible");
     expect(source.subscribeMessages).toHaveBeenCalledTimes(2);

@@ -466,21 +466,59 @@ describe("Gateway route model reuse", () => {
             { timeoutMs: 60_000, signal },
           );
           signal.throwIfAborted();
-          await expect
-            .poll(
-              async ({ signal: pollSignal }) => {
-                signal.throwIfAborted();
-                const value = await activeClient.request<{ reloadSettled: boolean }>(
-                  "routeModelProof.stats",
-                  {},
-                  { signal: AbortSignal.any([signal, pollSignal]) },
-                );
-                signal.throwIfAborted();
-                return value.reloadSettled;
-              },
-              { timeout: 30_000 },
-            )
-            .toBe(true);
+          const reloadPollStartedAt = performance.now();
+          let reloadProbeResponses = 0;
+          let lastReloadSettled: boolean | null = null;
+          try {
+            await expect
+              .poll(
+                async ({ signal: pollSignal }) => {
+                  signal.throwIfAborted();
+                  const value = await activeClient.request<{ reloadSettled: boolean }>(
+                    "routeModelProof.stats",
+                    {},
+                    { signal: AbortSignal.any([signal, pollSignal]) },
+                  );
+                  signal.throwIfAborted();
+                  reloadProbeResponses += 1;
+                  lastReloadSettled = value.reloadSettled;
+                  return value.reloadSettled;
+                },
+                { timeout: 30_000 },
+              )
+              .toBe(true);
+          } catch (error) {
+            try {
+              // Count fixed owner messages in the bounded child tail; never emit its contents.
+              const logs = gateway.logs();
+              console.error(
+                "[route-model-reload-diagnostic]",
+                JSON.stringify({
+                  elapsedMs: Math.round(performance.now() - reloadPollStartedAt),
+                  reloadProbeResponses,
+                  lastReloadSettled,
+                  sameGatewayProcess: gateway.child?.pid === gatewayPid,
+                  logScope: "captured-child-tail",
+                  logsTruncated: logs.includes("[output truncated to last "),
+                  changeDetected: (logs.match(/config change detected; evaluating reload/g) ?? [])
+                    .length,
+                  hotApplied: (logs.match(/config hot reload applied/g) ?? []).length,
+                  sourceAccepted: (logs.match(/config source revision \d+ accepted/g) ?? []).length,
+                  reloadRetry: (logs.match(/config reload retry/g) ?? []).length,
+                  reloadFailed: (logs.match(/config reload failed/g) ?? []).length,
+                  reloadSuperseded: (logs.match(/config reload superseded/g) ?? []).length,
+                  promotionFailed: (
+                    logs.match(/config reload last-known-good promotion failed/g) ?? []
+                  ).length,
+                  restartRequired: (logs.match(/config change requires gateway restart/g) ?? [])
+                    .length,
+                }),
+              );
+            } catch {
+              // A diagnostic failure must preserve the original poll failure and cleanup path.
+            }
+            throw error;
+          }
           signal.throwIfAborted();
           const afterReload = await turn(PROVIDERS[0], capacityModelId(64));
           signal.throwIfAborted();
