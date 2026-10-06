@@ -790,7 +790,11 @@ jobs:
 
 
           class RepairError(Exception):
-              pass
+              def __init__(self, code, stage="prepare"):
+                  super().__init__(code)
+                  # Call sites supply fixed codes/stages, never subprocess or HTTP text.
+                  self.code = code
+                  self.stage = stage
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -798,7 +802,7 @@ jobs:
                   return None
 
 
-          def git(repository, *args, data=None):
+          def git(repository, *args, data=None, stage="git"):
               env = os.environ.copy()
               # Never fetch lazy objects or honor replacement objects from another task.
               env["GIT_NO_LAZY_FETCH"] = "1"
@@ -806,28 +810,37 @@ jobs:
               env["GIT_CONFIG_NOSYSTEM"] = "1"
               for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
                   env.pop(name, None)
-              result = subprocess.run(
-                  ["git", "--no-replace-objects", "-c", "maintenance.auto=false", "-C", str(repository), *args],
-                  input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
-                  timeout=120, check=False,
-              )
+              try:
+                  result = subprocess.run(
+                      ["git", "--no-replace-objects", "-c", "maintenance.auto=false", "-C", str(repository), *args],
+                      input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                      timeout=120, check=False,
+                  )
+              except subprocess.TimeoutExpired:
+                  raise RepairError("git_timeout", stage) from None
+              except OSError:
+                  raise RepairError("git_start_failed", stage) from None
               if result.returncode:
                   # Git errors can include environment-dependent details; do not echo them.
-                  raise RepairError("git_operation_failed")
+                  raise RepairError("git_operation_failed", stage)
               return result.stdout
 
 
           def object_inventory(repository):
-              if git(repository, "rev-parse", HEAD + "^1").decode().strip() != PARENT:
-                  raise RepairError("unexpected_parent")
+              # Shallow boundaries suppress revision traversal even when both objects exist.
+              # Read the immutable commit header instead and require its exact single parent.
+              commit_header = git(repository, "cat-file", "commit", HEAD, stage="validate_parent").split(b"\n\n", 1)[0]
+              parents = [line[7:] for line in commit_header.split(b"\n") if line.startswith(b"parent ")]
+              if parents != [PARENT.encode("ascii")]:
+                  raise RepairError("unexpected_parent", "validate_parent")
               objects = {HEAD, PARENT}
               trees_by_commit = {}
               for commit in (HEAD, PARENT):
-                  root = git(repository, "rev-parse", commit + "^{tree}").decode().strip()
+                  root = git(repository, "rev-parse", commit + "^{tree}", stage="read_root").decode().strip()
                   if not OID.fullmatch(root):
                       raise RepairError("invalid_root")
                   trees = {root}
-                  for record in git(repository, "ls-tree", "-r", "-t", "-z", commit).split(b"\0"):
+                  for record in git(repository, "ls-tree", "-r", "-t", "-z", commit, stage="enumerate_trees").split(b"\0"):
                       if not record:
                           continue
                       metadata, _path = record.split(b"\t", 1)
@@ -844,7 +857,7 @@ jobs:
               if not 2 < len(objects) <= MAX_OBJECTS:
                   raise RepairError("object_count_out_of_bounds")
               encoded = ("\n".join(sorted(objects)) + "\n").encode("ascii")
-              checked = git(repository, "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)", data=encoded)
+              checked = git(repository, "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)", data=encoded, stage="check_objects")
               types = {}
               for line in checked.decode("ascii").splitlines():
                   oid, kind, size = line.split()
@@ -860,14 +873,14 @@ jobs:
 
           def prepare(repository, output):
               encoded, types, trees = object_inventory(repository)
-              pack = git(repository, "pack-objects", "--stdout", "--compression=9", "--no-reuse-delta", "--no-reuse-object", data=encoded)
+              pack = git(repository, "pack-objects", "--stdout", "--compression=9", "--no-reuse-delta", "--no-reuse-object", data=encoded, stage="pack_objects")
               if not 0 < len(pack) <= MAX_PACK_BYTES:
                   raise RepairError("pack_size_out_of_bounds")
               pack_path = output / "metadata.pack"
               idx_path = output / "metadata.idx"
               pack_path.write_bytes(pack)
-              git(repository, "index-pack", "-o", str(idx_path), str(pack_path))
-              verified = git(repository, "verify-pack", "-v", str(idx_path)).decode("ascii")
+              git(repository, "index-pack", "-o", str(idx_path), str(pack_path), stage="index_pack")
+              verified = git(repository, "verify-pack", "-v", str(idx_path), stage="verify_pack").decode("ascii")
               verified_types = {}
               for line in verified.splitlines():
                   fields = line.split()
@@ -894,7 +907,7 @@ jobs:
           def upload(pack, summary):
               api_key = os.environ.get("DD_API_KEY")
               if not api_key:
-                  raise RepairError("missing_api_key")
+                  raise RepairError("missing_api_key", "upload_configuration")
               boundary = "openclaw-metadata-" + summary["pack_sha256"]
               identity = json.dumps({"data": {"id": HEAD, "type": "commit"}, "meta": {"repository_url": REPOSITORY_URL}}, separators=(",", ":")).encode("ascii")
               body = (
@@ -939,9 +952,12 @@ jobs:
                       print(json.dumps({**summary, "status": "prepared_no_upload"}), flush=True)
                       return 0
                   return upload(pack, summary)
-              except (RepairError, subprocess.TimeoutExpired, ValueError, OSError):
+              except RepairError as error:
+                  print(json.dumps({"status": "preparation_or_configuration_failed", "stage": error.stage, "code": error.code}), flush=True)
+                  return 1
+              except (ValueError, OSError):
                   # No credential, environment, Git stderr, HTTP body, or traceback output.
-                  print(json.dumps({"status": "preparation_or_configuration_failed"}), flush=True)
+                  print(json.dumps({"status": "preparation_or_configuration_failed", "stage": "prepare_or_upload_configuration", "code": "invalid_input_or_io_failure"}), flush=True)
                   return 1
 
 
