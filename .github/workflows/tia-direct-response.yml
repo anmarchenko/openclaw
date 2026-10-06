@@ -29,7 +29,7 @@ jobs:
           - lane: runtime18
             shard: bundle-infra-small-runtime-18
             diagnostic: "0"
-            groups: H4sIAAAAAAAC/33PO27DMAyA4asE8hr6ocqK21N0D4KAlWlXqEwFohwgKHr3Kk6GTp3I4f8I8PitXOTJz6LedkeVSXJz9X9G7XlKWD+iOos67XfKswvrSO+YMyV+UEmu2drmkqIjESC+1tuJp5JPTOOZcaEC1MfKYyDYCMiCIUBaOfuFoBtUycvqeT5/0e2eJwqEQjCtJfzXVlJSl2MCa+DVtnZA1C9Gm2ompoTZR4ZD31uNRtvBtdUFU4YO4gRd9Xztbk3f2R4PehpbUj+nXzxED20rAQAA
+            groups: H4sIAAAAAAAC/33PO27DMAyA4asE8hr6ocqK21NkD4KAtSlXiCwFFF2gKHr3Kk6GTp3I4f8I8PStxhSdn7N6252UUJbm0/8ZtY+OsX5EtWR13u+Uj2NYJzqiCHF80Mxjs7XNLbFkcIkXlHq78WT5A3m6RFyoCPW+xikQbAbygiEAr1H8QtANquRl9XG+XOnrnjMFwkzg1hL+a6tc0lESgzXwals7IOoXo001UyRG8SnCoe+tRqPtMLbVDVmgg+Sgq56/3a3pO9vjQbupJfVz/gXaojfWLAEAAA==
             inventory:
               '["src/infra/package-dist-content-inventory.test.ts", "src/infra/package-dist-inventory.test.ts", "src/infra/package-json.test.ts",
               "src/infra/package-lifecycle.ownership.test.ts", "src/infra/package-lifecycle.test.ts", "src/infra/package-local-overrides.modes.test.ts",
@@ -54,96 +54,8 @@ jobs:
               "src/infra/restart.authorization.test.ts", "src/infra/restart.deferral-timeout.test.ts", "src/infra/restart.monotonic-clock.test.ts",
               "src/infra/restart.test.ts", "src/infra/run-node-static-assets.test.ts", "src/infra/run-node.live-dist.test.ts",
               "src/infra/run-node.runtime-postbuild.test.ts", "src/infra/run-node.test.ts"]'
-            selected: src/infra/process-env.test.ts
-            testPattern: preserves exact POSIX keys and the existing Path fallback
-          - lane: security2
-            shard: core-unit-src-security-2
-            diagnostic: "0"
-            groups: H4sIAAAAAAAC/3XPS27CQAyA4augybZOQggN9BTdI4TMjCcdERxkO0io4u4ML6mbrrz5flve/Do/cky9uq/ZxhmpVef0Z5QTJwMVXz5daeq2HzOX2A9ToG80I+FnnVXlkc+oVcZqyKblY8kr0h+UsGM8Uvb5sBC814OSnyTZBRqXpaVj4n53oMtdCg2EShCnYYD/skKz8jYKNE0HXY1dE+K+DZ9d0ROToKWRoV3Xvm5X+7BcU3FCMZjDGGFevB56xIuAYbH0EXHVuuv2BpqM67ElAQAA
-            inventory:
-              '["src/audit/audit-event-writer.lifecycle.test.ts", "src/audit/execution-identity-admission.test.ts",
-              "src/audit/message-audit-events.test.ts", "src/boards/board-layout.test.ts", "src/canvas/constants.test.ts", "src/canvas/widget-script-syntax.test.ts",
-              "src/canvas/widget-tool.prompt.test.ts", "src/canvas/wrap.test.ts", "src/chat/tool-call-grouping.test.ts", "src/claws/cron-update.test.ts",
-              "src/claws/openclaw-profile.test.ts", "src/claws/path-containment.test.ts", "src/claws/provenance-runtime-read.test.ts",
-              "src/claws/read-only-state-compat.test.ts", "src/claws/schema.test.ts", "src/claws/tool-profile-consent.test.ts",
-              "src/claws/update-plan-readiness.test.ts", "src/context-engine/host-compat.test.ts", "src/context-engine/registry.logical-turn-resources.test.ts",
-              "src/decisions/diagnostics.test.ts", "src/docker-build-cache.test.ts", "src/dockerfile.test.ts", "src/docs/cloud-workers-config.test.ts",
-              "src/docs/plugin-doc-examples.test.ts", "src/entry.respawn-diagnostics.test.ts", "src/fleet/backup.runtime.test.ts",
-              "src/fleet/service-support.runtime.test.ts", "src/flows/doctor-acp-agent-model-check.test.ts", "src/flows/doctor-core-browser-residue-check.test.ts",
-              "src/flows/doctor-core-checks.runtime.bundled.test.ts", "src/flows/doctor-core-platform-notes.test.ts", "src/flows/doctor-gateway-exec-credential.test.ts",
-              "src/flows/doctor-health-contribution-runners.config.auth-cleanup.test.ts", "src/flows/doctor-health-contributions.auth-import-order.test.ts",
-              "src/flows/doctor-health-contributions.windows-cloud-state.test.ts", "src/flows/doctor-health.plugin-load.test.ts",
-              "src/flows/doctor-health.update-scope.test.ts", "src/flows/doctor-plugin-install-config-write.test.ts", "src/flows/doctor-repair-flow.test.ts",
-              "src/flows/doctor-tool-schema-frames.test.ts", "src/flows/doctor-whatsapp-responsiveness.flow.test.ts", "src/image-generation/runtime.resources.test.ts",
-              "src/library.test.ts", "src/llm/ai-transport-host.test.ts", "src/llm/providers/stream-wrappers/anthropic-cache-control-payload.test.ts",
-              "src/llm/providers/stream-wrappers/minimax.test.ts", "src/llm/providers/stream-wrappers/reasoning-effort-utils.test.ts",
-              "src/llm/stream.sync-host.test.ts", "src/llm/utils/oauth/abort.test.ts", "src/llm/utils/retry.test.ts", "src/mcp/channel-bridge.test.ts",
-              "src/mcp/plugin-tools-handlers.cancel.test.ts", "src/mcp/plugin-tools-registration.test.ts", "src/media-generation/runtime-shared.test.ts",
-              "src/meeting-bot/audio-base64.test.ts", "src/meeting-bot/browser-controller.test.ts", "src/meeting-bot/configured-node-host.test.ts",
-              "src/meeting-bot/node-invoke-policy.test.ts", "src/meeting-bot/platform-adapter.provenance.test.ts", "src/meeting-bot/realtime-engine.continuous.test.ts",
-              "src/meeting-bot/realtime-node-audio-transport.test.ts", "src/meeting-bot/session-runtime.participation.test.ts",
-              "src/meeting-bot/session-transcript-store.test.ts", "src/memory-host-sdk/dreaming.test.ts", "src/model-catalog/pricing.test.ts",
-              "src/model-catalog/remote-overlay.test.ts", "src/model-picker/apply-session-model-selection-placement.test.ts",
-              "src/music-generation/provider-assets.test.ts", "src/node-host/auto-update-compatibility.test.ts", "src/node-host/claude-skill-session.test.ts",
-              "src/node-host/desktop-stream-command.test.ts", "src/node-host/gateway-platform-identity.test.ts", "src/node-host/invoke-system-run-allowlist.test.ts",
-              "src/node-host/invoke-workspace.test.ts", "src/node-host/linux-node-plugin.integration.test.ts", "src/node-host/mcp.recovery.test.ts",
-              "src/node-host/node-worker-bundle-installer.test.ts", "src/node-host/node-worker-output.test.ts", "src/node-host/node-worker-supervisor.settlement.test.ts",
-              "src/node-host/node-worker-transfer-client.lifetime.test.ts", "src/node-host/node-worker-upload-snapshot.test.ts",
-              "src/node-host/node-worker-workspace-manifest.test.ts", "src/node-host/node-worker-workspace-quiescence.test.ts",
-              "src/node-host/plugin-exec-policy.test.ts", "src/node-host/pty-command.test.ts", "src/node-host/runner.shutdown.test.ts",
-              "src/node-host/runtime.computer.test.ts", "src/node-host/runtime.worker-hosting.test.ts", "src/node-host/with-timeout.test.ts",
-              "src/pairing/pairing-messages.test.ts", "src/pairing/setup-code.control-ui.test.ts", "src/plugin-state/plugin-blob-store.eviction.test.ts",
-              "src/projects/project-clone-registration.test.ts", "src/projects/project-source-env.test.ts", "src/proxy-capture/coverage.test.ts",
-              "src/proxy-capture/runtime.admission.test.ts", "src/proxy-capture/store-readonly.test.ts", "src/runtime.test.ts",
-              "src/sessions/background-session-result.test.ts", "src/sessions/session-diff-baseline-files.test.ts", "src/sessions/session-lifecycle-admission.pending.test.ts",
-              "src/sessions/session-participant-recording.test.ts", "src/sessions/stored-model-overrides.test.ts", "src/skills/discovery/chat-commands.remote-menu.test.ts",
-              "src/skills/discovery/status-bundled-warning.test.ts", "src/skills/library/bundle.test.ts", "src/skills/lifecycle/clawhub-uninstall.test.ts",
-              "src/skills/lifecycle/install-download.test.ts", "src/skills/lifecycle/skill-change-hook.test.ts", "src/skills/lifecycle/upload-store-commit.test.ts",
-              "src/skills/loading/bundled-dir.test.ts", "src/skills/loading/plugin-skill-read.test.ts", "src/skills/loading/skill-path-containment.test.ts",
-              "src/skills/loading/workspace-bundled-allowlist.test.ts", "src/skills/loading/workspace-skill-loader.test.ts",
-              "src/skills/loading/workspace-skill-remote.test.ts", "src/skills/runtime/cron-snapshot.test.ts", "src/skills/runtime/refresh-file-stability.test.ts",
-              "src/skills/runtime/refresh.capacity.test.ts", "src/skills/runtime/refresh.missing-root.integration.test.ts",
-              "src/skills/runtime/refresh.structural-change.test.ts", "src/skills/runtime/refresh.windows.test.ts", "src/skills/runtime/remote-skills.test.ts",
-              "src/skills/runtime/resources.workspace.test.ts", "src/skills/runtime/session-snapshot.test.ts", "src/skills/security/repository-skill-content.test.ts",
-              "src/snapshot/git-backup-codec.test.ts", "src/snapshot/local-repository-directory-identity.test.ts", "src/snapshot/local-repository.windows.test.ts",
-              "src/state/agent-deletion-journal.fence.test.ts", "src/state/local-onboarding-state.test.ts", "src/state/openclaw-agent-canonical-validation-receipt.test.ts",
-              "src/state/openclaw-agent-db-module-identity.test.ts", "src/state/openclaw-agent-db-readonly-scope.test.ts", "src/state/openclaw-agent-db-registry.test.ts",
-              "src/state/openclaw-agent-db-validation-cache.test.ts", "src/state/openclaw-agent-db.cache-eviction.test.ts",
-              "src/state/openclaw-agent-db.integrity-cache.test.ts", "src/state/openclaw-agent-db.open-timing.test.ts", "src/state/openclaw-agent-db.registration-commit.test.ts",
-              "src/state/openclaw-agent-label-index.test.ts", "src/state/openclaw-agent-project-column.test.ts", "src/state/openclaw-agent-standing-intents-schema.admission.test.ts",
-              "src/state/openclaw-database-maintenance.test.ts", "src/state/openclaw-database-paths.windows.test.ts", "src/state/openclaw-database-preflight.artifacts.test.ts",
-              "src/state/openclaw-database-preflight.lifecycle.test.ts", "src/state/openclaw-database-preflight.startup-prepared.test.ts",
-              "src/state/openclaw-database-verify.test.ts", "src/state/openclaw-schema-retirements.test.ts", "src/state/openclaw-state-db-binding-targets.test.ts",
-              "src/state/openclaw-state-db-cache.idle.test.ts", "src/state/openclaw-state-db-first-use-column-strict-migration.test.ts",
-              "src/state/openclaw-state-db-legacy-backfills.test.ts", "src/state/openclaw-state-db-pending-admission.test.ts",
-              "src/state/openclaw-state-db-publication-authority.test.ts", "src/state/openclaw-state-db-readonly.error-mapping.test.ts",
-              "src/state/openclaw-state-db-readonly.retained.test.ts", "src/state/openclaw-state-db-readonly.source-identity.test.ts",
-              "src/state/openclaw-state-db-resource-scope.test.ts", "src/state/openclaw-state-db-schema-helpers.test.ts", "src/state/openclaw-state-db.corruption-recovery.test.ts",
-              "src/state/openclaw-state-db.runtime-fence.test.ts", "src/state/openclaw-state-lease-async.maintenance.test.ts",
-              "src/state/openclaw-state-lease-heartbeat.lifetime.test.ts", "src/state/openclaw-state-lease-native-admission.test.ts",
-              "src/state/openclaw-state-lease-worker.transaction-group.test.ts", "src/state/openclaw-state-read-worker.bun.test.ts",
-              "src/state/openclaw-state-read-worker.settlement.test.ts", "src/state/openclaw-state-read.quarantine-cleanup.test.ts",
-              "src/state/openclaw-state-snapshot-leases.test.ts", "src/state/openclaw-state-worker-error.test.ts", "src/state/openclaw-state.worker.settlement.test.ts",
-              "src/state/sqlite-nocow.test.ts", "src/state/user-model-accounts.test.ts", "src/state/user-profile-list.resident.test.ts",
-              "src/state/user-profiles-tailscale-login.test.ts", "src/status/agent-runtime-label.test.ts", "src/status/status-model-auth.test.ts",
-              "src/status/status-text.model.test.ts", "src/system-agent/agent-turn.test.ts", "src/system-agent/assistant-timeout.test.ts",
-              "src/system-agent/chat-turn-router.approval.test.ts", "src/system-agent/chat-wizard-host.test.ts", "src/system-agent/config-write-validation.test.ts",
-              "src/system-agent/inference-fallback.test.ts", "src/system-agent/new-agent-welcome.test.ts", "src/system-agent/operations-plugin-reads.test.ts",
-              "src/system-agent/operations.doctor.test.ts", "src/system-agent/operations.setup.test.ts", "src/system-agent/plugin-artifact.test.ts",
-              "src/system-agent/setup-app-recommendations.test.ts", "src/system-agent/setup-inference-auth-options.test.ts",
-              "src/system-agent/setup-inference-turn.test.ts", "src/system-agent/verified-inference.test.ts", "src/talk/agent-consult-tool.test.ts",
-              "src/talk/agent-target.test.ts", "src/talk/audio-output-port.test.ts", "src/talk/client-voice-confirmation.test.ts",
-              "src/talk/client-voice-session.digest-retry.test.ts", "src/talk/consult-question.test.ts", "src/talk/exact-speech-protocol.test.ts",
-              "src/talk/logging.test.ts", "src/talk/provider-resolver.test.ts", "src/talk/session-log-runtime.test.ts", "src/talk/session-runtime.test.ts",
-              "src/talk/turn-context-tracker.test.ts", "src/test-helpers/temp-dir.test.ts", "src/test-utils/openclaw-test-state.auth.test.ts",
-              "src/test-utils/repo-files.test.ts", "src/trajectory/command-export.test.ts", "src/transcripts/config.test.ts",
-              "src/transcripts/summary.test.ts", "src/tts/tts-audio-store.test.ts", "src/tts/tts-entry-delivery.test.ts", "src/tts/tts-runtime-fallbacks.test.ts",
-              "src/tts/tts-runtime-routing.test.ts", "src/video-generation/capability-overlays.test.ts", "src/web-fetch/content-extractors.runtime.test.ts",
-              "src/web-search/runtime-execution.test.ts", "src/worker/computer-observation.runtime.test.ts", "src/worker/inference-stream.runtime.test.ts",
-              "src/worker/node-supervisor-protocol.test.ts", "src/worker/transcript-message.test.ts", "src/worker/worker-connection.test.ts",
-              "src/worker/worker-rpc-clients.test.ts", "src/worker/worker.runtime-imports.test.ts"]'
-            selected: src/canvas/constants.test.ts
-            testPattern: keeps document auth scoped to the stable Canvas path
+            selected: src/infra/ports-format.test.ts
+            testPattern: formats free, unknown, and busy port diagnostics
     steps:
       - name: Checkout
         shell: bash
