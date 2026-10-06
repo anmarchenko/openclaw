@@ -10,6 +10,8 @@ minimumReleaseAgeStrict: true
 
 # Trusted Codex runtimes are outside the dependency cooldown.
 minimumReleaseAgeExclude:
+  # Security patch for GHSA-68fv-2mgg-jv7q; remove after 2026-10-07T14:08:09.382Z.
+  - source-map-js@1.2.2
   # Maintainer-approved for Bun-only npm plugin installs; remove after 2026-09-29T21:29:31.258Z.
   - npm@11.20.0
   # Reviewed ACPX release; remove after 2026-09-29T10:05:37.124Z.
@@ -35,6 +37,7 @@ verifyDepsBeforeRun: false
 blockExoticSubdeps: true
 
 overrides:
+  source-map-js: 1.2.2
   # Memory LanceDB supplies vectors; WhatsApp prepares thumbnails with Rastermill.
   "@lancedb/lancedb>@huggingface/transformers": "-"
   "baileys>sharp": "-"
