@@ -5,13 +5,13 @@ import { normalizeAccountId } from "../routing/account-id.js";
 import { resolveChannelAccountEntry } from "../routing/account-lookup.js";
 import { MEDIA_MAX_BYTES } from "./store.js";
 
-const MB = 1024 * 1024;
+const BYTES_PER_MEBIBYTE = 1024 * 1024;
 const TELEGRAM_DEFAULT_MEDIA_MAX_MB = 100;
 type GeneratedMediaKind = Extract<MediaKind, "audio" | "image" | "video">;
 
 function configuredMegabytesToBytes(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? Math.floor(value * MB)
+    ? Math.floor(value * BYTES_PER_MEBIBYTE)
     : undefined;
 }
 
