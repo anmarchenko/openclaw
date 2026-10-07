@@ -12,7 +12,7 @@ function git(root: string, ...args: string[]): string {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
 }
 
-function createGitFixture(base: string) {
+function createDryRunGitFixture(base: string) {
   const remote = path.join(base, "remote.git");
   const source = path.join(base, "source");
   const checkout = path.join(base, "checkout");
@@ -48,7 +48,7 @@ async function inspectFailure(root: string): Promise<string> {
 }
 
 it("distinguishes a stale cached ref from an unreachable remote during a dry-run", async () => {
-  const { checkout, source } = createGitFixture(tempDirs.make("update-git-dry-run-"));
+  const { checkout, source } = createDryRunGitFixture(tempDirs.make("update-git-dry-run-"));
   const cachedBefore = git(checkout, "rev-parse", "origin/main");
   fs.writeFileSync(path.join(source, "next.txt"), "next\n");
   git(source, "add", "next.txt");
