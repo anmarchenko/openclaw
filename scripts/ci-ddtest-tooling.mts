@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -260,19 +261,30 @@ function planEvidence() {
         }),
       "planned file",
     );
-  const discovered = read(resolve(planDirectory, "tests-discovery/tests.json"))
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-  const discoveryFiles = [
-    ...new Set(
-      discovered
-        .filter((record) => !record._ddtest_discovery_cache_metadata)
-        .map((record) => pathWithinCohort(record.suiteSourceFile)),
-    ),
-  ].sort();
-  assert(hash(discoveryFiles) === hash(cohort.files), "Discovery omitted or added cohort files");
   const runnable = files(read(resolve(planDirectory, "runner/test-files.txt")));
+  // Fast Vitest discovery deliberately has no tests-discovery/tests.json.
+  // Every omission must instead be justified by the plan's cached backend TIA response.
+  const skippablesPath = resolve(planDirectory, "cache/http/skippable_tests.json");
+  const response = existsSync(skippablesPath) ? JSON.parse(read(skippablesPath)) : { data: [] };
+  assert(Array.isArray(response.data), "Invalid cached TIA response");
+  const skippable = new Set<string>();
+  for (const record of response.data) {
+    const attributes = record?.attributes;
+    if (
+      record?.type === "suite" &&
+      attributes?.configurations?.["test.bundle"] === "vitest" &&
+      typeof attributes.suite === "string" &&
+      allowed.has(attributes.suite)
+    ) {
+      skippable.add(attributes.suite);
+    }
+  }
+  const runnableSet = new Set(runnable);
+  const omitted = cohort.files.filter((file) => !runnableSet.has(file));
+  assert(
+    omitted.every((file) => skippable.has(file)),
+    "Plan omitted a file without a backend TIA decision",
+  );
   const configText = read(resolve(planDirectory, "github/config")).trim();
   assert(configText.startsWith("matrix="), "Missing ddtest GitHub matrix");
   const matrix = JSON.parse(configText.slice("matrix=".length));
@@ -311,8 +323,8 @@ function planEvidence() {
   const payload = {
     head: cohort.head,
     cohortHash: cohort.hash,
-    discoveredTests: discovered.filter((record) => !record._ddtest_discovery_cache_metadata).length,
-    discoveredFiles: discoveryFiles.length,
+    inventoryFiles: cohort.files.length,
+    omitted,
     runnable,
     splits,
     matrix,
@@ -324,7 +336,7 @@ function verifyPlan() {
   save("plan.json", evidence);
   output("matrix", evidence.matrix);
   console.log(
-    `Validated ddtest plan: ${evidence.discoveredFiles} discovered files, ${evidence.runnable.length} runnable, ${evidence.splits.length} runners`,
+    `Validated ddtest plan: ${evidence.inventoryFiles} inventory files, ${evidence.runnable.length} runnable, ${evidence.splits.length} runners`,
   );
 }
 function run(arm: "control" | "dynamic", rawIndex: string | undefined) {

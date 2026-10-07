@@ -57,8 +57,9 @@ The minimum is one runner and the maximum is the original cohort size. The
 64-second per-job overhead estimate comes from the latest completed cohort's
 900 non-test runner-seconds across 14 jobs. No target-time override is imposed.
 
-Before either arm executes, the helper verifies that discovery covers exactly
-the canonical file inventory, every runnable file occurs in exactly one split,
+Before either arm executes, the helper verifies that every canonical file is
+either runnable or explicitly listed as a Vitest suite in the plan’s cached
+backend TIA response, and that every runnable file occurs in exactly one split,
 and the matrix count matches ddtest's output. Empty assignments are recorded
 explicitly. SHA-bound inventory, plan and execution receipts are uploaded as
 artifacts, including the hidden `.testoptimization` directory.
