@@ -228,7 +228,6 @@ function planner() {
       "--ci-job-overhead",
       "64s",
       "--strict-discovery",
-      "--debug",
     ],
     {
       stdio: "inherit",
