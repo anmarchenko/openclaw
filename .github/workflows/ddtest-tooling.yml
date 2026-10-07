@@ -1,0 +1,144 @@
+name: DDTest tooling comparison
+
+on:
+  push:
+    branches: [anmarchenko/ddtest-dynamic-tooling]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DD_CIVISIBILITY_ITR_ENABLED: ${{ vars.DD_CIVISIBILITY_ITR_ENABLED || 'true' }}
+  DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED: "false"
+  DD_CIVISIBILITY_FLAKY_RETRY_ENABLED: "false"
+  DD_TRACE_OPENAI_ENABLED: "false"
+  DD_TRACE_HTTP_ENABLED: "false"
+  DD_TRACE_OTEL_ENABLED: "false"
+
+jobs:
+  plan:
+    if: github.repository == 'anmarchenko/openclaw'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      control_matrix: ${{ steps.inventory.outputs.control_matrix }}
+      matrix: ${{ steps.verify.outputs.matrix }}
+    steps:
+      - &checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - &node
+        name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          semantic-checks: "true"
+          cache-mode: restore
+          node-version: "24.x"
+          install-bun: "false"
+          dependency-cache: "false"
+          vitest-fs-cache: "true"
+          vitest-worker-cache: "true"
+          node-compile-cache: "true"
+      - name: Derive canonical tooling inventory
+        id: inventory
+        run: node --import tsx scripts/ci-ddtest-tooling.mts inventory
+      - &datadog
+        name: Setup Datadog Test Optimization
+        uses: DataDog/test-visibility-github-action@1abae93083b69778facd7ee11f89184306c999e6 # v3.2.0
+        with:
+          languages: js
+          api_key: ${{ secrets.DD_API_KEY }}
+          service: openclaw-tests
+          js-tracer-version: latest
+      - name: Install ddtest
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            https://github.com/DataDog/ddtest/releases/download/v1.11.0/ddtest-linux-amd64 \
+            --output "$RUNNER_TEMP/ddtest"
+          printf '%s  %s\n' cdad460eaf314d1474d89cd9b238e88ccad2dfd22d11e2fc15371cc127346d7c "$RUNNER_TEMP/ddtest" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/ddtest"
+          echo "DDTEST_BINARY=$RUNNER_TEMP/ddtest" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/ddtest" --version
+      - name: Select runner count and file assignments
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_SERVICE: openclaw-tests
+          DD_ENV: ci
+        run: node --import tsx scripts/ci-ddtest-tooling.mts plan
+      - name: Verify discovery and assignment coverage
+        id: verify
+        run: node --import tsx scripts/ci-ddtest-tooling.mts verify-plan
+      - name: Upload plan
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ddtest-tooling-plan
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            .ddtest-tooling/
+            .testoptimization/
+
+  control:
+    name: Fixed / ${{ matrix.check_name }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.control_matrix) }}
+    steps:
+      - *checkout
+      - *node
+      - &download
+        name: Download verified plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ddtest-tooling-plan
+      - *datadog
+      - name: Run original fixed shard
+        env:
+          RUNNER_INDEX: ${{ matrix.index }}
+        run: node --import tsx scripts/ci-ddtest-tooling.mts run-control "$RUNNER_INDEX"
+      - name: Upload execution receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ddtest-tooling-control-${{ matrix.index }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          path: .ddtest-tooling/result-control-*.json
+
+  dynamic:
+    name: Dynamic / ${{ matrix.ci_node_index }} of ${{ matrix.ci_node_total }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - *checkout
+      - *node
+      - *download
+      - *datadog
+      - name: Run ddtest file assignment
+        env:
+          RUNNER_INDEX: ${{ matrix.ci_node_index }}
+        run: node --import tsx scripts/ci-ddtest-tooling.mts run-dynamic "$RUNNER_INDEX"
+      - name: Upload execution receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ddtest-tooling-dynamic-${{ matrix.ci_node_index }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          path: .ddtest-tooling/result-dynamic-*.json

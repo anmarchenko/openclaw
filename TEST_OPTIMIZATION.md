@@ -33,8 +33,41 @@ Standalone probes reproduced all three application-instrumentation failures with
 
 The single TIA switch applies equally to normal and Node-driven E2E tests. Enabling it does not establish complete dependency coverage: Chromium and separately spawned Gateway/CLI processes are not covered by the test worker's V8 coverage. Validate representative application edits before treating skips as safe for those subprocesses. Datadog disables TIA for Vitest browser-mode invocations itself. Non-isolated workers may conservatively accumulate coverage and skip fewer suites.
 
-Bun tests, custom non-Vitest QA flows, native platform jobs, static checks and non-Vitest build verifiers are excluded. Frozen historical targets do not contain this launcher integration. No ddtest scheduling is introduced.
+Bun tests, custom non-Vitest QA flows, native platform jobs, static checks and non-Vitest build verifiers are excluded. Frozen historical targets do not contain this launcher integration. The main CI matrix remains unchanged; the separate ddtest pilot below compares scheduling for one compatible cohort.
 
 Verify individual worker events for `openclaw-tests`, filtered by CI pipeline ID and PR head (`git.commit.head.sha`). Check actual suite-skip events separately from enabled tags. Historical runs used two services; their results do not prove the unified configuration.
 
 Compare equivalent changes with TIA off and on, recording selected/skipped suites, test-step time, summed assigned runner execution and queue-inclusive elapsed time. Preserve every test-job duration. Calculate monetary savings only from actual billed runner prices; public-repository standard GitHub-hosted runners can have zero direct runner charges.
+
+## Dynamic runner pilot
+
+The `DDTest tooling comparison` workflow runs only on the personal fork's
+`anmarchenko/ddtest-dynamic-tooling` branch or by explicit dispatch. It compares
+the canonical no-build, Node-only tooling stripes with a dynamically sized
+matrix from ddtest 1.11.0 (the current official release when the pilot was created).
+Both arms use the same checkout, runner image, setup, tracer, TIA settings and
+original OpenClaw test runner. No test assertions, deadlines or retry settings change.
+
+The planner derives the complete compatible cohort from OpenClaw's canonical
+fork-push manifest. It rejects mixed environments or special build/toolchain
+requirements. ddtest uses the official [file-list integration](https://github.com/DataDog/ddtest/blob/main/docs/third-party-runners.md):
+Vitest discovery and backend durations/TIA information select the number of
+runners and their files; OpenClaw retains process supervision and instrumentation.
+The minimum is one runner and the maximum is the original cohort size. The
+64-second per-job overhead estimate comes from the latest completed cohort's
+900 non-test runner-seconds across 14 jobs. No target-time override is imposed.
+
+Before either arm executes, the helper verifies that discovery covers exactly
+the canonical file inventory, every runnable file occurs in exactly one split,
+and the matrix count matches ddtest's output. Empty assignments are recorded
+explicitly. SHA-bound inventory, plan and execution receipts are uploaded as
+artifacts, including the hidden `.testoptimization` directory.
+
+Compare the sum of **planner plus all dynamic worker durations** against all
+fixed workers, including checkout, installation, upload and cleanup. Also report
+test-step time, queue-inclusive elapsed time, actual runner count and executed
+suite identities. The shared planning prerequisite is charged only to the ddtest
+arm for cost comparison; it is not a cost saving for the control. Missing runner
+allocations or failed/incomplete workloads invalidate a savings claim. Repeated
+same-SHA runs are not automatically independent measurements: backend history,
+cache state and runner variability can affect both arms.
