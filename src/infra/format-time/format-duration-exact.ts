@@ -1,7 +1,14 @@
 import { durationUnitMs } from "./duration-units.ts";
 import type { DurationPart } from "./format-duration-internal.js";
 
-const EXACT_DURATION_UNITS = ["week", "day", "hour", "minute", "second", "millisecond"] as const;
+const EXACT_DURATION_UNITS_DESCENDING = [
+  "week",
+  "day",
+  "hour",
+  "minute",
+  "second",
+  "millisecond",
+] as const;
 
 // Exact display stays outside startup formatting; health uses weeks, cron uses days.
 export function resolveExactDurationParts(ms?: number | null, showWeeks = false) {
@@ -10,7 +17,7 @@ export function resolveExactDurationParts(ms?: number | null, showWeeks = false)
   }
   let remaining = BigInt(Math.round(ms));
   const parts: DurationPart[] = [];
-  for (const unit of EXACT_DURATION_UNITS) {
+  for (const unit of EXACT_DURATION_UNITS_DESCENDING) {
     const scale = BigInt(durationUnitMs[unit]);
     const value = remaining / scale;
     if (value > 0n && (unit !== "week" || showWeeks)) {
