@@ -53,7 +53,7 @@ const bunCompatibleConfigs = new Set([
 const bunCompatibleAgentSupportFiles = ["src/agents/worktrees/service.removal-recovery.test.ts"];
 // TypeScript's synchronous native API uses Node child-process pipe handles.
 // Keep these compiler assertions on Node, including those in mixed runtime suites.
-const nativeCompilerTestFiles = [
+const nodeNativeCompilerTestFiles = [
   "src/agents/agent-bundle-mcp-requester-connect.import-boundary.test.ts",
   "src/agents/agent-model-discovery.imports.test.ts",
   "src/agents/code-mode.auto-results.test.ts",
@@ -97,7 +97,7 @@ const runtimePartitions = new Map<
     {
       files: unitFastFiles,
       nodeRequired: new Set([
-        ...nativeCompilerTestFiles,
+        ...nodeNativeCompilerTestFiles,
         "packages/markdown-core/src/render-aware-chunking.test.ts",
         // Bun skips a sibling diagnostics subscriber when warm-worker cleanup unsubscribes.
         "src/agents/code-mode-node.test.ts",
@@ -123,7 +123,7 @@ const runtimePartitions = new Map<
     "test/vitest/vitest.unit-fast-isolated.config.ts",
     {
       files: () => getUnitFastIsolatedTestFiles(),
-      nodeRequired: new Set(nativeCompilerTestFiles),
+      nodeRequired: new Set(nodeNativeCompilerTestFiles),
     },
   ],
   [
