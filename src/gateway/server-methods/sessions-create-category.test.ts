@@ -94,12 +94,12 @@ afterEach(async () => {
 
 test("creates and patches first-use groups before publishing their invalidation", async () => {
   await createSessionStoreDir();
-  const observedGroups: string[][] = [];
+  const publishedGroupSnapshots: string[][] = [];
   const context = {
     getSessionEventSubscriberConnIds: () => new Set(["group-observer"]),
     broadcastToConnIds: (_event: string, payload: { reason?: string }) => {
       if (payload.reason === "groups") {
-        observedGroups.push(groups.listSessionGroups().map(({ name }) => name));
+        publishedGroupSnapshots.push(groups.listSessionGroups().map(({ name }) => name));
       }
     },
   };
@@ -110,7 +110,7 @@ test("creates and patches first-use groups before publishing their invalidation"
     { context },
   );
   expect(created.ok).toBe(true);
-  expect(observedGroups).toEqual([expect.arrayContaining(["Created"])]);
+  expect(publishedGroupSnapshots).toEqual([expect.arrayContaining(["Created"])]);
 
   const patched = await directSessionReq(
     "sessions.patch",
@@ -118,14 +118,14 @@ test("creates and patches first-use groups before publishing their invalidation"
     { context },
   );
   expect(patched.ok).toBe(true);
-  expect(observedGroups).toEqual([
+  expect(publishedGroupSnapshots).toEqual([
     expect.arrayContaining(["Created"]),
     expect.arrayContaining(["Created", "Patched"]),
   ]);
   expect(
     (await directSessionReq("sessions.patch", { key, category: "Patched" }, { context })).ok,
   ).toBe(true);
-  expect(observedGroups).toHaveLength(2);
+  expect(publishedGroupSnapshots).toHaveLength(2);
 });
 
 test("joins rejected post-commit group registration before reporting durable create success", async () => {

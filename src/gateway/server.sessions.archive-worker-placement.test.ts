@@ -39,7 +39,7 @@ const pendingArchiveCleanups = new Set<() => Promise<void>>();
 const sessionKey = "agent:main:archive-placement";
 const sessionId = "archive-placement-session";
 
-async function preparePlacement(
+async function prepareArchivePlacement(
   state: Parameters<typeof workerPlacement>[0]["state"],
   archived = false,
 ) {
@@ -257,7 +257,7 @@ test.each([false, true])(
 test.each(["rejected", "unavailable"] as const)(
   "sessions.patch leaves active placement unarchived and releases its drain when reclaim is %s",
   async (failure) => {
-    const { storePath, placement } = await preparePlacement("active");
+    const { storePath, placement } = await prepareArchivePlacement("active");
     const release = vi.fn();
     const reclaim = vi.fn(async () => {
       throw new Error("provider reclaim rejected");
@@ -286,7 +286,7 @@ test.each(["rejected", "unavailable"] as const)(
 );
 
 test("sessions.patch rejects a mismatched reclaimed identity without archiving", async () => {
-  const { storePath, placement } = await preparePlacement("active");
+  const { storePath, placement } = await prepareArchivePlacement("active");
   const reclaim = vi.fn(async () =>
     workerPlacement({
       sessionId,
@@ -308,7 +308,7 @@ test("sessions.patch rejects a mismatched reclaimed identity without archiving",
 });
 
 test("sessions.patch rejects a reclaimed return when its authoritative placement stayed active", async () => {
-  const { storePath, placement } = await preparePlacement("active");
+  const { storePath, placement } = await prepareArchivePlacement("active");
   const reclaim = vi.fn(async () => workerPlacement({ sessionId, sessionKey, state: "reclaimed" }));
 
   const archived = await patchPlacement({
@@ -327,7 +327,7 @@ test("sessions.patch rejects a reclaimed return when its authoritative placement
 test("sessions.patch rejects a failed placement identity changed during the runtime drain", async ({
   signal,
 }) => {
-  const fixture = await preparePlacement("failed");
+  const fixture = await prepareArchivePlacement("failed");
   const { storePath } = fixture;
   let { placement } = fixture;
   const drainGate = createDeferredCore();
@@ -383,7 +383,7 @@ test("sessions.patch rejects a failed placement identity changed during the runt
 });
 
 test("sessions.patch stops requested placement before archiving", async () => {
-  const fixture = await preparePlacement("requested");
+  const fixture = await prepareArchivePlacement("requested");
   const { storePath } = fixture;
   let { placement } = fixture;
   const reclaim = vi.fn(async () => {
@@ -400,7 +400,7 @@ test("sessions.patch stops requested placement before archiving", async () => {
 });
 
 test("sessions.patch keeps reconciliation pending before cancellation", async () => {
-  const { storePath, placement } = await preparePlacement("reconciling");
+  const { storePath, placement } = await prepareArchivePlacement("reconciling");
   const reclaim = vi.fn();
   embeddedRunMock.activeIds.add(sessionId);
   const archived = await patchPlacement({
@@ -415,7 +415,7 @@ test("sessions.patch keeps reconciliation pending before cancellation", async ()
 });
 
 test("sessions.patch archives failed placement without reclaim after its environment is gone", async () => {
-  const { storePath, placement } = await preparePlacement("failed");
+  const { storePath, placement } = await prepareArchivePlacement("failed");
   const reclaim = vi.fn();
 
   const archived = await patchPlacement({
@@ -437,7 +437,7 @@ test.each([
   { name: "reclaimed", state: "reclaimed" as const },
   { name: "failed after its environment is gone", state: "failed" as const, gone: true },
 ])("sessions.patch restores $name placement", async (testCase) => {
-  const { storePath, placement } = await preparePlacement(testCase.state, true);
+  const { storePath, placement } = await prepareArchivePlacement(testCase.state, true);
 
   const restored = await patchPlacement(
     {
@@ -460,7 +460,7 @@ test.each([
 });
 
 test("sessions.patch keeps restore blocked for an active cloud placement", async () => {
-  const { storePath, placement } = await preparePlacement("active", true);
+  const { storePath, placement } = await prepareArchivePlacement("active", true);
 
   const restored = await patchPlacement(
     { workerSessionPlacementService: placementReader(() => placement) },
