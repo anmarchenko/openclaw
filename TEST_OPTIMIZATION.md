@@ -46,7 +46,9 @@ The `DDTest tooling comparison` workflow runs only on the personal fork's
 the canonical no-build, Node-only tooling stripes with a dynamically sized
 matrix from ddtest 1.11.0 (the current official release when the pilot was created).
 Both arms use the same checkout, runner image, setup, tracer, TIA settings and
-original OpenClaw test runner. No test assertions, deadlines or retry settings change.
+original OpenClaw test runner. Both arms and the planner use a shallow checkout
+(`fetch-depth: 1`). Datadog may fetch additional Git metadata as needed; include
+that work in the measured job duration. No test assertions, deadlines or retry settings change.
 
 The planner derives the complete compatible cohort from OpenClaw's canonical
 fork-push manifest. It rejects mixed environments or special build/toolchain
