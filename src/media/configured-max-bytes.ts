@@ -5,9 +5,15 @@ import { normalizeAccountId } from "../routing/account-id.js";
 import { resolveChannelAccountEntry } from "../routing/account-lookup.js";
 import { MEDIA_MAX_BYTES } from "./store.js";
 
-const MB = 1024 * 1024;
+const BYTES_PER_MEBIBYTE = 1024 * 1024;
 const TELEGRAM_DEFAULT_MEDIA_MAX_MB = 100;
 type GeneratedMediaKind = Extract<MediaKind, "audio" | "image" | "video">;
+
+function configuredMegabytesToBytes(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value * BYTES_PER_MEBIBYTE)
+    : undefined;
+}
 
 /** Returns the configured media cap, falling back to the media-core per-kind default. */
 export function resolveGeneratedMediaMaxBytes(
@@ -15,9 +21,7 @@ export function resolveGeneratedMediaMaxBytes(
   kind: GeneratedMediaKind,
 ) {
   const configured = cfg?.agents?.defaults?.mediaMaxMb;
-  return typeof configured === "number" && Number.isFinite(configured) && configured > 0
-    ? Math.floor(configured * MB)
-    : maxBytesForKind(kind);
+  return configuredMegabytesToBytes(configured) ?? maxBytesForKind(kind);
 }
 
 /** Reads channel/account media caps from raw channel config without requiring typed account schemas. */
@@ -55,7 +59,5 @@ export function resolveOutboundMediaMaxBytes(params: {
     (params.channel?.trim().toLowerCase() === "telegram"
       ? TELEGRAM_DEFAULT_MEDIA_MAX_MB
       : undefined);
-  return typeof limitMb === "number" && Number.isFinite(limitMb) && limitMb > 0
-    ? Math.floor(limitMb * MB)
-    : MEDIA_MAX_BYTES;
+  return configuredMegabytesToBytes(limitMb) ?? MEDIA_MAX_BYTES;
 }

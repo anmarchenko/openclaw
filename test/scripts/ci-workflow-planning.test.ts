@@ -3330,7 +3330,7 @@ describe("ci workflow guards", () => {
     "gates only canonical main pushes admitted by CI ($repository $ref)",
     ({ repository, ref, expected }) => {
       const push = readCiWorkflow().on.push;
-      expect(push.branches).toEqual(["main"]);
+      expect(push.branches).toEqual(["main", "anmarchenko/datadog-test-optimization"]);
       expect(push).not.toHaveProperty("paths");
       expect(push["paths-ignore"]).toEqual(["**/*.md", "docs/**"]);
       const result = runCiManifestFixture({
@@ -4186,7 +4186,7 @@ describe("ci workflow guards", () => {
     });
   });
 
-  describe("CI workflow admission", () => {
+  describe("CI triggers and concurrency policies", () => {
     type EventContext = Parameters<typeof evaluateWorkflowExpression>[1];
     type AdmissionRun = {
       context: EventContext;
@@ -4211,15 +4211,12 @@ describe("ci workflow guards", () => {
       ...overrides,
     });
 
-    function admissionDriver() {
+    function concurrencyDriver() {
       const workflow = readCiWorkflow();
       const runs: AdmissionRun[] = [];
       const active = (run: AdmissionRun) => run.state === "running" || run.state === "cancelling";
       return {
         admit(context: EventContext): AdmissionRun {
-          if (context.eventName === "pull_request") {
-            expect(workflow.on.pull_request.types).toContain(context.action);
-          }
           const group: string = evaluateWorkflowExpression(workflow.concurrency.group, context);
           const cancel = evaluateWorkflowExpression(
             workflow.concurrency["cancel-in-progress"],
@@ -4268,42 +4265,57 @@ describe("ci workflow guards", () => {
       };
     }
 
-    // Synthetic admission orders, not recovered webhook payloads.
+    it("runs the fork experiment on retained branch commits without PR merge runs", () => {
+      const workflow = readCiWorkflow();
+      expect(workflow.on).not.toHaveProperty("pull_request");
+      expect(workflow.on).not.toHaveProperty("pull_request_target");
+      expect(workflow.on.push.branches).toEqual(["main", "anmarchenko/datadog-test-optimization"]);
+      expect(workflow.on.push).not.toHaveProperty("paths");
+      expect(workflow.on.push["paths-ignore"]).toEqual(["**/*.md", "docs/**"]);
+      expect(workflow.on).toHaveProperty("workflow_dispatch");
+      expect(workflow.on).toHaveProperty("schedule");
+    });
+
+    // The experiment changes triggers only. These synthetic contexts protect the
+    // retained upstream concurrency/job predicates; PR events are not enabled here.
     it.each([
       { action: "opened", state: "pending" },
       { action: "reopened", state: "pending" },
       { action: "synchronize", state: "running" },
-    ])("preserves $state ready CI after a delayed draft $action", ({ action, state }) => {
-      const scheduler = admissionDriver();
-      const predecessor = scheduler.admit(event(1, { action: "opened" }));
-      scheduler.start(predecessor);
-      const ready = scheduler.admit(event(2));
-      if (state === "running") {
-        scheduler.finish(predecessor);
-        scheduler.start(ready);
-      }
-      expect(ready.state).toBe(state);
-      const lateDraft = scheduler.admit(event(3, { action, draft: true }));
-      expect(ready.state, "late draft displaced runnable ready CI").toBe(state);
-      scheduler.start(lateDraft);
-      expect(lateDraft.state).toBe("skipped");
-      expect(lateDraft.eligibleJobs).toEqual([]);
-      const anotherDraft = scheduler.admit(event(4, { action, draft: true }));
-      expect(anotherDraft.group).not.toBe(lateDraft.group);
-      expect(lateDraft.group).not.toBe(ready.group);
-      if (state === "pending") {
-        expect(ready.eligibleJobs).toBeUndefined();
-        scheduler.start(ready);
-        expect(ready.state).toBe("pending");
-        scheduler.finish(predecessor);
-        scheduler.start(ready);
-      }
-      expect(ready.state).toBe("running");
-      expect(ready.eligibleJobs).toEqual(guardedJobs);
-    });
+    ])(
+      "retained PR expressions: preserves $state ready CI after a delayed draft $action",
+      ({ action, state }) => {
+        const scheduler = concurrencyDriver();
+        const predecessor = scheduler.admit(event(1, { action: "opened" }));
+        scheduler.start(predecessor);
+        const ready = scheduler.admit(event(2));
+        if (state === "running") {
+          scheduler.finish(predecessor);
+          scheduler.start(ready);
+        }
+        expect(ready.state).toBe(state);
+        const lateDraft = scheduler.admit(event(3, { action, draft: true }));
+        expect(ready.state, "late draft displaced runnable ready CI").toBe(state);
+        scheduler.start(lateDraft);
+        expect(lateDraft.state).toBe("skipped");
+        expect(lateDraft.eligibleJobs).toEqual([]);
+        const anotherDraft = scheduler.admit(event(4, { action, draft: true }));
+        expect(anotherDraft.group).not.toBe(lateDraft.group);
+        expect(lateDraft.group).not.toBe(ready.group);
+        if (state === "pending") {
+          expect(ready.eligibleJobs).toBeUndefined();
+          scheduler.start(ready);
+          expect(ready.state).toBe("pending");
+          scheduler.finish(predecessor);
+          scheduler.start(ready);
+        }
+        expect(ready.state).toBe("running");
+        expect(ready.eligibleJobs).toEqual(guardedJobs);
+      },
+    );
 
-    it("admits ready CI after the forward draft-to-ready sequence", () => {
-      const scheduler = admissionDriver();
+    it("retained PR expressions: admits ready CI after the forward draft-to-ready sequence", () => {
+      const scheduler = concurrencyDriver();
       const draft = scheduler.admit(event(1, { action: "opened", draft: true }));
       scheduler.start(draft);
       expect(draft.eligibleJobs).toEqual([]);
@@ -4315,9 +4327,9 @@ describe("ci workflow guards", () => {
     });
 
     it.each(["pending", "running"])(
-      "converted_to_draft cancels %s CI and skips its jobs",
+      "retained PR expressions: converted_to_draft cancels %s CI and skips its jobs",
       (state) => {
-        const scheduler = admissionDriver();
+        const scheduler = concurrencyDriver();
         const previous = scheduler.admit(event(1));
         scheduler.start(previous);
         const ready = state === "pending" ? scheduler.admit(event(2)) : previous;
@@ -4333,9 +4345,9 @@ describe("ci workflow guards", () => {
     );
 
     it.each(["pending", "running"])(
-      "a newer non-draft head supersedes %s CI only for its PR",
+      "retained PR expressions: a newer non-draft head supersedes %s CI only for its PR",
       (state) => {
-        const scheduler = admissionDriver();
+        const scheduler = concurrencyDriver();
         const otherPr = scheduler.admit(
           event(1, { pullRequestNumber: 8, ref: "refs/pull/8/merge" }),
         );
@@ -4362,8 +4374,8 @@ describe("ci workflow guards", () => {
       },
     );
 
-    it("isolates manual dispatches on the same target from each other and PR CI", () => {
-      const scheduler = admissionDriver();
+    it("retained PR expressions: isolates manual dispatches on the same target from each other and PR CI", () => {
+      const scheduler = concurrencyDriver();
       const ready = scheduler.admit(event(1));
       scheduler.start(ready);
       const manual = [2, 3].map((runId) =>
@@ -4384,9 +4396,9 @@ describe("ci workflow guards", () => {
     });
 
     it.each(["pending", "running"])(
-      "passive drafts do not resurrect explicitly cancelled %s CI",
+      "retained PR expressions: passive drafts do not resurrect explicitly cancelled %s CI",
       (state) => {
-        const scheduler = admissionDriver();
+        const scheduler = concurrencyDriver();
         const ready = scheduler.admit(event(1));
         if (state === "running") {
           scheduler.start(ready);
@@ -4409,7 +4421,7 @@ describe("ci workflow guards", () => {
 
     it("pipelines opted-in canonical main across two non-canceling slots with coalesced pending work", () => {
       const workflow = readCiWorkflow();
-      const scheduler = admissionDriver();
+      const scheduler = concurrencyDriver();
       const push = (runId: number) =>
         event(runId, {
           ciOnPush: "true",
@@ -4445,6 +4457,30 @@ describe("ci workflow guards", () => {
       expect(workflow.jobs["runner-admission"]).toBeUndefined();
       expect(workflow.jobs.preflight.needs).toBeUndefined();
       expect(workflow.jobs["security-fast"].needs).toEqual(["preflight"]);
+    });
+
+    it("keeps distinct fork push heads running independently on the experiment branch", () => {
+      const workflow = readCiWorkflow();
+      const scheduler = concurrencyDriver();
+      const pushes = [1, 2].map((runId) =>
+        scheduler.admit(
+          event(runId, {
+            eventName: "push",
+            repository: "anmarchenko/openclaw",
+            ref: "refs/heads/anmarchenko/datadog-test-optimization",
+            sha: runId.toString(16).padStart(40, "0"),
+          }),
+        ),
+      );
+      for (const run of pushes) {
+        expect(
+          evaluateWorkflowExpression(workflow.concurrency["cancel-in-progress"], run.context),
+        ).toBe(false);
+        scheduler.start(run);
+        expect(run.state).toBe("running");
+        expect(run.eligibleJobs).toEqual(guardedJobs);
+      }
+      expect(pushes[0]!.group).not.toBe(pushes[1]!.group);
     });
 
     it.each([
@@ -10895,7 +10931,7 @@ describe("ci workflow guards", () => {
       "pr-fail-fast",
     ];
 
-    expect(workflow.on.pull_request).not.toHaveProperty("paths-ignore");
+    expect(workflow.on).not.toHaveProperty("pull_request");
     expect(gate.name).toBe("openclaw/ci-gate");
     expect(gate.needs).toEqual([...requiredJobs, ...selectedJobs]);
     // Every workload is gated; the release-only receipt sealer runs after this gate.

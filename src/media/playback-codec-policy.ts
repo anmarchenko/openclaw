@@ -2,6 +2,10 @@ import type { MediaKind } from "@openclaw/media-core/constants";
 import { normalizeMimeType } from "@openclaw/media-core/mime";
 import type { PlaybackMediaProbeResult } from "./media-probe.js";
 
+const WAV_MIME_TYPE_PATTERN = /^audio\/(?:x-wav|wav|wave)$/;
+const PORTABLE_VIDEO_PROFILES = new Set(["baseline", "constrained baseline", "main", "high"]);
+const PORTABLE_VIDEO_PIXEL_FORMATS = new Set(["yuv420p", "yuvj420p"]);
+
 export type PlaybackMediaKind = Extract<MediaKind, "audio" | "video">;
 export type PlaybackMode = "native" | "transcode";
 
@@ -111,10 +115,11 @@ export function resolveNativePlaybackCodecCompatibility(
     if (probe.audioStreamIndex === undefined || !codec) {
       return undefined;
     }
-    if (/^audio\/(?:x-wav|wav|wave)$/.test(normalizeMimeType(mimeType) ?? "")) {
+    const mime = normalizeMimeType(mimeType);
+    if (WAV_MIME_TYPE_PATTERN.test(mime ?? "")) {
       return codec === "pcm_s16le" || codec === "pcm_u8";
     }
-    return codec === "mp3" || (normalizeMimeType(mimeType) !== "audio/mpeg" && codec === "aac");
+    return codec === "mp3" || (mime !== "audio/mpeg" && codec === "aac");
   }
 
   const audioCompatible =
@@ -127,13 +132,8 @@ export function resolveNativePlaybackCodecCompatibility(
         : undefined;
   let videoCompatible: boolean | undefined;
   if (probe.videoCodec && probe.videoStreamIndex !== undefined) {
-    const portableProfile =
-      probe.videoProfile === "baseline" ||
-      probe.videoProfile === "constrained baseline" ||
-      probe.videoProfile === "main" ||
-      probe.videoProfile === "high";
-    const portablePixelFormat =
-      probe.videoPixelFormat === "yuv420p" || probe.videoPixelFormat === "yuvj420p";
+    const portableProfile = PORTABLE_VIDEO_PROFILES.has(probe.videoProfile ?? "");
+    const portablePixelFormat = PORTABLE_VIDEO_PIXEL_FORMATS.has(probe.videoPixelFormat ?? "");
     videoCompatible =
       probe.videoCodec === "h264" && probe.videoProfile && probe.videoPixelFormat
         ? portableProfile && portablePixelFormat

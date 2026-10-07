@@ -5,6 +5,8 @@ import { hasEncodedFileUrlSeparator } from "@openclaw/fs-safe/advanced";
 const PATH_PARENT_SEGMENT_RE = /(?:^|[\\/])\.\.(?:[\\/]|$)/u;
 const FORWARD_NETWORK_PATH_PREFIX_RE = /^\/\//u;
 const FILE_URL_PREFIX_RE = /^file:(?:\/\/)?/iu;
+const LOCALHOST_FILE_URL_RE = /^localhost(?:\/|$)/iu;
+const WINDOWS_FILE_URL_DRIVE_RE = /^\/[a-z]:[\\/]/iu;
 const FILE_URL_LOCAL_NETWORK_KEY_PREFIX = "\0file-url-local-network:";
 
 function normalizeAbsoluteLocalPath(value: string): string {
@@ -33,12 +35,12 @@ function normalizeMalformedLocalFileUrl(value: string): string | undefined {
   let localPath: string;
   if (remainder.startsWith("/")) {
     localPath = remainder;
-  } else if (/^localhost(?:\/|$)/iu.test(remainder)) {
+  } else if (LOCALHOST_FILE_URL_RE.test(remainder)) {
     localPath = remainder.slice("localhost".length);
   } else {
     return undefined;
   }
-  if (process.platform === "win32" && /^\/[a-z]:[\\/]/iu.test(localPath)) {
+  if (process.platform === "win32" && WINDOWS_FILE_URL_DRIVE_RE.test(localPath)) {
     localPath = localPath.slice(1);
   }
   return normalizeFileUrlLocalPath(localPath);
@@ -62,7 +64,7 @@ export function normalizeMediaReferenceForComparison(value: string): string {
       }
       const windows =
         process.platform === "win32" &&
-        (parsed.hostname !== "" || /^\/[a-z]:[\\/]/iu.test(parsed.pathname));
+        (parsed.hostname !== "" || WINDOWS_FILE_URL_DRIVE_RE.test(parsed.pathname));
       return normalizeFileUrlLocalPath(fileURLToPath(parsed, { windows }));
     }
   } catch {

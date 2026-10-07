@@ -170,9 +170,13 @@ describe("package verification bounds", () => {
           await fs.writeFile(payload, "");
           await fs.truncate(payload, 1024 * 1024 * 1024 + 1);
         } else {
+          let now = Date.now();
+          vi.spyOn(Date, "now").mockImplementation(() => now);
           vi.spyOn(fs, "open").mockImplementation(async (...args) => {
             if (!entered && String(args[0]) === path.join(packageRoot, "dist", "index.js")) {
               entered = true;
+              // Expire the baseline scan without charging later readers for filesystem latency.
+              now += 201;
               await blocked.promise;
             }
             return open(...args);

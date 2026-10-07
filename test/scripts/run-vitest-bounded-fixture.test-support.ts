@@ -51,6 +51,7 @@ export function createPreparedVitestCliFixture(
       );
       const files = new Set([
         ...closure,
+        "scripts/lib/datadog-test-register.mjs",
         "scripts/lib/vitest-worker-bootstrap.mts",
         "scripts/lib/vitest-worker-compiler.mts",
         "package.json",

@@ -4,10 +4,33 @@ import { resolveRepoRoot } from "./repo-root.mjs";
 import { resolveVitestNodeArgs } from "./vitest-process-env.mts";
 
 /** Select only the Vitest process; orchestration and preparation retain Node. */
-export function resolveVitestTestCommand(args: string[], env: NodeJS.ProcessEnv = process.env) {
+export function resolveVitestTestCommand(
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): { command: string; args: string[]; env?: NodeJS.ProcessEnv } {
   const runtime = env.OPENCLAW_VITEST_RUNTIME?.trim() || "node";
   if (runtime === "node") {
-    return { command: process.execPath, args };
+    const tracerInit = env.DD_TRACE_PACKAGE;
+    const cliIndex = args.findIndex((arg) => path.basename(arg) === "vitest.mjs");
+    if (!tracerInit || !env.DD_TRACE_ESM_IMPORT || cliIndex < 0) {
+      return { command: process.execPath, args };
+    }
+    // Add hooks only at the final spawn, after shard-specific V8 options.
+    // Workers inherit them before test-env removes NODE_OPTIONS from fixtures.
+    return {
+      command: process.execPath,
+      args,
+      env: {
+        ...env,
+        NODE_OPTIONS: [
+          env.NODE_OPTIONS,
+          `--import=${JSON.stringify(new URL("./datadog-test-register.mjs", import.meta.url).href)}`,
+          `--require=${JSON.stringify(tracerInit)}`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      },
+    };
   }
   if (runtime !== "bun") {
     throw new Error(`Invalid OPENCLAW_VITEST_RUNTIME: ${runtime}; expected node or bun`);

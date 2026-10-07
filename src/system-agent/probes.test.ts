@@ -10,11 +10,36 @@ describe("openclaw probes", () => {
   });
 
   it("bounds noisy local command probe output", async () => {
+    const startedAt = performance.now();
     const result = await probeLocalCommand(
       process.execPath,
       ["-e", "process.stdout.write('x'.repeat(4096));"],
       { outputLimit: 64, timeoutMs: 1_000 },
     );
+
+    if (!result.found || result.version?.length !== 64) {
+      let errorKind = "other-error";
+      if (result.error === undefined) {
+        errorKind = "none";
+      } else if (result.error === "timed out after 1000ms") {
+        errorKind = "timeout";
+      } else if (result.error === "not found") {
+        errorKind = "not-found";
+      } else if (/^exited (?:-?\d+|null)$/.test(result.error)) {
+        errorKind = "exit";
+      }
+      console.error(
+        "[local-command-probe-diagnostic]",
+        JSON.stringify({
+          elapsedMs: Math.round(performance.now() - startedAt),
+          found: result.found,
+          timedOut: result.timedOut === true,
+          versionLength: result.version?.length ?? null,
+          errorKind,
+          nodeOptionsPresent: Boolean(process.env.NODE_OPTIONS),
+        }),
+      );
+    }
 
     expect(result.found).toBe(true);
     expect(result.version).toHaveLength(64);

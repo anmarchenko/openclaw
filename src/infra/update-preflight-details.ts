@@ -45,7 +45,9 @@ export const UPDATE_PREFLIGHT_DETAILS = {
 } as const;
 
 export function updatePreflightDetailMessage(code: string): string | undefined {
-  return Object.entries(UPDATE_PREFLIGHT_DETAILS).find(([key]) => key === code)?.[1];
+  return Object.entries(UPDATE_PREFLIGHT_DETAILS).find(
+    ([failureCode]) => failureCode === code,
+  )?.[1];
 }
 
 export function createUpdatePreflightFailure(

@@ -129,7 +129,7 @@ future-attempt artifacts remain invalid.
 Linux test shards select Bun through `scripts/lib/ci-test-runtime.mts`. The
 ordinary and isolated unit-fast lanes partition their existing file inventories: files with known Bun
 failures or additional skips stay on Node, and the compatible remainder runs on
-Bun. Those Node files still execute; they are not excluded from CI.
+Bun. Files retained on Node remain in the CI inventory and still execute.
 The process lane runs `terminal-pty-bun.test.ts` on Bun and retains its other
 files on Node. Its native real-PTY block skips when the pinned Bun build lacks
 `Bun.Terminal.pause()` and `resume()`, as the current pin does. macOS and Linux

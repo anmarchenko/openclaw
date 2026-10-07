@@ -17,6 +17,7 @@ import {
   systemChromiumExecutableCandidates,
   waitForControlUiRoute,
 } from "./control-ui-e2e.ts";
+import { reportPendingFakeTimers } from "./pending-fake-timer-diagnostics.ts";
 
 describe("shared proof capture", () => {
   const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -36,6 +37,7 @@ describe("shared proof capture", () => {
     "preserves the original failure when diagnostic $stage stalls then $late arrives late",
     async ({ stage, late }) => {
       vi.useFakeTimers();
+      const baselineTimerCount = vi.getTimerCount();
       const parent = tempDirs.make("control-ui-stalled-proof-");
       vi.stubEnv("OPENCLAW_UI_E2E_DIAGNOSTIC_DIR", parent);
       vi.spyOn(console, "error").mockImplementation(() => {});
@@ -73,7 +75,12 @@ describe("shared proof capture", () => {
       try {
         await vi.advanceTimersByTimeAsync(5_000);
         expect(observed).toBe(original);
-        expect(vi.getTimerCount()).toBe(0);
+        try {
+          expect(vi.getTimerCount()).toBe(0);
+        } catch (error) {
+          reportPendingFakeTimers(baselineTimerCount, { scope: "control-ui-proof", stage, late });
+          throw error;
+        }
         const directories = readdirSync(parent);
         expect(directories).toHaveLength(1);
         const root = path.join(parent, directories[0]!);

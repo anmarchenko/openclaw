@@ -383,17 +383,17 @@ export async function inspectGitDryRunTargetSchemaVersions(params: {
   if (!revision) {
     return { metadataUnreadable: "could not resolve the selected Git target" };
   }
-  const target = await readGitTargetSchemaVersions({
+  const targetSchemaResult = await readGitTargetSchemaVersions({
     runCommand: runTargetCommand,
     root: params.root,
     revision,
     timeoutMs: params.timeoutMs,
   });
-  return target.status === "ok"
-    ? target.schemaVersions
-      ? { schemaVersions: target.schemaVersions }
+  return targetSchemaResult.status === "ok"
+    ? targetSchemaResult.schemaVersions
+      ? { schemaVersions: targetSchemaResult.schemaVersions }
       : {}
-    : { metadataUnreadable: target.reason };
+    : { metadataUnreadable: targetSchemaResult.reason };
 }
 
 export async function updateGitInstall(params: {

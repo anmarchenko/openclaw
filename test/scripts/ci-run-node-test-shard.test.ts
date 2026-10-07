@@ -54,7 +54,7 @@ const agentsSupportConfig = "test/vitest/vitest.agents-support.config.ts";
 const worktreeRecoveryTarget = "src/agents/worktrees/service.removal-recovery.test.ts";
 const gatewayCoreConfig = "test/vitest/vitest.gateway-core.config.ts";
 const gatewayClientConfig = "test/vitest/vitest.gateway-client.config.ts";
-const gatewayClientTarget = "src/gateway/talk/handlers/client-native-control.test.ts";
+const gatewayClientNativeControlTarget = "src/gateway/talk/handlers/client-native-control.test.ts";
 const memoryConfig = "test/vitest/vitest.extension-memory.config.ts";
 const memoryTarget = "extensions/memory-lancedb/config.test.ts";
 const memoryIncludes = ["extensions/memory-lancedb", "extensions/memory-wiki"];
@@ -341,7 +341,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
         {
           configs: [gatewayClientConfig],
           shard_name: "gateway-client",
-          includePatterns: [gatewayClientTarget],
+          includePatterns: [gatewayClientNativeControlTarget],
         },
         {
           configs: [memoryConfig],
@@ -381,7 +381,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
           }
           if (label.endsWith("gateway-client")) {
             expect(JSON.parse(readFileSync(env.OPENCLAW_VITEST_INCLUDE_FILE!, "utf8"))).toEqual([
-              gatewayClientTarget,
+              gatewayClientNativeControlTarget,
             ]);
           }
           if (label.endsWith("memory")) {
@@ -437,7 +437,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
             ];
       for (const includePatterns of [
         undefined,
-        ["src/gateway/auth.test.ts", gatewayClientTarget],
+        ["src/gateway/auth.test.ts", gatewayClientNativeControlTarget],
       ]) {
         const group = {
           configs,
@@ -858,7 +858,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
     { configs: [gatewayClientConfig, gatewayCoreConfig] },
     { configs: [gatewayCoreConfig, gatewayClientConfig, bunConfig] },
     { configs: [gatewayClientConfig, gatewayClientConfig] },
-    { targets: [gatewayClientTarget] },
+    { targets: [gatewayClientNativeControlTarget] },
     { targets: ["packages/markdown-core/src"] },
     { targets: ["packages/markdown-core/src/*.test.ts"] },
     { targets: [bunTarget, nodeTarget] },

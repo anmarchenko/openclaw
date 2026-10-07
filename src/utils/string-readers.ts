@@ -2,6 +2,8 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 
 type StringOptions<T extends string> = readonly T[] | ReadonlySet<T>;
 
+const GENERIC_CHANNEL_PREFIXES = ["channel:", "chat:", "user:"] as const;
+
 export function isStringOption<T extends string>(
   value: unknown,
   options: StringOptions<T>,
@@ -34,8 +36,7 @@ export function stripChannelPrefix(
   if (!value) {
     return undefined;
   }
-  const genericPrefixes = ["channel:", "chat:", "user:"];
-  for (const prefix of genericPrefixes) {
+  for (const prefix of GENERIC_CHANNEL_PREFIXES) {
     if (value.startsWith(prefix)) {
       return value.slice(prefix.length);
     }
