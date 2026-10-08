@@ -54,6 +54,9 @@ on:
       compatibility-target:
         type: boolean
         default: false
+      dependency-cache:
+        type: boolean
+        default: false
       cache-mode:
         type: string
         default: restore
@@ -131,6 +134,7 @@ jobs:
         if: contains(inputs.runner-json, 'runs-on=') && runner.environment == 'self-hosted'
         uses: runs-on/action@efac073ea2507ec18797de3a81704201ade11d9d # v2
       - &harness
+        if: (inputs.checkout-revision || github.sha) != github.workflow_sha
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.workflow_sha }}
@@ -140,6 +144,15 @@ jobs:
             .github/actions
             scripts/lib
           persist-credentials: false
+      - &local-harness
+        name: Reuse checked-out CI harness
+        if: (inputs.checkout-revision || github.sha) == github.workflow_sha
+        env:
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$WORKFLOW_SHA"
+          mkdir -p .ci-harness
+          git archive HEAD .github/actions scripts/lib | tar -x -C .ci-harness
       - &selection
         name: Restore manifest selection and environment
         env:
@@ -191,75 +204,22 @@ jobs:
             writeEnv("OPENCLAW_VITEST_INCLUDE_FILE", file);
           }
           NODE
-      - &node
+      - name: Setup planner dependencies
         uses: ./.ci-harness/.github/actions/setup-node-env
         with:
-          semantic-checks: "true"
-          cache-mode: ${{ inputs.cache-mode }}
+          cache-mode: ${{ inputs.dependency-cache && 'restore' || inputs.cache-mode }}
+          dependency-cache: ${{ inputs.dependency-cache && 'true' || 'false' }}
           node-version: ${{ inputs.node-version }}
           install-bun: "false"
-          dependency-cache: "false"
-          vitest-fs-cache: "true"
-          vitest-worker-cache: ${{ inputs.build == '' && 'true' || 'false' }}
-          node-compile-cache: "true"
       - &compat
         name: Apply frozen Node test compatibility
         if: inputs.checkout-revision == 'f773aa06a1a93b36b050f1a3f4b57d3d91311541'
         uses: ./.ci-harness/.github/actions/frozen-node-test-compat
         with:
           target-sha: ${{ inputs.checkout-revision }}
-      - &bun
-        if: inputs.requires-bun
-        uses: ./.ci-harness/.github/actions/setup-test-bun
-      - &git
-        name: Fetch required Git fixtures
-        env:
-          FIXTURE_COMMITS_JSON: ${{ inputs.git-commits-json }}
-        run: |
-          node --input-type=module <<'NODE'
-          import { spawnSync } from "node:child_process";
-          for (const commit of JSON.parse(process.env.FIXTURE_COMMITS_JSON)) {
-            if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("Invalid Git fixture SHA");
-            const result = spawnSync("git", ["-c", "credential.helper=", "fetch", "--no-tags", "--depth=1", `https://github.com/${process.env.GITHUB_REPOSITORY}.git`, commit], { stdio: "inherit" });
-            if (result.error) throw result.error;
-            if (result.status !== 0) process.exit(result.status ?? 1);
-          }
-          NODE
-      - &go
-        if: inputs.go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: "1.27.1"
-          cache: false
-      - &ripgrep
-        name: Install ripgrep
-        if: inputs.ripgrep
-        run: command -v rg || (sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ripgrep)
-      - &sandbox
-        name: Prepare Docker sandbox image
-        if: inputs.sandbox
-        run: |
-          if ! docker image inspect openclaw-sandbox:bookworm-slim >/dev/null 2>&1; then scripts/sandbox-setup.sh; fi
-      - &browser
-        name: Install Chromium
-        if: inputs.browser
+      - name: Install Chromium for browser discovery
+        if: inputs.config == 'test/vitest/vitest.ui-browser.config.ts' || inputs.config == 'ui/vitest.config.ts'
         run: pnpm --dir ui exec playwright install --with-deps chromium
-      - &build
-        name: Build test runtime
-        if: inputs.build != ''
-        env:
-          OPENCLAW_BUILD_PRIVATE_QA: ${{ inputs.build == 'private-qa' && '1' || '0' }}
-          VITEST: "1"
-          BUILD_MODE: ${{ inputs.build }}
-        run: |
-          if [[ "$BUILD_MODE" == full ]]; then pnpm build; else pnpm build qaRuntime; fi
-          if [[ "$BUILD_MODE" == private-qa ]]; then echo "OPENCLAW_E2E_USE_PREBUILT_DIST=1" >> "$GITHUB_ENV"; fi
-      - &ai-types
-        name: Build AI package declarations
-        if: inputs.build == 'private-qa' && inputs.config == 'test/vitest/vitest.e2e.config.ts'
-        env:
-          OPENCLAW_RUN_NODE_SKIP_DTS_BUILD: "0"
-        run: node --import tsx scripts/tsdown-build.mts --config tsdown.ai.config.ts
       - &ddtest
         uses: ./.ci-harness/.github/actions/setup-ddtest
       - name: Plan with ddtest
@@ -296,17 +256,64 @@ jobs:
       - *checkout
       - *runson
       - *harness
+      - *local-harness
       - *selection
-      - *node
+      - name: Setup test dependencies
+        uses: ./.ci-harness/.github/actions/setup-node-env
+        with:
+          semantic-checks: "true"
+          cache-mode: ${{ inputs.cache-mode }}
+          node-version: ${{ inputs.node-version }}
+          install-bun: "false"
+          dependency-cache: "false"
+          vitest-fs-cache: "true"
+          vitest-worker-cache: ${{ inputs.build == '' && 'true' || 'false' }}
+          node-compile-cache: "true"
       - *compat
-      - *bun
-      - *git
-      - *go
-      - *ripgrep
-      - *sandbox
-      - *browser
-      - *build
-      - *ai-types
+      - if: inputs.requires-bun
+        uses: ./.ci-harness/.github/actions/setup-test-bun
+      - name: Fetch required Git fixtures
+        env:
+          FIXTURE_COMMITS_JSON: ${{ inputs.git-commits-json }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { spawnSync } from "node:child_process";
+          for (const commit of JSON.parse(process.env.FIXTURE_COMMITS_JSON)) {
+            if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("Invalid Git fixture SHA");
+            const result = spawnSync("git", ["-c", "credential.helper=", "fetch", "--no-tags", "--depth=1", `https://github.com/${process.env.GITHUB_REPOSITORY}.git`, commit], { stdio: "inherit" });
+            if (result.error) throw result.error;
+            if (result.status !== 0) process.exit(result.status ?? 1);
+          }
+          NODE
+      - if: inputs.go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.27.1"
+          cache: false
+      - name: Install ripgrep
+        if: inputs.ripgrep
+        run: command -v rg || (sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ripgrep)
+      - name: Prepare Docker sandbox image
+        if: inputs.sandbox
+        run: |
+          if ! docker image inspect openclaw-sandbox:bookworm-slim >/dev/null 2>&1; then scripts/sandbox-setup.sh; fi
+      - name: Install Chromium
+        if: inputs.browser
+        run: pnpm --dir ui exec playwright install --with-deps chromium
+      - name: Build test runtime
+        if: inputs.build != ''
+        env:
+          OPENCLAW_BUILD_PRIVATE_QA: ${{ inputs.build == 'private-qa' && '1' || '0' }}
+          VITEST: "1"
+          BUILD_MODE: ${{ inputs.build }}
+        run: |
+          if [[ "$BUILD_MODE" == full ]]; then pnpm build; else pnpm build qaRuntime; fi
+          if [[ "$BUILD_MODE" == private-qa ]]; then echo "OPENCLAW_E2E_USE_PREBUILT_DIST=1" >> "$GITHUB_ENV"; fi
+      - name: Build AI package declarations
+        if: inputs.build == 'private-qa' && inputs.config == 'test/vitest/vitest.e2e.config.ts'
+        env:
+          OPENCLAW_RUN_NODE_SKIP_DTS_BUILD: "0"
+        run: node --import tsx scripts/tsdown-build.mts --config tsdown.ai.config.ts
       - *ddtest
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:

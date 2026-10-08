@@ -126,6 +126,7 @@ jobs:
       pr_check_job_count: ${{ steps.manifest.outputs.pr_check_job_count }}
       candidate_trust: ${{ steps.candidate_trust.outputs.trust }}
       cache_mode: ${{ steps.candidate_trust.outputs.cache_mode }}
+      ddtest_dependency_cache: ${{ steps.ddtest-dependencies.outcome == 'success' }}
       cache_write_allowed: ${{ steps.candidate_trust.outputs.cache_write_allowed }}
       hosted_runner_profile_contract: ${{ steps.runner_profile.outputs.hosted_runner_profile_contract }}
       runner_profile: ${{ steps.runner_profile.outputs.runner_profile }} # hosted-runner-profile-contract-v1
@@ -1307,6 +1308,7 @@ jobs:
           trust=untrusted
           cache_mode=off
           cache_write_allowed=false
+          ddtest_cache_write_allowed=false
 
           if [[ ( "$GITHUB_EVENT_NAME" == "push" || "$GITHUB_EVENT_NAME" == "schedule" ) && "$GITHUB_REF" == "refs/heads/main" ]]; then
             trust=main
@@ -1337,7 +1339,15 @@ jobs:
             fi
           fi
 
+          # Native planning has its own dependency-only cache authority. A
+          # branch push may seed its branch-scoped cache from the workflow's
+          # exact revision without enabling test/build caches in other jobs.
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == refs/heads/* && "$CHECKOUT_REVISION" == "$WORKFLOW_REVISION" ]]; then
+            ddtest_cache_write_allowed=true
+          fi
+
           {
+            echo "ddtest_cache_write_allowed=$ddtest_cache_write_allowed"
             echo "trust=$trust"
             echo "cache_mode=$cache_mode"
             echo "cache_write_allowed=$cache_write_allowed"
@@ -1565,8 +1575,33 @@ jobs:
             node scripts/check-protocol-event-coverage.mts
           fi
 
+      # Publish dependencies once before native planners fan out. The existing
+      # semantic key and offline reconciliation own cache validity.
+      - name: Prepare shared ddtest dependencies
+        id: ddtest-dependencies
+        if: steps.candidate_trust.outputs.ddtest_cache_write_allowed == 'true' && runner.environment == 'github-hosted' && runner.os == 'Linux' && (steps.ddtest-cohorts.outputs.run_node == 'true' || steps.ddtest-ui.outputs.run == 'true' || (steps.manifest.outputs.run_ui_tests == 'true' && steps.manifest.outputs.ui_test_runtime_policy != 'bun-compatible' && steps.manifest.outputs.ui_test_runtime_policy != 'dual'))
+        uses: ./.ci-harness/.github/actions/setup-node-env
+        with:
+          cache-mode: read-write
+          dependency-cache: "true"
+          install-bun: "false"
+
+      - name: Save shared ddtest dependencies
+        if: steps.ddtest-dependencies.outcome == 'success' && steps.ddtest-dependencies.outputs.dependency-cache-key != '' && steps.ddtest-dependencies.outputs.dependency-cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            node_modules
+            ui/node_modules
+            packages/*/node_modules
+            extensions/*/node_modules
+            examples/*/node_modules
+            .cache/openclaw-pnpm-store
+          key: ${{ steps.ddtest-dependencies.outputs.dependency-cache-key }}
+
       - name: Restore exact dependency cache
-        if: vars.OPENCLAW_CI_RUNNER_BACKEND != 'github' && !contains(fromJSON('["hybrid","runson"]'), vars.OPENCLAW_CI_RUNNER_BACKEND) && github.repository == 'openclaw/openclaw' && steps.manifest.outputs.run_node == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        if: steps.ddtest-dependencies.outcome != 'success' && vars.OPENCLAW_CI_RUNNER_BACKEND != 'github' && !contains(fromJSON('["hybrid","runson"]'), vars.OPENCLAW_CI_RUNNER_BACKEND) && github.repository == 'openclaw/openclaw' && steps.manifest.outputs.run_node == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         uses: ./.ci-harness/.github/actions/setup-node-env
         with:
           cache-mode: ${{ steps.candidate_trust.outputs.cache_mode }}
@@ -2293,11 +2328,10 @@ jobs:
       - name: Setup Node environment
         uses: ./.ci-harness/.github/actions/setup-node-env
         with:
-          cache-mode: *cache_mode
+          cache-mode: ${{ needs.preflight.outputs.ddtest_dependency_cache == 'true' && 'restore' || needs.preflight.outputs.cache_mode }}
           node-version: "24.x"
           install-bun: "false"
-          dependency-cache: *trusted_dependency_cache
-          restore-test-caches: &restore_test_caches ${{ (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && 'true' || 'false' }}
+          dependency-cache: ${{ needs.preflight.outputs.ddtest_dependency_cache == 'true' && 'true' || ((needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) != 'github' && runner.environment == 'self-hosted' && (github.event_name != 'workflow_dispatch' || ((needs.preflight.outputs.node_runner_backend == 'runson' || needs.preflight.outputs.ci_qualification == 'true') && github.run_attempt == 1)) && github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'true' || 'false') }}
 
       - *datadog_test_setup
 
@@ -2406,7 +2440,7 @@ jobs:
           node-version: "24.x"
           install-bun: "false"
           dependency-cache: *trusted_dependency_cache
-          restore-test-caches: *restore_test_caches
+          restore-test-caches: &restore_test_caches ${{ (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && 'true' || 'false' }}
       - *datadog_test_setup
       - *cache_playwright_chromium
       - *install_playwright_chromium
@@ -2515,6 +2549,7 @@ jobs:
       skip-real-gateway: true
       groups-gzip-base64: ${{ needs.preflight.outputs.ui_e2e_test_groups_gzip_base64 }}
       checkout-revision: ${{ needs.preflight.outputs.checkout_revision }}
+      dependency-cache: ${{ needs.preflight.outputs.ddtest_dependency_cache == 'true' }}
       cache-mode: ${{ needs.preflight.outputs.cache_mode }}
     secrets:
       DD_API_KEY: ${{ secrets.DD_API_KEY }}
@@ -3477,6 +3512,7 @@ jobs:
       max-workers: 0
       checkout-revision: ${{ needs.preflight.outputs.checkout_revision }}
       compatibility-target: ${{ needs.preflight.outputs.compatibility_target == 'true' }}
+      dependency-cache: ${{ needs.preflight.outputs.ddtest_dependency_cache == 'true' }}
       cache-mode: ${{ needs.preflight.outputs.cache_mode }}
     secrets:
       DD_API_KEY: ${{ secrets.DD_API_KEY }}
