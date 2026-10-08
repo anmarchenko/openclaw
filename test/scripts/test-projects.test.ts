@@ -2452,7 +2452,7 @@ describe("scripts/test-projects changed-target routing", () => {
     const wrapperConsumer = "src/config/wrapper-consumer.test.ts";
     const unrelated = "src/config/unrelated.ts";
     const unrelatedTest = "src/config/unrelated.test.ts";
-    const tooling = "test/scripts/check.test.ts";
+    const tooling = "test/scripts/run-opengrep.test.ts";
     const changed = ["--changed", "origin/main"];
     const normal = [baseConsumer, sibling, wrapperConsumer];
     const files = {
@@ -2744,7 +2744,13 @@ describe("scripts/test-projects changed-target routing", () => {
     expect(plan).toEqual({
       mode: "targets",
       skippedBroadFallbackPaths: ["src/gateway/server.impl.ts"],
-      targets: ["test/scripts/check.test.ts", "test/scripts/pr-gate-base.test.ts"],
+      targets: [
+        "src/scripts/ci-changed-scope.test.ts",
+        "test/scripts/changed-path-facts.test.ts",
+        "test/scripts/crabbox-wrapper.test.ts",
+        "test/scripts/check.test.ts",
+        "test/scripts/pr-gate-base.test.ts",
+      ],
     });
     expect(repoSourceReads).toEqual([]);
   });

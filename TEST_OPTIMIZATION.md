@@ -4,7 +4,7 @@ CI uses the official `ddtest` CLI to plan and execute supported test suites. The
 
 ## Setup
 
-Set the Actions secret `DD_API_KEY`. The workflow installs the official ddtest release and the official `DataDog/test-visibility-github-action` with the latest tracer. Tests use service `openclaw-tests`, environment `ci`, and the default Datadog site.
+Set the Actions secret `DD_API_KEY`. The workflow installs the official ddtest release and the official `DataDog/test-visibility-github-action` with the latest tracer. Tests use service `openclaw-tests`, environment `ci`, and site `datadoghq.com`. Standalone planners enable Agentless mode explicitly to use the API key without a local Datadog Agent.
 
 `DD_CIVISIBILITY_ITR_ENABLED` is the repository variable controlling TIA, defaulting to `true`. Early flake detection and automatic retries remain disabled. The existing OpenAI, HTTP, and OpenTelemetry instrumentation opt-outs and Node builtin compatibility preload from PR #2 remain in place.
 
@@ -16,7 +16,7 @@ Existing singleton proof, contract, and platform boundaries use a one-runner ddt
 
 Bun and dual-runtime routing retain their existing runner because ddtest's JavaScript integration supports Node, not Bun. Swift, Android, custom QA process verifiers, lint, builds, and security audits retain their existing tools. Frozen target fallbacks remain explicit compatibility paths.
 
-The former `scripts/ci-ddtest-tooling.mts` adapter and paired `ddtest-tooling.yml` workflow are removed. Native ddtest invokes Vitest directly. Vitest test/hook deadlines and GitHub job deadlines remain; the former OpenClaw launcher-specific no-output watchdog does not apply to direct execution.
+The former `scripts/ci-ddtest-tooling.mts` adapter and paired `ddtest-tooling.yml` workflow are removed. Native ddtest invokes the existing `scripts/run-vitest.mjs` launcher on current POSIX checkouts so OpenClaw retains its compiled subprocess ownership, private temporary directory, and launcher watchdog. Windows and the exact frozen compatibility target retain direct Vitest execution. Vitest test/hook deadlines and GitHub job deadlines remain. Explicit file selections are positional arguments to `ddtest plan`; workers consume the saved plan with `ddtest run`.
 
 ## Results
 

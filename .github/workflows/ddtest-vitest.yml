@@ -91,9 +91,11 @@ permissions:
 env:
   DD_TEST_OPTIMIZATION_RUNNER_PLATFORM: javascript
   DD_TEST_OPTIMIZATION_RUNNER_FRAMEWORK: vitest
-  DD_TEST_OPTIMIZATION_RUNNER_COMMAND: node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config ${{ inputs.config }} --configLoader runner ${{ inputs.compatibility-target && '--hookTimeout=600000' || '' }} ${{ inputs.args }}
+  DD_TEST_OPTIMIZATION_RUNNER_COMMAND: ${{ inputs.checkout-revision == 'f773aa06a1a93b36b050f1a3f4b57d3d91311541' && 'node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs' || './scripts/run-vitest.mjs' }} run --config ${{ inputs.config }} --configLoader runner ${{ inputs.compatibility-target && '--hookTimeout=600000' || '' }} ${{ inputs.args }}
   DD_SERVICE: openclaw-tests
   DD_ENV: ci
+  DD_SITE: datadoghq.com
+  DD_CIVISIBILITY_AGENTLESS_ENABLED: "true"
   DD_CIVISIBILITY_ITR_ENABLED: ${{ vars.DD_CIVISIBILITY_ITR_ENABLED || 'true' }}
   DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED: "false"
   DD_CIVISIBILITY_FLAKY_RETRY_ENABLED: "false"
@@ -257,6 +259,10 @@ jobs:
         env:
           OPENCLAW_RUN_NODE_SKIP_DTS_BUILD: "0"
         run: node --import tsx scripts/tsdown-build.mts --config tsdown.ai.config.ts
+      - &vitest-launcher
+        name: Prepare repository Vitest launcher
+        if: inputs.checkout-revision != 'f773aa06a1a93b36b050f1a3f4b57d3d91311541'
+        run: chmod +x scripts/run-vitest.mjs
       - &ddtest
         uses: ./.ci-harness/.github/actions/setup-ddtest
       - name: Plan with ddtest
@@ -297,6 +303,7 @@ jobs:
       - *browser
       - *build
       - *ai-types
+      - *vitest-launcher
       - *ddtest
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:

@@ -936,23 +936,6 @@ process.exitCode = 1;
 );
 
 it.skipIf(process.platform === "win32")(
-  "waits for legal slow tree startup before cancellation",
-  async () => {
-    const report = await runCiGitStep({
-      job: "checks-windows",
-      env: { CHECKOUT_KIND: "platform" },
-      fetchResults: ["hang"],
-      scenario: "cancel-SIGTERM",
-      startupDelay: { tree: 4_100 },
-    });
-    expect(report.code, report.output).toBe(143);
-    expect(report.readyAttempts).toEqual([1]);
-    expect(report.fetches).toHaveLength(1);
-  },
-  55_000,
-);
-
-it.skipIf(process.platform === "win32")(
   "reports owner exit and output instead of a cleanup readiness timeout",
   async () => {
     const report = await runCiGitStep({

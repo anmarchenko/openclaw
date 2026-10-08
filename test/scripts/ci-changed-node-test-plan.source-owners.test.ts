@@ -296,8 +296,8 @@ describe("CI changed Node test plan", () => {
 
   it.each([
     {
-      source: "test/scripts/check.test.ts",
-      targets: ["test/scripts/check.test.ts", "test/scripts/test-projects.test.ts"],
+      source: "test/scripts/run-opengrep.test.ts",
+      targets: ["test/scripts/run-opengrep.test.ts", "test/scripts/test-projects.test.ts"],
     },
     ...[
       "extensions/codex/src/app-server/run-attempt.native-config.test.ts",

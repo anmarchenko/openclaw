@@ -738,7 +738,7 @@ export function listChangedPaths(
  * @param {string[] | null} [changedPaths]
  * @returns {void}
  */
-export function writeGitHubOutput(
+function writeGitHubOutput(
   scope,
   outputPath = process.env.GITHUB_OUTPUT,
   installSmokeScope = {

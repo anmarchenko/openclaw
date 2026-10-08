@@ -39,6 +39,8 @@ const config = {
   // Script entrypoints import core and Plugin SDK APIs. Those owners are
   // checked by the application scans; this pass owns only scripts/** exports.
   ignoreIssues: {
+    // ci-build-manifest loads this target-owned module through a computed file URL.
+    "scripts/lib/ci-native-generated-scope.mjs": ["exports"],
     // These executable modules are also loaded through variable/file-URL imports
     // by build or subprocess test harnesses, which Knip cannot resolve statically.
     "scripts/diffs-shiki-curated.ts": [

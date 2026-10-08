@@ -5,17 +5,12 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll } from "vitest";
-import { parse } from "yaml";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
-const PUBLISH_GENERATED_PR_ACTION = ".github/actions/publish-generated-pr/action.yml";
 const publisherTemplateDirs = useAutoCleanupTempDirTracker(afterAll);
 let generatedPublisherTemplate: string | undefined;
 function runGit(cwd: string, args: string[]): string {
@@ -300,41 +295,4 @@ export function prepareGeneratedPublisherFixture(
       };
     },
   };
-}
-export function runGeneratedPublisherScenario(
-  baseChangePath: "a" | "b" | null,
-  options: GeneratedPublisherOptions = {},
-) {
-  const root = mkdtempSync(path.join(tmpdir(), "openclaw-generated-pr-"));
-  try {
-    const fixture = prepareGeneratedPublisherFixture(root, baseChangePath, options);
-    const action = parse(readFileSync(PUBLISH_GENERATED_PR_ACTION, "utf8"));
-    const run = action.runs.steps.find(
-      (step: { name?: string }) => step.name === "Publish generated pull request",
-    ).run;
-    writeExecutable(path.join(fixture.fakeBin, "timeout"), [
-      "#!/bin/bash",
-      'while [[ "$#" -gt 0 ]]; do case "$1" in --signal=*|--kill-after=*) shift ;; [0-9]*s) shift; break ;; *) break ;; esac; done',
-      'exec "$@"',
-    ]);
-    const publish = spawnSync("bash", ["-c", run], {
-      cwd: fixture.worktree,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        ...fixture.env,
-        CI_GIT_OWNER: path.resolve(".github/actions/git-owner/owner.py"),
-        PUBLISH_ACTION_PATH: path.resolve(".github/actions/publish-generated-pr"),
-      },
-    });
-    const publishOutput = `${publish.stdout}${publish.stderr}`;
-    if (options.expectFailure ? publish.status === 0 : publish.status !== 0) {
-      throw new Error(
-        `generated publisher exited ${String(publish.status)} (expected ${options.expectFailure ? "failure" : "success"}):\n${publishOutput}`,
-      );
-    }
-    return fixture.inspect(publishOutput);
-  } finally {
-    rmSync(root, { force: true, recursive: true });
-  }
 }

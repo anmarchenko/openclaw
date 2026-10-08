@@ -1863,10 +1863,16 @@ jobs:
           OPENCLAW_E2E_USE_PREBUILT_DIST: "1"
           OPENCLAW_VITEST_MAX_WORKERS: "1"
         run: |
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
           set -euo pipefail
           rm -f "${RUNNER_TEMP}/browser-native-host.json"
-          command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts --reporter=default --reporter=json --outputFile.json '$RUNNER_TEMP/browser-native-host.json' -- extensions/browser/src/browser/extension-install.native-host.e2e.test.ts"
-          ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+          command="$vitest_command run --config test/vitest/vitest.e2e.config.ts --reporter=default --reporter=json --outputFile.json '$RUNNER_TEMP/browser-native-host.json'"
+          ddtest plan extensions/browser/src/browser/extension-install.native-host.e2e.test.ts --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
           NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
             ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
           node --input-type=module <<'BROWSER_PROOF_REPORT'
@@ -1931,6 +1937,12 @@ jobs:
           FROZEN_TARGET: *frozen_target
         shell: bash
         run: |
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
           set -uo pipefail
 
           names=()
@@ -1987,15 +1999,15 @@ jobs:
           }
 
           run_sqlite_session_lifecycle() {
-            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts -- test/scripts/sqlite-sessions-transcripts-flip-proof.built-cli.e2e.test.ts"
+            local command="$vitest_command run --config test/vitest/vitest.e2e.config.ts"
             OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 \
-              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+              ddtest plan test/scripts/sqlite-sessions-transcripts-flip-proof.built-cli.e2e.test.ts --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
             OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
               ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
           }
 
           run_channels() {
-            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.channels.config.ts"
+            local command="$vitest_command run --config test/vitest/vitest.channels.config.ts"
             NODE_OPTIONS="$CHANNEL_NODE_OPTIONS" OPENCLAW_VITEST_MAX_WORKERS="$CHANNEL_MAX_WORKERS" \
               ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
             NODE_OPTIONS="$CHANNEL_NODE_OPTIONS --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" OPENCLAW_VITEST_MAX_WORKERS="$CHANNEL_MAX_WORKERS" \
@@ -2003,7 +2015,7 @@ jobs:
           }
 
           run_core_support_boundary() {
-            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.full-core-support-boundary.config.ts"
+            local command="$vitest_command run --config test/vitest/vitest.full-core-support-boundary.config.ts"
             NODE_OPTIONS=--max-old-space-size=8192 OPENCLAW_VITEST_MAX_WORKERS=2 \
               ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
             NODE_OPTIONS="--max-old-space-size=8192 --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" OPENCLAW_VITEST_MAX_WORKERS=2 \
@@ -2011,9 +2023,9 @@ jobs:
           }
 
           run_tui_pty() {
-            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.tui-pty.config.ts --testNamePattern 'launches openclaw (chat as local mode|tui against a real Gateway) through a real PTY' -- src/tui/tui-pty-local.e2e.test.ts"
+            local command="$vitest_command run --config test/vitest/vitest.tui-pty.config.ts --testNamePattern 'launches openclaw (chat as local mode|tui against a real Gateway) through a real PTY'"
             NODE_OPTIONS=--max-old-space-size=8192 OPENCLAW_TUI_PTY_INCLUDE_LOCAL=1 OPENCLAW_TUI_PTY_USE_BUILT_CLI=1 OPENCLAW_VITEST_MAX_WORKERS=2 \
-              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+              ddtest plan src/tui/tui-pty-local.e2e.test.ts --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
             NODE_OPTIONS="--max-old-space-size=8192 --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" OPENCLAW_TUI_PTY_INCLUDE_LOCAL=1 OPENCLAW_TUI_PTY_USE_BUILT_CLI=1 OPENCLAW_VITEST_MAX_WORKERS=2 \
               ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
           }
@@ -2022,9 +2034,9 @@ jobs:
             if [[ -f test/scripts/doctor-config-preflight-plugin-index.built-cli.e2e.test.ts ]]; then
               # Cold hosted runners can spend over five minutes in E2E setup before
               # this proof's own bounded test can report a result.
-              local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts -- test/scripts/doctor-config-preflight-plugin-index.built-cli.e2e.test.ts"
+              local command="$vitest_command run --config test/vitest/vitest.e2e.config.ts"
               OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 \
-                ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+                ddtest plan test/scripts/doctor-config-preflight-plugin-index.built-cli.e2e.test.ts --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
               OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 \
                 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
                 ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
@@ -2040,9 +2052,9 @@ jobs:
               return 0
             fi
             rm -f "${RUNNER_TEMP}/discord-component-attachments.json" || return
-            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts --testNamePattern 'preserves component attachment filenames through the public Gateway message action' --reporter=default --reporter=json --outputFile.json '$RUNNER_TEMP/discord-component-attachments.json' -- $test_file"
+            local command="$vitest_command run --config test/vitest/vitest.e2e.config.ts --testNamePattern 'preserves component attachment filenames through the public Gateway message action' --reporter=default --reporter=json --outputFile.json '$RUNNER_TEMP/discord-component-attachments.json'"
             OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_E2E_WORKERS=1 OPENCLAW_E2E_VERBOSE=1 OPENCLAW_VITEST_MAX_WORKERS=1 \
-              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+              ddtest plan "$test_file" --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
             OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_E2E_WORKERS=1 OPENCLAW_E2E_VERBOSE=1 OPENCLAW_VITEST_MAX_WORKERS=1 \
               NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
               ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0 || return
@@ -2357,10 +2369,18 @@ jobs:
           DD_API_KEY: ${{ secrets.DD_API_KEY }}
           DD_SERVICE: openclaw-tests
           DD_ENV: ci
+          DD_CIVISIBILITY_AGENTLESS_ENABLED: "true"
+          DD_SITE: datadoghq.com
           OPENCLAW_VITEST_MAX_WORKERS: "3"
         run: |
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
           ddtest plan --platform javascript --framework vitest \
-            --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config ui/vitest.config.ts --maxWorkers 3 --reporter=verbose --reporter=github-actions --reporter=./scripts/lib/vitest-resource-reporter.mts ${{ needs.preflight.outputs.compatibility_target == 'true' && '--testTimeout=30000 --isolate' || '' }}" \
+            --command "$vitest_command run --config ui/vitest.config.ts --maxWorkers 3 --reporter=verbose --reporter=github-actions --reporter=./scripts/lib/vitest-resource-reporter.mts ${{ needs.preflight.outputs.compatibility_target == 'true' && '--testTimeout=30000 --isolate' || '' }}" \
             --min-parallelism 1 --max-parallelism 3 --ci-job-overhead 64s --strict-discovery
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -2401,9 +2421,15 @@ jobs:
           OPENCLAW_VITEST_MAX_WORKERS: "3"
           OPENCLAW_UI_E2E_DIAGNOSTIC_DIR: ${{ github.workspace }}/.artifacts/control-ui-e2e-timeouts/ui-shard-${{ matrix.ci_node_index }}-attempt-${{ github.run_attempt }}
         run: |
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
           export NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs"
           ddtest run --platform javascript --framework vitest \
-            --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config ui/vitest.config.ts --maxWorkers 3 --reporter=verbose --reporter=github-actions --reporter=./scripts/lib/vitest-resource-reporter.mts ${{ needs.preflight.outputs.compatibility_target == 'true' && '--testTimeout=30000 --isolate' || '' }}" \
+            --command "$vitest_command run --config ui/vitest.config.ts --maxWorkers 3 --reporter=verbose --reporter=github-actions --reporter=./scripts/lib/vitest-resource-reporter.mts ${{ needs.preflight.outputs.compatibility_target == 'true' && '--testTimeout=30000 --isolate' || '' }}" \
             --ci-node "$CI_NODE_INDEX"
       - name: Upload Control UI timeout diagnostics
         if: failure()
@@ -2519,11 +2545,17 @@ jobs:
           OPENCLAW_BROWSER_EXTENSION_E2E: "1"
           OPENCLAW_E2E_WORKERS: "1"
         run: |
-          ddtest plan --platform javascript --framework vitest \
-            --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run -- extensions/browser/chrome-extension/bootstrap.chromium.test.ts" \
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
+          ddtest plan extensions/browser/chrome-extension/bootstrap.chromium.test.ts --platform javascript --framework vitest \
+            --command "$vitest_command run --config vitest.config.ts" \
             --min-parallelism 1 --max-parallelism 1 --strict-discovery
           export NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs"
-          ddtest run --platform javascript --framework vitest --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run -- extensions/browser/chrome-extension/bootstrap.chromium.test.ts" --ci-node 0
+          ddtest run --platform javascript --framework vitest --command "$vitest_command run --config vitest.config.ts" --ci-node 0
 
   checks-ui-e2e-real-gateway:
     permissions:
@@ -2593,6 +2625,12 @@ jobs:
           OPENCLAW_UI_E2E_DIAGNOSTIC_DIR: .artifacts/control-ui-e2e-timeouts/real-gateway-attempt-${{ github.run_attempt }}
           OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: ${{ matrix.test_groups_gzip_base64 }}
         run: |
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
           set -euo pipefail
           if [[ -n "${OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64:-}" ]]; then
             OPENCLAW_VITEST_INCLUDE_FILE="$(node --import tsx --input-type=module <<'NODE'
@@ -2627,11 +2665,11 @@ jobs:
           if [[ "$config" == test/vitest/vitest.ui-e2e-prebuilt.config.ts ]]; then
             # The canonical config owns this inventory; desktop transport proof runs above.
             ddtest plan --platform javascript --framework vitest \
-              --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config $config --configLoader runner --reporter verbose --reporter github-actions --reporter default --reporter ./scripts/lib/vitest-resource-reporter.mts --exclude ui/src/e2e/desktop-resize.real-gateway.e2e.test.ts" \
+              --command "$vitest_command run --config $config --configLoader runner --reporter verbose --reporter github-actions --reporter default --reporter ./scripts/lib/vitest-resource-reporter.mts --exclude ui/src/e2e/desktop-resize.real-gateway.e2e.test.ts" \
               --min-parallelism 1 --max-parallelism 1 --strict-discovery
             export NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs"
             ddtest run --platform javascript --framework vitest \
-              --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config $config --configLoader runner --reporter verbose --reporter github-actions --reporter default --reporter ./scripts/lib/vitest-resource-reporter.mts --exclude ui/src/e2e/desktop-resize.real-gateway.e2e.test.ts" --ci-node 0
+              --command "$vitest_command run --config $config --configLoader runner --reporter verbose --reporter github-actions --reporter default --reporter ./scripts/lib/vitest-resource-reporter.mts --exclude ui/src/e2e/desktop-resize.real-gateway.e2e.test.ts" --ci-node 0
             exit 0
           fi
           node scripts/run-vitest.mjs run \
@@ -2925,11 +2963,17 @@ jobs:
           RUN_BUNDLED_TESTS: ${{ needs.preflight.outputs.run_proof_tier }}
         shell: bash
         run: |
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
           set -euo pipefail
           case "$TASK" in
             bundled-protocol)
               if [[ "$RUN_BUNDLED_TESTS" == "true" ]]; then
-                command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.bundled.config.ts"
+                command="$vitest_command run --config test/vitest/vitest.bundled.config.ts"
                 ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
                 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
                   ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
@@ -2938,20 +2982,20 @@ jobs:
               pnpm protocol:check
               ;;
             contracts-plugins-ci-routing)
-              command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.contracts-plugin.config.ts --maxWorkers=1"
+              command="$vitest_command run --config test/vitest/vitest.contracts-plugin.config.ts --maxWorkers=1"
               ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
               NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
                 ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               routing_files=(src/scripts/ci-changed-scope*.test.ts test/scripts/changed-lanes.test.ts test/scripts/changed-path-facts.test.ts test/scripts/ci-changed-node-test-plan.test.ts test/scripts/ci-changed-node-test-plan.config-fallback.test.ts test/scripts/ci-changed-node-test-plan.dependency-inputs.test.ts test/scripts/ci-changed-node-test-plan.dependency-hubs.test.ts test/scripts/ci-changed-node-test-plan.policy.test.ts test/scripts/ci-changed-node-test-plan.process-owners.test.ts test/scripts/ci-changed-node-test-plan.source-owners.test.ts test/scripts/ci-docker-seed-plan.test.ts test/scripts/ci-run-node-test-shard.test.ts test/scripts/run-vitest.test.ts test/scripts/test-projects.test.ts)
-              command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts -- ${routing_files[*]}"
-              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+              command="$vitest_command run --config vitest.config.ts"
+              ddtest plan "${routing_files[@]}" --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
               NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
                 ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               ;;
             ci-routing)
               routing_files=(src/scripts/ci-changed-scope*.test.ts test/scripts/changed-lanes.test.ts test/scripts/changed-path-facts.test.ts test/scripts/ci-changed-node-test-plan.test.ts test/scripts/ci-changed-node-test-plan.config-fallback.test.ts test/scripts/ci-changed-node-test-plan.dependency-inputs.test.ts test/scripts/ci-changed-node-test-plan.dependency-hubs.test.ts test/scripts/ci-changed-node-test-plan.policy.test.ts test/scripts/ci-changed-node-test-plan.process-owners.test.ts test/scripts/ci-changed-node-test-plan.source-owners.test.ts test/scripts/ci-docker-seed-plan.test.ts test/scripts/ci-run-node-test-shard.test.ts test/scripts/run-vitest.test.ts test/scripts/test-projects.test.ts)
-              command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts -- ${routing_files[*]}"
-              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+              command="$vitest_command run --config vitest.config.ts"
+              ddtest plan "${routing_files[@]}" --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
               NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
                 ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               ;;
@@ -2970,18 +3014,18 @@ jobs:
               node --import tsx scripts/run-oxlint-shards.mts --only=extensions --threads=1
               ;;
             bun-launcher)
-              command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts -- test/openclaw-launcher.e2e.test.ts"
-              OPENCLAW_E2E_SKIP_BUILD=1 OPENCLAW_TEST_BUN_LAUNCHER=1 ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+              command="$vitest_command run --config test/vitest/vitest.e2e.config.ts"
+              OPENCLAW_E2E_SKIP_BUILD=1 OPENCLAW_TEST_BUN_LAUNCHER=1 ddtest plan test/openclaw-launcher.e2e.test.ts --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
               OPENCLAW_E2E_SKIP_BUILD=1 OPENCLAW_TEST_BUN_LAUNCHER=1 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
                 ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               if [[ -f src/plugins/plugin-module-generation.bun.test.ts ]]; then
-                command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts -- src/plugins/plugin-module-generation.bun.test.ts"
-                OPENCLAW_TEST_BUN_LAUNCHER=1 ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+                command="$vitest_command run --config vitest.config.ts"
+                OPENCLAW_TEST_BUN_LAUNCHER=1 ddtest plan src/plugins/plugin-module-generation.bun.test.ts --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
                 OPENCLAW_TEST_BUN_LAUNCHER=1 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
                   ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               elif [[ -f src/plugins/plugin-module-generation.test.ts ]]; then
-                command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts --testNamePattern Bun -- src/plugins/plugin-module-generation.test.ts"
-                OPENCLAW_TEST_BUN_LAUNCHER=1 ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+                command="$vitest_command run --config vitest.config.ts --testNamePattern Bun"
+                OPENCLAW_TEST_BUN_LAUNCHER=1 ddtest plan src/plugins/plugin-module-generation.test.ts --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
                 OPENCLAW_TEST_BUN_LAUNCHER=1 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
                   ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               elif [[ "${{ needs.preflight.outputs.frozen_target }}" != "true" ]]; then
@@ -3000,11 +3044,17 @@ jobs:
         env:
           OPENCLAW_CI_STARTUP_CORPUS_TEST_FILES_JSON: ${{ needs.preflight.outputs.startup_corpus_test_files_json }}
         run: |
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
           set -euo pipefail
           # Prepare once before Vitest workers consume the runtime.
           pnpm build qaRuntime
           run_startup_corpus() {
-            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.runtime-config.config.ts"
+            local command="$vitest_command run --config test/vitest/vitest.runtime-config.config.ts"
             if [[ "${{ needs.preflight.outputs.frozen_target }}" != "true" ]]; then
               command+=" --reporter verbose --reporter github-actions --reporter ./scripts/lib/vitest-resource-reporter.mts"
             fi
@@ -3012,8 +3062,7 @@ jobs:
               command+=" $1"
               shift
             fi
-            command+=" -- $*"
-            ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+            ddtest plan "$@" --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
             NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
               ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
           }
@@ -3288,6 +3337,12 @@ jobs:
           OPENCLAW_CONTRACT_INCLUDE_PATTERNS_JSON: ${{ toJson(matrix) }}
         shell: bash
         run: &run_contract_groups |
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
           set -euo pipefail
           include_list="$RUNNER_TEMP/contract-includes.list"
           INCLUDE_FILE="$include_list" node --input-type=module <<'EOF'
@@ -3320,7 +3375,7 @@ jobs:
           while IFS=$'\t' read -r include_file contract_config contract_name; do
             echo "::group::${contract_name} (${contract_config})"
             export OPENCLAW_VITEST_INCLUDE_FILE="$include_file"
-            command="node --no-maglev --no-concurrent-sparkplug node_modules/vitest/vitest.mjs run --config $contract_config --maxWorkers=1"
+            command="$vitest_command run --config $contract_config --maxWorkers=1"
             # Contracts keep their process envelopes and serial cleanup boundary.
             ddtest plan --platform javascript --framework vitest --command "$command" --min-parallelism 1 --max-parallelism 1 --strict-discovery
             NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
@@ -3388,13 +3443,19 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=8192
         run: |
+          vitest_command="./scripts/run-vitest.mjs"
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+            vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
+          else
+            chmod +x scripts/run-vitest.mjs
+          fi
           pnpm build
           pnpm ui:build
           node openclaw.mjs --help
           node openclaw.mjs status --json --timeout 1
           pnpm test:build:singleton
-          command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts -- src/config/sessions/session-accessor.test.ts src/config/sessions/store-writer.test.ts src/config/sessions/sessions.test.ts"
-          ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+          command="$vitest_command run --config vitest.config.ts"
+          ddtest plan src/config/sessions/session-accessor.test.ts src/config/sessions/store-writer.test.ts src/config/sessions/sessions.test.ts --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
           NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
             ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
 
@@ -4849,6 +4910,7 @@ jobs:
         env:
           TASK: ${{ matrix.task }}
           PLATFORM_TEST_FAMILY: windows
+          FROZEN_TARGET: *frozen_target
           # The 16-class supplies four CPUs; hosted fallback stays serial.
           OPENCLAW_VITEST_MAX_WORKERS: ${{ runner.environment == 'self-hosted' && 4 || 1 }}
           WINDOWS_TARGETS_JSON: ${{ toJSON(matrix.targets || null) }}
@@ -4857,7 +4919,7 @@ jobs:
           set -euo pipefail
           node --input-type=module <<'PLATFORM_TESTS'
           import { spawnSync } from "node:child_process";
-          import { readFileSync } from "node:fs";
+          import { chmodSync, existsSync, readFileSync } from "node:fs";
           import { resolve } from "node:path";
           import { pathToFileURL } from "node:url";
           const family = process.env.PLATFORM_TEST_FAMILY;
@@ -4905,15 +4967,20 @@ jobs:
             if (result.error) throw result.error;
             if (result.status !== 0) process.exit(result.status ?? 1);
           };
+          const legacyFrozen = process.env.FROZEN_TARGET === "true" && !existsSync("scripts/run-vitest.mjs");
+          const useRepositoryLauncher = family === "macos" && !legacyFrozen;
+          if (useRepositoryLauncher) chmodSync("scripts/run-vitest.mjs", 0o755);
           for (const targets of envelopes) {
             if (!Array.isArray(targets) || targets.length === 0 ||
                 targets.some((file) => typeof file !== "string" || !/^[\w./-]+\.test\.tsx?$/.test(file))) {
               throw new Error("Platform test row requires explicit canonical test files");
             }
-            // ddtest replaces paths after -- with its selected files during execution.
-            const command = `node --no-maglev --no-concurrent-sparkplug node_modules/vitest/vitest.mjs run --config vitest.config.ts --maxWorkers=${workers}${family === "windows" ? " --fileParallelism" : ""} -- ${targets.join(" ")}`;
+            const executable = useRepositoryLauncher
+              ? "./scripts/run-vitest.mjs"
+              : "node --no-maglev --no-concurrent-sparkplug node_modules/vitest/vitest.mjs";
+            const command = `${executable} run --config vitest.config.ts --maxWorkers=${workers}${family === "windows" ? " --fileParallelism" : ""}`;
             const common = ["--platform", "javascript", "--framework", "vitest", "--command", command];
-            execute(["plan", ...common, "--min-parallelism", "1", "--max-parallelism", "1", "--strict-discovery"], {
+            execute(["plan", ...targets, ...common, "--min-parallelism", "1", "--max-parallelism", "1", "--strict-discovery"], {
               ...process.env,
             });
             execute(["run", ...common, "--ci-node", "0"], {
@@ -4951,6 +5018,7 @@ jobs:
           OPENCLAW_VITEST_MAX_WORKERS: 2
           TASK: ${{ matrix.task }}
           PLATFORM_TEST_FAMILY: macos
+          FROZEN_TARGET: *frozen_target
         shell: bash
         run: *run_ddtest_platform_targets
 
