@@ -1864,10 +1864,8 @@ jobs:
           OPENCLAW_VITEST_MAX_WORKERS: "1"
         run: |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           set -euo pipefail
           rm -f "${RUNNER_TEMP}/browser-native-host.json"
@@ -1938,10 +1936,8 @@ jobs:
         shell: bash
         run: |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           set -uo pipefail
 
@@ -2374,10 +2370,8 @@ jobs:
           OPENCLAW_VITEST_MAX_WORKERS: "3"
         run: |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           ddtest plan --platform javascript --framework vitest \
             --command "$vitest_command run --config ui/vitest.config.ts --maxWorkers 3 --reporter=verbose --reporter=github-actions --reporter=./scripts/lib/vitest-resource-reporter.mts ${{ needs.preflight.outputs.compatibility_target == 'true' && '--testTimeout=30000 --isolate' || '' }}" \
@@ -2422,10 +2416,8 @@ jobs:
           OPENCLAW_UI_E2E_DIAGNOSTIC_DIR: ${{ github.workspace }}/.artifacts/control-ui-e2e-timeouts/ui-shard-${{ matrix.ci_node_index }}-attempt-${{ github.run_attempt }}
         run: |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           export NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs"
           ddtest run --platform javascript --framework vitest \
@@ -2546,10 +2538,8 @@ jobs:
           OPENCLAW_E2E_WORKERS: "1"
         run: |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           ddtest plan extensions/browser/chrome-extension/bootstrap.chromium.test.ts --platform javascript --framework vitest \
             --command "$vitest_command run --config vitest.config.ts" \
@@ -2626,10 +2616,8 @@ jobs:
           OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: ${{ matrix.test_groups_gzip_base64 }}
         run: |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           set -euo pipefail
           if [[ -n "${OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64:-}" ]]; then
@@ -2964,10 +2952,8 @@ jobs:
         shell: bash
         run: |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           set -euo pipefail
           case "$TASK" in
@@ -3045,10 +3031,8 @@ jobs:
           OPENCLAW_CI_STARTUP_CORPUS_TEST_FILES_JSON: ${{ needs.preflight.outputs.startup_corpus_test_files_json }}
         run: |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           set -euo pipefail
           # Prepare once before Vitest workers consume the runtime.
@@ -3338,10 +3322,8 @@ jobs:
         shell: bash
         run: &run_contract_groups |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           set -euo pipefail
           include_list="$RUNNER_TEMP/contract-includes.list"
@@ -3444,10 +3426,8 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=8192
         run: |
           vitest_command="./scripts/run-vitest.mjs"
-          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -f scripts/run-vitest.mjs ]]; then
+          if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" && ! -x scripts/run-vitest.mjs ]]; then
             vitest_command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs"
-          else
-            chmod +x scripts/run-vitest.mjs
           fi
           pnpm build
           pnpm ui:build
@@ -4919,7 +4899,7 @@ jobs:
           set -euo pipefail
           node --input-type=module <<'PLATFORM_TESTS'
           import { spawnSync } from "node:child_process";
-          import { chmodSync, existsSync, readFileSync } from "node:fs";
+          import { existsSync, readFileSync, statSync } from "node:fs";
           import { resolve } from "node:path";
           import { pathToFileURL } from "node:url";
           const family = process.env.PLATFORM_TEST_FAMILY;
@@ -4967,9 +4947,9 @@ jobs:
             if (result.error) throw result.error;
             if (result.status !== 0) process.exit(result.status ?? 1);
           };
-          const legacyFrozen = process.env.FROZEN_TARGET === "true" && !existsSync("scripts/run-vitest.mjs");
+          const legacyFrozen = process.env.FROZEN_TARGET === "true" &&
+            (!existsSync("scripts/run-vitest.mjs") || (statSync("scripts/run-vitest.mjs").mode & 0o111) === 0);
           const useRepositoryLauncher = family === "macos" && !legacyFrozen;
-          if (useRepositoryLauncher) chmodSync("scripts/run-vitest.mjs", 0o755);
           for (const targets of envelopes) {
             if (!Array.isArray(targets) || targets.length === 0 ||
                 targets.some((file) => typeof file !== "string" || !/^[\w./-]+\.test\.tsx?$/.test(file))) {

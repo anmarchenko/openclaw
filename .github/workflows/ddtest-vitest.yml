@@ -259,10 +259,6 @@ jobs:
         env:
           OPENCLAW_RUN_NODE_SKIP_DTS_BUILD: "0"
         run: node --import tsx scripts/tsdown-build.mts --config tsdown.ai.config.ts
-      - &vitest-launcher
-        name: Prepare repository Vitest launcher
-        if: inputs.checkout-revision != 'f773aa06a1a93b36b050f1a3f4b57d3d91311541'
-        run: chmod +x scripts/run-vitest.mjs
       - &ddtest
         uses: ./.ci-harness/.github/actions/setup-ddtest
       - name: Plan with ddtest
@@ -303,7 +299,6 @@ jobs:
       - *browser
       - *build
       - *ai-types
-      - *vitest-launcher
       - *ddtest
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:

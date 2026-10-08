@@ -522,7 +522,8 @@ ${run}`;
       if (options.action === "ensure-base-commit") {
         expect(report.output).not.toContain("fixture quiet probe");
       }
-      if (options.action === "git-owner") {
+      // Direct policy calls bypass action preparation and do not publish an owner path.
+      if (options.action === "git-owner" && !options.policy) {
         const ownerPath = readOutput("github-env")
           .trim()
           .replace(/^CI_GIT_OWNER=/u, "");

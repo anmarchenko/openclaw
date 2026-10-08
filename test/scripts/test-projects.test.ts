@@ -2032,8 +2032,7 @@ describe("scripts/test-projects changed-target routing", () => {
     expect(new Set(selected).size).toBe(selected.length);
 
     const requiredOwners: Record<string, string> = {
-      "test/scripts/ci-git-prerequisites.test.ts":
-        "test/vitest/vitest.unit-fast-isolated.config.ts",
+      "test/scripts/ci-git-prerequisites.test.ts": "test/vitest/vitest.unit-fast.config.ts",
       "test/scripts/pr-ci-sweeper.reopen-timer.test.ts":
         "test/vitest/vitest.unit-fast-fake-timers.config.ts",
       "test/scripts/docker-build-helper.test.ts": "test/vitest/vitest.tooling-docker.config.ts",

@@ -1,3 +1,5 @@
+/** @datadog {"unskippable": true} */
+// CI requires the proof artifacts produced by this suite on every run.
 import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";

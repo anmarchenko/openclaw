@@ -16,7 +16,9 @@ Existing singleton proof, contract, and platform boundaries use a one-runner ddt
 
 Bun and dual-runtime routing retain their existing runner because ddtest's JavaScript integration supports Node, not Bun. Swift, Android, custom QA process verifiers, lint, builds, and security audits retain their existing tools. Frozen target fallbacks remain explicit compatibility paths.
 
-The former `scripts/ci-ddtest-tooling.mts` adapter and paired `ddtest-tooling.yml` workflow are removed. Native ddtest invokes the existing `scripts/run-vitest.mjs` launcher on current POSIX checkouts so OpenClaw retains its compiled subprocess ownership, private temporary directory, and launcher watchdog. Windows and the exact frozen compatibility target retain direct Vitest execution. Vitest test/hook deadlines and GitHub job deadlines remain. Explicit file selections are positional arguments to `ddtest plan`; workers consume the saved plan with `ddtest run`.
+The former `scripts/ci-ddtest-tooling.mts` adapter and paired `ddtest-tooling.yml` workflow are removed. Native ddtest invokes the existing `scripts/run-vitest.mjs` launcher on current POSIX checkouts so OpenClaw retains its compiled subprocess ownership, private temporary directory, and launcher watchdog. The launcher is executable in Git, so CI does not change tracked file modes and prebuilt UI source checks remain clean. Windows and the frozen compatibility targets without an executable launcher retain direct Vitest execution. Vitest test/hook deadlines and GitHub job deadlines remain. Explicit file selections are positional arguments to `ddtest plan`; workers consume the saved plan with `ddtest run`.
+
+The native-host, desktop-resize, and Discord attachment proofs produce artifacts required by downstream checks. Their standard Datadog `unskippable` annotations require execution while preserving those checks; these mandatory proofs are not TIA savings.
 
 ## Results
 
