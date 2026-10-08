@@ -2285,6 +2285,7 @@ jobs:
     timeout-minutes: *hosted_budget_timeout_minutes
     outputs:
       matrix: ${{ steps.ddtest-plan.outputs.matrix }}
+      has_tests: ${{ steps.ddtest-plan.outputs.has_tests }}
     env:
       COMPATIBILITY_TARGET: *historical_target
     steps:
@@ -2376,6 +2377,12 @@ jobs:
           ddtest plan --platform javascript --framework vitest \
             --command "$vitest_command run --config ui/vitest.config.ts --maxWorkers 3 --reporter=verbose --reporter=github-actions --reporter=./scripts/lib/vitest-resource-reporter.mts ${{ needs.preflight.outputs.compatibility_target == 'true' && '--testTimeout=30000 --isolate' || '' }}" \
             --min-parallelism 1 --max-parallelism 3 --ci-job-overhead 64s --strict-discovery
+          test -f .testoptimization/runner/test-files.txt
+          if [[ -s .testoptimization/runner/test-files.txt ]]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ddtest-control-ui
@@ -2385,7 +2392,7 @@ jobs:
 
   checks-ui-run:
     needs: [preflight, checks-ui]
-    if: needs.preflight.outputs.run_ui_tests == 'true' && needs.preflight.outputs.ui_test_runtime_policy != 'bun-compatible' && needs.preflight.outputs.ui_test_runtime_policy != 'dual'
+    if: needs.preflight.outputs.run_ui_tests == 'true' && needs.preflight.outputs.ui_test_runtime_policy != 'bun-compatible' && needs.preflight.outputs.ui_test_runtime_policy != 'dual' && needs.checks-ui.outputs.has_tests == 'true'
     runs-on: *ui_ddtest_runner
     timeout-minutes: *hosted_budget_timeout_minutes
     strategy:
@@ -6513,7 +6520,7 @@ jobs:
             control-ui-performance=${{ needs.control-ui-performance.result }}|${{ needs.preflight.outputs.run_control_ui_performance }}
             native-i18n=${{ needs.native-i18n.result }}|${{ needs.preflight.outputs.run_native_i18n }}
             checks-ui=${{ needs.checks-ui.result }}|${{ needs.preflight.outputs.run_ui_tests == 'true' && needs.preflight.outputs.ui_test_runtime_policy != 'bun-compatible' && needs.preflight.outputs.ui_test_runtime_policy != 'dual' }}
-            checks-ui-run=${{ needs.checks-ui-run.result }}|${{ needs.preflight.outputs.run_ui_tests == 'true' && needs.preflight.outputs.ui_test_runtime_policy != 'bun-compatible' && needs.preflight.outputs.ui_test_runtime_policy != 'dual' }}
+            checks-ui-run=${{ needs.checks-ui-run.result }}|${{ needs.preflight.outputs.run_ui_tests == 'true' && needs.preflight.outputs.ui_test_runtime_policy != 'bun-compatible' && needs.preflight.outputs.ui_test_runtime_policy != 'dual' && needs.checks-ui.outputs.has_tests == 'true' }}
             checks-ui-bun=${{ needs.checks-ui-bun.result }}|${{ needs.preflight.outputs.run_ui_tests == 'true' && (needs.preflight.outputs.ui_test_runtime_policy == 'bun-compatible' || needs.preflight.outputs.ui_test_runtime_policy == 'dual') }}
             checks-ui-e2e=${{ needs.checks-ui-e2e.result }}|${{ needs.preflight.outputs.run_ui_ddtest == 'true' && needs.preflight.outputs.compatibility_target != 'true' }}
             checks-browser-extension=${{ needs.checks-browser-extension.result }}|${{ needs.preflight.outputs.run_ui_e2e == 'true' && needs.preflight.outputs.compatibility_target != 'true' && contains(needs.preflight.outputs.ui_e2e_matrix, 'browser-extension') }}
