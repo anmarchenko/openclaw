@@ -1469,22 +1469,27 @@ jobs:
             manifest_node_args+=(--import tsx)
           fi
           node "${manifest_node_args[@]}" .ci-harness/scripts/ci-build-manifest.mjs
+          cp "$GITHUB_OUTPUT" "$RUNNER_TEMP/ci-manifest-outputs"
 
       - name: Group selected Node configurations for ddtest
         id: ddtest-cohorts
         if: steps.manifest.outputs.run_checks_node_core_nondist == 'true'
         env:
-          NODE_MATRIX: ${{ steps.manifest.outputs.checks_node_core_nondist_matrix }}
+          MANIFEST_OUTPUTS_FILE: ${{ runner.temp }}/ci-manifest-outputs
         run: |
           node --input-type=module <<'NODE'
-          import { appendFileSync } from "node:fs";
+          import { appendFileSync, readFileSync } from "node:fs";
           import { createHash } from "node:crypto";
           import { gzipSync } from "node:zlib";
           import { decodeNodeTestGroups } from "./.ci-harness/scripts/lib/ci-node-test-groups-codec.mts";
           // Retain the manifest's selections and process prerequisites. ddtest alone
           // performs test discovery, TIA selection, balancing, and runner sizing.
           const cohorts = new Map();
-          const rows = JSON.parse(process.env.NODE_MATRIX).include;
+          const prefix = "checks_node_core_nondist_matrix=";
+          const matrixOutput = readFileSync(process.env.MANIFEST_OUTPUTS_FILE, "utf8")
+            .split("\n").find((line) => line.startsWith(prefix));
+          if (!matrixOutput) throw new Error("Missing canonical Node matrix output");
+          const rows = JSON.parse(matrixOutput.slice(prefix.length)).include;
           const bunRows = rows.filter((row) => row.requires_bun === true || (row.test_runtime_policy && row.test_runtime_policy !== "node"));
           const nodeRows = rows.filter((row) => !bunRows.includes(row));
           for (const [rowIndex, row] of nodeRows.entries()) {
@@ -2485,7 +2490,8 @@ jobs:
       groups-gzip-base64: ${{ needs.preflight.outputs.ui_e2e_test_groups_gzip_base64 }}
       checkout-revision: ${{ needs.preflight.outputs.checkout_revision }}
       cache-mode: ${{ needs.preflight.outputs.cache_mode }}
-    secrets: inherit
+    secrets:
+      DD_API_KEY: ${{ secrets.DD_API_KEY }}
 
   checks-browser-extension:
     needs: [preflight]
@@ -3423,7 +3429,8 @@ jobs:
       checkout-revision: ${{ needs.preflight.outputs.checkout_revision }}
       compatibility-target: ${{ needs.preflight.outputs.compatibility_target == 'true' }}
       cache-mode: ${{ needs.preflight.outputs.cache_mode }}
-    secrets: inherit
+    secrets:
+      DD_API_KEY: ${{ secrets.DD_API_KEY }}
 
   checks-node-bun:
     permissions:

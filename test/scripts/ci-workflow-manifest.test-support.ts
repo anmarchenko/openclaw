@@ -770,7 +770,7 @@ export function runCiManifestFixture(options: {
       [
         "ddtest-cohorts",
         outputs.run_checks_node_core_nondist,
-        { NODE_MATRIX: outputs.checks_node_core_nondist_matrix },
+        { MANIFEST_OUTPUTS_FILE: path.join(root, "ci-manifest-outputs") },
       ],
       ["ddtest-ui", outputs.run_ui_e2e, { UI_E2E_MATRIX: outputs.ui_e2e_matrix }],
     ] as const) {
