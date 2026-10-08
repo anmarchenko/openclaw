@@ -3,18 +3,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 
 const roots: string[] = [];
 const workflowSha = "a".repeat(40);
 const repository = "openclaw/openclaw";
 const dispatchArgs = ["-f", "publish_scope=all-publishable", "-f", `ref=${"b".repeat(40)}`];
-const workflow = parse(readFileSync(".github/workflows/openclaw-release-publish.yml", "utf8")) as {
-  jobs: { publish: { steps: { name?: string; run?: string }[] } };
-};
-const startCorePublication = workflow.jobs.publish.steps.find(
-  (step) => step.name === "Start core npm publication",
-)?.run;
 
 type Job = { name: string; status: string; conclusion: string | null };
 type RunState = { status: string; conclusion?: string; jobs: Job[] };
@@ -24,14 +17,9 @@ const job = (name: string, conclusion: string | null, status = "completed"): Job
   status,
   conclusion,
 });
-const previewFailed = job("preview_plugin_pack (featherless, ...)", "failure");
 const previewPassed = job("preview_plugin_pack (featherless, ...)", "success");
 const publish = (conclusion: string | null, status = "completed") =>
   job("Publish plugin npm package (@openclaw/featherless)", conclusion, status);
-const failedBeforePublish: RunState[] = [
-  { status: "in_progress", jobs: [previewFailed, publish(null, "waiting")] },
-  { status: "completed", conclusion: "failure", jobs: [previewFailed, publish("skipped")] },
-];
 const succeeded: RunState[] = [
   { status: "in_progress", jobs: [previewPassed, publish(null, "in_progress")] },
   { status: "completed", conclusion: "success", jobs: [previewPassed, publish("success")] },
@@ -146,71 +134,6 @@ if (args[0] === 'run' && args[1] === 'view') {
     },
   };
 }
-
-describe("plugin npm child failure propagation", () => {
-  it.each([
-    {
-      label: "a pre-publish failure while the child is still running",
-      states: failedBeforePublish,
-    },
-    {
-      label: "a terminal pre-publish failure",
-      states: [failedBeforePublish[1]!],
-    },
-    {
-      label: "a failed job while a sibling publisher is still running",
-      states: [
-        { status: "in_progress", jobs: [previewFailed, publish(null, "in_progress")] },
-        { status: "in_progress", jobs: [previewFailed, publish(null, "in_progress")] },
-        { status: "completed", conclusion: "failure", jobs: [previewFailed, publish("success")] },
-      ],
-    },
-    {
-      label: "a failure after publication started",
-      states: [
-        {
-          status: "completed",
-          conclusion: "failure",
-          jobs: [
-            previewPassed,
-            publish("success"),
-            job("Publish plugin npm package (@openclaw/x)", "failure"),
-          ],
-        },
-      ],
-    },
-    {
-      label: "a cancelled pre-publish job",
-      states: [
-        {
-          status: "completed",
-          conclusion: "cancelled",
-          jobs: [job(previewFailed.name, "cancelled"), publish("skipped")],
-        },
-      ],
-    },
-  ])("fails the publication step without replacing $label", ({ states }) => {
-    expect(startCorePublication).toBeDefined();
-    const result = fixture({ 91: states, 92: succeeded }).run(startCorePublication!);
-    expect(result.status).toBe(1);
-    expect(result.dispatches).toHaveLength(0);
-    expect(result.stderr).toContain("Plugin npm publish failed");
-    expect(result.outputs).toBe("cleanup\n");
-    expect(result.events).toEqual([
-      ...states.map(({ status }) => `observed 91 ${status}`),
-      "cleanup",
-    ]);
-  });
-
-  it("records the successful original child before continuing publication", () => {
-    expect(startCorePublication).toBeDefined();
-    const result = fixture({ 91: succeeded }).run(startCorePublication!);
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.dispatches).toHaveLength(0);
-    expect(result.outputs).toBe("plugin_npm_completed=true\nplugin_npm_run_id=91\n");
-    expect(result.summary).toContain("plugin-npm-release.yml: success");
-  });
-});
 
 describe("waiting npm child cleanup", () => {
   it.each([

@@ -941,19 +941,6 @@ describe("scripts/openclaw-cross-os-release-checks", () => {
     expect(resolveProviderConfig("minimax", {})?.requiredCompanionPackages).toEqual([]);
   });
 
-  it("keeps release cross-OS OpenAI smoke on GPT-5.6 Luna", () => {
-    const workflow = readFileSync(
-      ".github/workflows/openclaw-cross-os-release-checks-reusable.yml",
-      "utf8",
-    );
-    const releaseChecks = readFileSync(".github/workflows/openclaw-release-checks.yml", "utf8");
-
-    expect(workflow).toContain(
-      "OPENCLAW_CROSS_OS_OPENAI_MODEL: ${{ inputs.openai_model || vars.OPENCLAW_CROSS_OS_OPENAI_MODEL || 'openai/gpt-5.6-luna' }}",
-    );
-    expect(releaseChecks).toContain("openai_model: openai/gpt-5.6-luna");
-  });
-
   it("keeps release smoke plugin allowlists focused on agent-turn essentials", () => {
     const allowlist = buildCrossOsReleaseSmokePluginAllowlist({ extensionId: "openai" });
 

@@ -1,35 +1,12 @@
 import { spawnSync } from "node:child_process";
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
-import { resolveWorkflowBash } from "../helpers/workflow-bash.js";
-
-let cachedWorkflowBash: string | undefined;
-const workflowBash = () =>
-  process.platform === "darwin" ? (cachedWorkflowBash ??= resolveWorkflowBash()) : "bash";
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const collectorPath = path.join(repoRoot, "scripts/qa/qa-profile-run-status.mjs");
-const workflow = parse(
-  readFileSync(path.join(repoRoot, ".github/workflows/qa-profile-evidence.yml"), "utf8"),
-);
-const aggregateScript = workflow.jobs.aggregate_qa_profile.steps.find(
-  (step: { name: string }) => step.name === "Aggregate validated shard evidence",
-).run as string;
-const finalGateScript = workflow.jobs.aggregate_qa_profile.steps.find(
-  (step: { name: string }) => step.name === "Fail if QA profile failed",
-).run as string;
 const targetSha = "a".repeat(40);
 const protocolSha = "b".repeat(40);
 const plan = {
@@ -200,36 +177,6 @@ describe("QA profile failure diagnostics", () => {
     },
   );
 
-  it.skipIf(process.platform === "win32").each(["missing", "timeout"])(
-    "retains status after the actual aggregate shell rejects %s evidence",
-    (failure) => {
-      const f = fixture();
-      const first = f.writeShard();
-      const original = readFileSync(first);
-      if (failure === "timeout") {
-        f.writeShard(1, { ...f.status(1), exitCode: 124, timedOut: true, timeoutOutcome: "term" });
-      }
-      const aggregate = spawnSync(workflowBash(), ["-c", aggregateScript], {
-        cwd: f.selected,
-        env: f.env,
-        encoding: "utf8",
-      });
-      expect(aggregate.status, aggregate.stderr).toBe(1);
-      expect(aggregate.stderr).toContain(
-        failure === "missing"
-          ? "Expected 2 completed status and evidence files"
-          : "Timed-out QA shard",
-      );
-      const { result } = f.collect();
-      expect(result.exitCode).toBeNull();
-      expect(result.diagnostics.stages.AGGREGATE_OUTCOME).toBe("failure");
-      expect(result.diagnostics.missingStatuses).toEqual(failure === "missing" ? ["shard-02"] : []);
-      expect(result.timedOut).toBe(failure === "timeout" ? true : null);
-      expect(readFileSync(first)).toEqual(original);
-      expect(readdirSync(f.output)).toEqual(["qa-profile-run-status.json"]);
-    },
-  );
-
   it("retains unknown outcomes when no download directory exists", () => {
     const { result } = fixture().collect({
       DOWNLOAD_OUTCOME: "failure",
@@ -264,71 +211,6 @@ describe("QA profile failure diagnostics", () => {
     });
   });
 
-  it.skipIf(process.platform === "win32")(
-    "refuses to execute diagnostics from an unfrozen harness",
-    () => {
-      const f = fixture();
-      const script = workflow.jobs.aggregate_qa_profile.steps.find(
-        (step: { name: string }) => step.name === "Collect QA profile diagnostics",
-      ).run;
-      const head = spawnSync("git", ["rev-parse", "HEAD"], {
-        cwd: repoRoot,
-        encoding: "utf8",
-      }).stdout.trim();
-      for (const expected of ["", "not-a-sha", "f".repeat(40), head]) {
-        const run = spawnSync(workflowBash(), ["-c", script], {
-          cwd: repoRoot,
-          env: { ...f.env, EXPECTED_WORKFLOW_SHA: expected },
-          encoding: "utf8",
-        });
-        expect(run.status, run.stderr).toBe(expected === head ? 0 : 1);
-        expect(existsSync(path.join(f.output, "qa-profile-run-status.json"))).toBe(
-          expected === head,
-        );
-      }
-    },
-  );
-
-  it.skipIf(process.platform === "win32").each([null, {}, [], "invalid", 1, true])(
-    "preserves the previous jq admission for shard shape %#",
-    (shard) => {
-      const f = fixture();
-      const statusPath = f.writeShard(0, { ...f.status(), shard });
-      const admission = aggregateScript
-        .split("\n")
-        .find((line) => line.includes("map(.shard + {})"));
-      expect(admission).toBeDefined();
-      for (const code of ["0", "1", "oops"]) {
-        const env = { ...f.env, qa_exit_code: code, STATUS_PATH: statusPath };
-        const prior = spawnSync(
-          "jq",
-          [
-            "-s",
-            "--argjson",
-            "exitCode",
-            code,
-            "map(.shard + {exitCode, timedOut, timeoutOutcome, completedAt})",
-            statusPath,
-          ],
-          { env, encoding: "utf8" },
-        );
-        const current = spawnSync(
-          workflowBash(),
-          ["-c", `status_paths=("$STATUS_PATH")\n${admission}`],
-          {
-            env,
-            encoding: "utf8",
-          },
-        );
-        expect(current.status).toBe(prior.status);
-        expect(current.status === 0).toBe(
-          code !== "oops" &&
-            (shard === null || (!Array.isArray(shard) && typeof shard === "object")),
-        );
-      }
-    },
-  );
-
   it.each([
     [0, false, "none"],
     [1, false, "none"],
@@ -350,23 +232,6 @@ describe("QA profile failure diagnostics", () => {
       expect(result).toMatchObject({ exitCode: code, timedOut, timeoutOutcome });
       expect(result.shards[0]).toMatchObject({ exitCode: code, timedOut, timeoutOutcome });
       expect(result.diagnostics.issues).toEqual([]);
-    },
-  );
-
-  it.skipIf(process.platform === "win32").each(["0", "1", "124", "137"])(
-    "does not change the existing allow_failures decision for exit %s",
-    (code) => {
-      for (const allowFailures of ["false", "true"]) {
-        const f = fixture();
-        f.writeShard();
-        f.writeShard(1);
-        f.collect({ QA_EXIT_CODE: code });
-        const gate = spawnSync(workflowBash(), ["-c", finalGateScript], {
-          env: { ...f.env, QA_EXIT_CODE: code, ALLOW_FAILURES: allowFailures },
-          encoding: "utf8",
-        });
-        expect(gate.status).toBe(allowFailures === "true" ? 0 : Number(code));
-      }
     },
   );
 
@@ -462,31 +327,4 @@ describe("QA profile failure diagnostics", () => {
     expect(first.result.diagnostics.issues).toEqual([{ source: null, reason: "artifact-limit" }]);
     expect(Buffer.byteLength(first.text)).toBeLessThan(2048);
   });
-
-  it.skipIf(process.platform === "win32")(
-    "cannot be consumed as qualified maturity evidence",
-    () => {
-      const f = fixture();
-      f.collect();
-      const consumerDirectory = path.join(f.root, ".artifacts/maturity-evidence");
-      mkdirSync(consumerDirectory, { recursive: true });
-      copyFileSync(
-        path.join(f.output, "qa-profile-run-status.json"),
-        path.join(consumerDirectory, "qa-profile-run-status.json"),
-      );
-      const consumer = parse(
-        readFileSync(path.join(repoRoot, ".github/workflows/maturity-scorecard.yml"), "utf8"),
-      );
-      const script = consumer.jobs.publish.steps.find(
-        (step: { name: string }) => step.name === "Require one QA evidence file",
-      ).run;
-      const run = spawnSync(workflowBash(), ["-c", script], {
-        cwd: f.root,
-        env: f.env,
-        encoding: "utf8",
-      });
-      expect(run.status, run.stderr).toBe(1);
-      expect(run.stderr).toContain("Expected exactly one aggregate QA evidence manifest, found 0");
-    },
-  );
 });

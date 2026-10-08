@@ -26,7 +26,7 @@ vi.mock(import("../../scripts/lib/ci-node-test-plan.mts"), async (importOriginal
         includePatterns: [
           "packages/media-core/src/mime.test.ts",
           "packages/markdown-core/src/render-aware-chunking.test.ts",
-          "test/scripts/ci-workflow-guards.test.ts",
+          "test/scripts/check.test.ts",
         ],
       };
       return profile === "hybrid-hosted"

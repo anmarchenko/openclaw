@@ -22,4 +22,6 @@ The former `scripts/ci-ddtest-tooling.mts` adapter and paired `ddtest-tooling.ym
 
 Report the main CI run against PR #2 only. Include planning jobs and setup time in aggregate runner duration. Separate queue-inclusive wall time from assigned runner time, and compare equivalent completed workloads. Jobs that never acquired runners are not savings. Backend omissions made during ddtest planning and tracer-reported TIA events are distinct measurements.
 
+Workflow test suites, workflow wiring assertions, and their unused mocks are removed at the user’s request. Application and script behavior tests remain. Account for this workload reduction separately from ddtest when comparing with PR #2.
+
 The migration must complete hosted CI before runtime or cost improvements can be claimed. Browser and separately spawned Gateway/CLI subprocess coverage remains incomplete; an enabled TIA tag alone does not establish safe skipping.

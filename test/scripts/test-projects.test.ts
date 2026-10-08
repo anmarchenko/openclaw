@@ -499,13 +499,6 @@ describe("scripts/test-projects changed-target routing", () => {
 
   it.each([
     {
-      changedPath: ".github/workflows/plugin-npm-release.yml",
-      exactTargets: [
-        "test/scripts/plugin-npm-extended-stable-workflow.test.ts",
-        "test/scripts/plugin-release-git-lifecycle.test.ts",
-      ],
-    },
-    {
       changedPath: ".github/actions/setup-node-env/action.yml",
       exactTargets: [
         "test/scripts/setup-node-env-bun.test.ts",
@@ -525,7 +518,6 @@ describe("scripts/test-projects changed-target routing", () => {
           expect(targets).toContain(exactTarget);
         }
         expect(targets).toContain("test/scripts/direct-workflow-reference.test.ts");
-        expect(targets).toContain("test/scripts/ci-workflow-guards.test.ts");
       },
     );
   });
@@ -2020,7 +2012,6 @@ describe("scripts/test-projects changed-target routing", () => {
       "test/scripts/docker-build-helper.test.ts",
       "test/scripts/docker-e2e-plan.test.ts",
       "test/scripts/codex-media-path-client.test.ts",
-      "test/scripts/package-acceptance-workflow.test.ts",
       "test/scripts/live-plugin-tool-assertions.test.ts",
       "test/scripts/plugin-binding-command-escape-docker.test.ts",
     ]);
@@ -2453,7 +2444,7 @@ describe("scripts/test-projects changed-target routing", () => {
     );
   });
 
-  describe("Kova schema selection", () => {
+  describe("Schema import-graph selection", () => {
     const wrapper = "src/config/zod-schema.agent-defaults.ts";
     const base = "src/config/zod-schema.agent-defaults-base.ts";
     const sibling = "src/config/zod-schema.agent-defaults.test.ts";
@@ -2461,7 +2452,7 @@ describe("scripts/test-projects changed-target routing", () => {
     const wrapperConsumer = "src/config/wrapper-consumer.test.ts";
     const unrelated = "src/config/unrelated.ts";
     const unrelatedTest = "src/config/unrelated.test.ts";
-    const kova = "test/scripts/openclaw-performance-workflow.test.ts";
+    const tooling = "test/scripts/check.test.ts";
     const changed = ["--changed", "origin/main"];
     const normal = [baseConsumer, sibling, wrapperConsumer];
     const files = {
@@ -2472,18 +2463,18 @@ describe("scripts/test-projects changed-target routing", () => {
       [wrapperConsumer]: 'import "./zod-schema.agent-defaults.js";\n',
       [unrelated]: "export const unrelated = true;\n",
       [unrelatedTest]: 'import "./unrelated.js";\n',
-      [kova]: "export {};\n",
+      [tooling]: "export {};\n",
     };
     it.each<[string, string[], string[], string[], boolean, boolean]>([
-      ["changed wrapper", changed, [wrapper], [sibling, kova], false, false],
-      ["explicit schemas", [base, wrapper, kova, base], [], [...normal, kova], false, false],
-      ["CI wrapper", changed, [wrapper], [sibling, wrapperConsumer, kova], false, true],
+      ["changed wrapper", changed, [wrapper], [sibling], false, false],
+      ["explicit schemas", [base, wrapper, tooling, base], [], [...normal, tooling], false, false],
+      ["CI wrapper", changed, [wrapper], [sibling, wrapperConsumer], false, true],
       ["unrelated source", changed, [unrelated], [unrelatedTest], false, false],
       ["changed watch", ["--watch", ...changed], [base], normal, true, false],
       ["explicit watch", ["--watch", wrapper], [], [sibling], true, false],
-      ["disabled watch", ["--watch", "false", wrapper], [], [sibling, kova], false, false],
-      ["equals watch", ["--watch=false", wrapper], [], [sibling, kova], false, false],
-      ["negated watch", ["--no-watch", wrapper], [], [sibling, kova], false, false],
+      ["disabled watch", ["--watch", "false", wrapper], [], [sibling], false, false],
+      ["equals watch", ["--watch=false", wrapper], [], [sibling], false, false],
+      ["negated watch", ["--no-watch", wrapper], [], [sibling], false, false],
     ])("preserves owner selection for %s", (_name, args, paths, expected, watchMode, ci) => {
       withTinyGitRepo(files, (cwd) => {
         const options = ci
@@ -2497,7 +2488,7 @@ describe("scripts/test-projects changed-target routing", () => {
         expect(
           plans.find((plan) => plan.config === "test/vitest/vitest.tooling.config.ts")
             ?.includePatterns,
-        ).toEqual(expected.includes(kova) ? [kova] : undefined);
+        ).toEqual(expected.includes(tooling) ? [tooling] : undefined);
         if (watchMode) {
           expectSingleVitestRunPlan(plans, {
             config: "test/vitest/vitest.runtime-config.config.ts",
@@ -2510,14 +2501,16 @@ describe("scripts/test-projects changed-target routing", () => {
     });
     it("rejects explicitly mixed watch suites", () => {
       withTinyGitRepo(files, (cwd) => {
-        expect(() => buildVitestRunPlans(["--watch", wrapper, kova], cwd)).toThrow(
+        expect(() => buildVitestRunPlans(["--watch", wrapper, tooling], cwd)).toThrow(
           "watch mode with mixed test suites is not supported",
         );
       });
     });
-    it("does not admit unmatched watch sources through Kova", () => {
-      withTinyGitRepo({ [base]: "export {};\n", [kova]: "export {};\n" }, (cwd) => {
-        expect(findUnmatchedExplicitTestTargets([base], cwd)).toEqual([]);
+    it("does not admit unmatched watch sources through an unrelated tooling test", () => {
+      withTinyGitRepo({ [base]: "export {};\n", [tooling]: "export {};\n" }, (cwd) => {
+        expect(findUnmatchedExplicitTestTargets([base], cwd)).toEqual([
+          expect.objectContaining({ target: base, reason: "target-matched-no-test-files" }),
+        ]);
         expect(findUnmatchedExplicitTestTargets(["--watch", base], cwd)).toEqual([
           expect.objectContaining({ target: base, reason: "target-matched-no-test-files" }),
         ]);
@@ -2528,7 +2521,7 @@ describe("scripts/test-projects changed-target routing", () => {
         const paths = [base, "unknown/file.txt"];
         expect(resolveChangedTestTargetPlan(paths, { cwd })).toEqual({
           mode: "targets",
-          targets: [kova],
+          targets: [],
           skippedBroadFallbackPaths: paths,
         });
         expect(resolveChangedTestTargetPlan(paths, { cwd, broad: true })).toEqual({
@@ -2751,11 +2744,7 @@ describe("scripts/test-projects changed-target routing", () => {
     expect(plan).toEqual({
       mode: "targets",
       skippedBroadFallbackPaths: ["src/gateway/server.impl.ts"],
-      targets: [
-        "test/scripts/package-acceptance-workflow.test.ts",
-        "test/scripts/check.test.ts",
-        "test/scripts/pr-gate-base.test.ts",
-      ],
+      targets: ["test/scripts/check.test.ts", "test/scripts/pr-gate-base.test.ts"],
     });
     expect(repoSourceReads).toEqual([]);
   });

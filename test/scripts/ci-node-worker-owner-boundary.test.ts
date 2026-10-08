@@ -3,17 +3,22 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect } from "vitest";
 import { shouldUseDetachedVitestProcessGroup } from "../../scripts/vitest-process-group.mts";
-import { readCiWorkflow, type WorkflowStep } from "./ci-workflow.test-support.js";
 import { createWorkerArtifactTest, writeFixture } from "./vitest-worker-artifacts.test-support.js";
 
 const it = createWorkerArtifactTest();
 const root = process.cwd();
-// ci.yml's trusted frozen-target checkout is intentionally this lightweight closure.
-const checkout = Object.values(readCiWorkflow().jobs)
-  .flatMap((job) => (job as { steps?: WorkflowStep[] }).steps ?? [])
-  .find((step: WorkflowStep) => step.name === "Checkout trusted Node shard runner");
-const sparseFiles = String(checkout?.with?.["sparse-checkout"]).trim().split(/\s+/u);
-expect(sparseFiles[0]).toBe("scripts/ci-run-node-test-shard.mts");
+// Minimal historical checkout fixture for the runner's compatibility boundary.
+const sparseFiles = [
+  "scripts/ci-run-node-test-shard.mts",
+  "scripts/lib/ci-node-test-groups-codec.mts",
+  "scripts/lib/direct-run.mjs",
+  "scripts/lib/local-check-runtime.mts",
+  "scripts/lib/numeric-options.mjs",
+  "scripts/lib/vitest-plan-scheduling.mts",
+  "scripts/lib/vitest-local-scheduling.mts",
+  "scripts/lib/arg-utils.mts",
+  "scripts/lib/arg-utils.runtime.mjs",
+];
 
 it.for([
   "frozen",
@@ -22,7 +27,7 @@ it.for([
   "modern-corrupt",
   "modern-unshared",
   "frozen-with-own-runner",
-])("preserves the explicit workflow-owned runner boundary (%s)", (mode, { workerArtifacts }) =>
+])("preserves the explicit historical runner boundary (%s)", (mode, { workerArtifacts }) =>
   workerArtifacts.fixtureLifetime.run(async () => {
     const { node } = workerArtifacts.createFixtureCommands();
     const directory = workerArtifacts.fixtureDirectory();

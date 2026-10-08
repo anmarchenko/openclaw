@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parse } from "yaml";
 import {
   DEFAULT_RESOURCE_LIMITS,
   resolveDockerE2ePlan,
@@ -64,7 +63,6 @@ const limits = {
 const posixIt = process.platform === "win32" ? it.skip : it;
 const { createTempDir } = createScriptTestHarness();
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-const LIVE_E2E_WORKFLOW = ".github/workflows/openclaw-live-and-e2e-checks-reusable.yml";
 type DockerCandidatePlan = Parameters<typeof validateDockerCandidateEnvironment>[1];
 
 function candidatePlan({
@@ -107,20 +105,6 @@ function writeFrozenScenarioContract(root: string, scenarios: string[]): string 
     `process.stdout.write(${JSON.stringify(`${JSON.stringify(scenarios)}\n`)});\n`,
   );
   return assertionsFile;
-}
-
-function expectDeclaredDispatchInputs(command: string): void {
-  const workflow = parse(readFileSync(LIVE_E2E_WORKFLOW, "utf8")) as {
-    on?: { workflow_dispatch?: { inputs?: Record<string, unknown> } };
-  };
-  const declared = new Set(Object.keys(workflow.on?.workflow_dispatch?.inputs ?? {}));
-  const emitted = [...command.matchAll(/(?:^|\s)-f\s+([a-z0-9_]+)=/gu)].flatMap((match) =>
-    match[1] === undefined ? [] : [match[1]],
-  );
-  expect(emitted.length).toBeGreaterThan(0);
-  for (const input of emitted) {
-    expect(declared.has(input), `undeclared workflow_dispatch input: ${input}`).toBe(true);
-  }
 }
 
 function activePool({
@@ -696,7 +680,6 @@ describe("scripts/test-docker-all scheduler", () => {
     expect(localCommand).not.toContain("docker_e2e_bare_image=");
     expect(localCommand).not.toContain("docker_e2e_functional_image=");
     expect(localCommand).not.toContain("shared_image_policy=existing-only");
-    expectDeclaredDispatchInputs(localCommand);
 
     const registryCommand = githubWorkflowRerunCommand(["install-e2e"], "b".repeat(40), {
       OPENCLAW_DOCKER_E2E_BARE_IMAGE: "ghcr.io/openclaw/openclaw-docker-e2e-bare:test",
@@ -716,7 +699,6 @@ describe("scripts/test-docker-all scheduler", () => {
     );
     expect(registryCommand).toContain("shared_image_policy=existing-only");
     expect(registryCommand).toContain("allow_unreleased_changelog=true");
-    expectDeclaredDispatchInputs(registryCommand);
   });
 
   it("preserves ephemeral package intent in generated summary and failure reruns", async () => {

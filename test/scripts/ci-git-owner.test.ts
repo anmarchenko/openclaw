@@ -7,8 +7,7 @@ import { expectDefined } from "@openclaw/normalization-core/expect";
 import { beforeAll, expect, vi } from "vitest";
 import { parse } from "yaml";
 import { createCommandTest } from "../helpers/command-fixture.js";
-import { readCiCheckoutStep, renderGitTestClock } from "./ci-checkout.test-support.js";
-import { runCiGitStep, type FetchResult } from "./ci-git-owner.test-support.js";
+import { runCiGitStep } from "./ci-git-owner.test-support.js";
 import { runDependencyFreePreflight } from "./ci-preflight-dependencies.test-support.js";
 
 // Each case owns its checkout and process trees. Overlap their real timeout and
@@ -518,6 +517,7 @@ releasePolicyIt.each([
   "retries a drained release ancestry fetch after $label",
   async ({ failure }) => {
     const report = await runCiGitStep({
+      action: "git-owner",
       policy: failure === "hang" ? fastReleaseAncestryPolicy : releaseAncestryPolicy,
       env: {
         RELEASE_ANCESTRY_MODE: "merge-base",
@@ -545,6 +545,7 @@ releasePolicyIt(
   "preserves the final release ancestry Git failure after bounded retries",
   async () => {
     const report = await runCiGitStep({
+      action: "git-owner",
       policy: releaseAncestryPolicy,
       env: {
         RELEASE_ANCESTRY_MODE: "merge-base",
@@ -562,6 +563,7 @@ releasePolicyIt(
 
 releasePolicyIt("returns 124 when the release ancestry total budget is exhausted", async () => {
   const report = await runCiGitStep({
+    action: "git-owner",
     policy: expiredReleaseAncestryPolicy,
     env: {
       RELEASE_ANCESTRY_MODE: "merge-base",
@@ -635,103 +637,12 @@ it("materializes an executable preflight manifest from the workflow revision", a
   expect(fixtureGit(workspace, ["status", "--porcelain"])).toBe("");
 });
 
-// Ask Bash to decode the source independently of the generator and fixture codec.
-it("keeps exactly one byte-identical generated CI owner", () => {
-  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
-  const source = readFileSync(".github/actions/git-owner/owner.py", "utf8");
-  const projections = [
-    ...workflow.matchAll(/^ {10}run_owner '[\s\S]*?^ {10}# End generated CI Git owner\.$/gmu),
-  ];
-  expect(projections).toHaveLength(1);
-  for (const [projection] of projections) {
-    const result = spawnSync("bash", ["--noprofile", "--norc", "-e"], {
-      encoding: "utf8",
-      input: "run_owner() { printf '%s' \"$1\"; }\n" + projection.replace(/^ {10}/gmu, ""),
-    });
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe(source);
-  }
-});
-
-it("launches the Windows checkout owner below the native command-line limit", () => {
-  const root = mkdtempSync(join(tmpdir(), "ci-owner-windows-argv "));
-  const bin = join(root, "bin");
-  const runnerTemp = join(root, "runner temp");
-  mkdirSync(bin);
-  mkdirSync(runnerTemp);
-  const python = join(bin, "python");
-  writeFileSync(python, "#!/usr/bin/env bash\nprintf '%s\\0' \"$@\"\n");
-  chmodSync(python, 0o755);
-  try {
-    const checkout = readCiCheckoutStep("checks-windows").run;
-    const owner =
-      renderGitTestClock(readFileSync(".github/actions/git-owner/owner.py", "utf8")) +
-      `\n#${"x".repeat(32_768)}\n`;
-    const source = checkout.replace(
-      /^run_owner '[\s\S]*?'\n# End generated CI Git owner\.$/mu,
-      () => `run_owner '${owner.replaceAll("'", "'\\''")}'\n# End generated CI Git owner.`,
-    );
-    expect(source).not.toBe(checkout);
-    const result = spawnSync("bash", ["--noprofile", "--norc", "-e"], {
-      // Git for Windows prepends its tools; restore the Python probe boundary inside Bash.
-      input:
-        (process.platform === "win32"
-          ? 'export PATH="$(cygpath -u "$OWNER_PROBE_BIN"):$PATH"\n'
-          : "") + source,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: `${bin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
-        OWNER_PROBE_BIN: bin,
-        RUNNER_OS: "Windows",
-        RUNNER_TEMP: runnerTemp.replaceAll("\\", "/"),
-      },
-    });
-    expect(result.status, result.stderr).toBe(0);
-    const args = result.stdout.split("\0").slice(0, -1);
-    expect(args).toEqual(["-I", "-S", `${runnerTemp.replaceAll("\\", "/")}/ci-git-owner.py`]);
-    expect(args.join(" ").length).toBeLessThan(1_024);
-    const materialized = readFileSync(join(runnerTemp, "ci-git-owner.py"), "utf8");
-    expect(materialized).toBe(owner);
-    // Fixed padding keeps the oversized-source regression meaningful if the owner shrinks.
-    expect(materialized.length + (materialized.match(/"/gu)?.length ?? 0) + 2).toBeGreaterThan(
-      32_767,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-it("binds read-only checkout authentication only to the workflow repository", () => {
-  const workflow = parse(readFileSync(".github/workflows/ci.yml", "utf8")) as {
-    permissions: Record<string, string>;
-    jobs: Record<
-      string,
-      { permissions?: Record<string, string>; steps?: { env?: Record<string, string> }[] }
-    >;
-  };
-  let ownedCheckouts = 0;
-  for (const job of Object.values(workflow.jobs)) {
-    for (const step of job.steps ?? []) {
-      if (!step.env?.CHECKOUT_REPO) {
-        continue;
-      }
-      ownedCheckouts++;
-      const sameRepository = step.env.CHECKOUT_REPO === "${{ github.repository }}";
-      expect(step.env.CHECKOUT_TOKEN).toBe(sameRepository ? "${{ github.token }}" : undefined);
-      if (sameRepository) {
-        expect((job.permissions ?? workflow.permissions).contents).toBe("read");
-      }
-    }
-  }
-  expect(ownedCheckouts).toBeGreaterThan(0);
-});
-
 it.each([false, true])("preserves linked Git metadata (reclaim locks=%s)", async (reclaimLocks) => {
   const invocation = reclaimLocks
     ? 'run_git(os.getcwd(), "fetch", "origin", "fixture", reclaim_locks=True)'
     : 'print(git_output(os.getcwd(), "rev-parse", "HEAD"), end="")';
   const report = await runCiGitStep({
+    action: "git-owner",
     fetchResults: [],
     policy:
       policyImport +
@@ -756,18 +667,6 @@ finally:
   if (!reclaimLocks) {
     expect(report.output).toBe(`${head}${EOL}`);
   }
-});
-
-it("reclaims failed supplemental-fetch locks before the next attempt", async () => {
-  const report = await runCiGitStep({
-    job: "checks-fast-core",
-    step: "Prepare release-gate ratchet merge tree",
-    fetchResults: ["hang", 0],
-    prepare: true,
-  });
-  expect(report.code, report.output).toBe(0);
-  expect(report.fetches).toHaveLength(2);
-  expect(report.readyAttempts).toEqual([1, 2]);
 });
 
 linuxIt(
@@ -1108,6 +1007,7 @@ linuxIt(
   "fences later calls even if a trusted policy accidentally catches an ownership failure",
   async () => {
     const report = await runCiGitStep({
+      action: "git-owner",
       fetchResults: ["cleanup-failure"],
       policy:
         policyImport +
@@ -1137,6 +1037,7 @@ linuxIt.each(
   async ({ inlinePolicy, failure }) => {
     const output = " \tpath\0another path\r\n\n\n";
     const report = await runCiGitStep({
+      action: "git-owner",
       fetchResults: [failure],
       inlinePolicy,
       revisions: { HEAD: output.slice(0, -1) },
@@ -1177,6 +1078,7 @@ linuxIt.each([0, 23, "cleanup-failure"] as const)(
   async (code) => {
     const output = `${head}\trefs/heads/main\n`;
     const report = await runCiGitStep({
+      action: "git-owner",
       policy:
         policyImport +
         'import sys\nsys.stdout.write(git_output(os.getcwd(), "ls-remote", "origin", "refs/heads/main"))\n',
@@ -1198,315 +1100,6 @@ linuxIt.each([0, 23, "cleanup-failure"] as const)(
 );
 
 const posixIt = it.skipIf(process.platform === "win32").concurrent;
-const auditFiles = [".pre-commit-config.yaml", ".github/zizmor.yml"];
-const branch = "refs/remotes/origin/main";
-const auditObjects = Object.fromEntries(
-  [base, branch].flatMap((ref) =>
-    auditFiles.map((file) => [
-      `${ref}:${file}`,
-      {
-        text: `# ${ref}\n${file === auditFiles[0] ? "config: .github/zizmor.yml" : "rules: {}"}\n`,
-      },
-    ]),
-  ),
-);
-function requireAuditObject(ref: string, file: string) {
-  const object = auditObjects[`${ref}:${file}`];
-  if (!object) {
-    throw new Error(`Missing audit fixture object: ${ref}:${file}`);
-  }
-  return object;
-}
-const sanity = (options: Omit<Parameters<typeof runCiGitStep>[0], "workflow">) =>
-  runCiGitStep({
-    ...options,
-    workflow: "workflow-sanity",
-    objects: { ...auditObjects, ...options.objects },
-  });
-
-type SanityFetchCase = {
-  label: string;
-  fetchResults: FetchResult[];
-  baseAvailableAfter?: number;
-  refs: string[];
-  warnings: number;
-  code: number;
-};
-const sanityFetchCases: SanityFetchCase[] = [
-  {
-    label: "already present",
-    fetchResults: [],
-    baseAvailableAfter: 0,
-    refs: [],
-    warnings: 0,
-    code: 0,
-  },
-  { label: "exact success", fetchResults: [0], refs: [base], warnings: 0, code: 0 },
-  ...[125, 143].map((code) => ({
-    label: `ordinary ${code}`,
-    fetchResults: [code, 0],
-    refs: [base, "refs/heads/main"],
-    warnings: 0,
-    code: 0,
-  })),
-  ...[124, 137].flatMap((code) => [
-    {
-      label: `ordinary ${code} retry`,
-      fetchResults: [code, 0],
-      refs: [base, base],
-      warnings: 1,
-      code: 0,
-    },
-    {
-      label: `ordinary ${code} exhaustion`,
-      fetchResults: Array(6).fill(code),
-      refs: [...Array(3).fill(base), ...Array(3).fill("refs/heads/main")],
-      warnings: 4,
-      code,
-    },
-  ]),
-  {
-    label: "FetchTimeout exhaustion then branch",
-    fetchResults: ["hang", "hang", "hang", 0],
-    refs: [base, base, base, "refs/heads/main"],
-    warnings: 2,
-    code: 0,
-  },
-  {
-    label: "FetchTimeout both refs exhausted",
-    fetchResults: Array(6).fill("hang"),
-    refs: [...Array(3).fill(base), ...Array(3).fill("refs/heads/main")],
-    warnings: 4,
-    code: 124,
-  },
-];
-
-posixIt.each(sanityFetchCases)(
-  "workflow sanity preserves fetch policy: $label",
-  async ({ fetchResults, baseAvailableAfter, refs, warnings, code }) => {
-    const report = await sanity({ fetchResults, baseAvailableAfter });
-    expect(report.code, report.output).toBe(code);
-    expect(report.fetches.map(({ args }) => args)).toEqual(
-      refs.map((ref) => [
-        "fetch",
-        "--no-tags",
-        "--depth=1",
-        "origin",
-        `+${ref}:${ref === base ? "refs/remotes/origin/security-base" : branch}`,
-      ]),
-    );
-    expect(
-      report.fetches.every(
-        ({ configuration, cwd }) => configuration?.length === 0 && cwd === report.workspace,
-      ),
-    ).toBe(true);
-    expect(report.output.match(/timed out on attempt [12]; retrying/gu) ?? []).toHaveLength(
-      warnings,
-    );
-    expect(
-      report.commands.filter(({ args }) => args[0] === "cat-file").map(({ args }) => args),
-    ).toEqual([
-      ["cat-file", "-e", `${base}^{commit}`],
-      ...(code === 0 ? auditFiles.map((file) => ["cat-file", "-e", `${base}:${file}`]) : []),
-    ]);
-    expect(report.githubEnv).toBe(
-      code === 0 ? `PRE_COMMIT_CONFIG_PATH=${report.runnerTemp}/pre-commit-base.yaml\n` : "",
-    );
-    if (code === 0) {
-      expect(report.trustedConfig).toBe(
-        `# ${base}\nconfig: ${report.runnerTemp}/zizmor-base.yml\n`,
-      );
-      expect(report.trustedZizmor).toBe(`# ${base}\nrules: {}\n`);
-    } else {
-      expect(report.trustedConfig).toBe("");
-      expect(report.trustedZizmor).toBe("");
-    }
-  },
-  55_000,
-);
-
-posixIt.each([
-  { label: "30-second fetch deadline", fetchResults: ["hang", 0], warnings: 1 },
-  { label: "five-second backoff", fetchResults: [137, 0], warnings: 1 },
-] as const)(
-  "workflow sanity retains $label",
-  async ({ fetchResults, warnings }) => {
-    const readyFetchClockAdvanceSeconds = fetchResults[0] === "hang" ? 30 : undefined;
-    const report = await sanity({
-      fetchResults: [...fetchResults],
-      realClock: true,
-      virtualBackoff: true,
-      cooperativeTrees: true,
-      readyFetchClockAdvanceSeconds,
-    });
-    expect(report.code, report.output).toBe(0);
-    expect(report.fetches).toHaveLength(2);
-    expect(report.output.match(/; retrying/gu) ?? []).toHaveLength(warnings);
-    expect(report.fetchClockAdvancedSeconds).toBe(readyFetchClockAdvanceSeconds);
-    if (readyFetchClockAdvanceSeconds !== undefined) {
-      expect(report.output.match(/fixture fetch timeout: \d+/gu)).toEqual([
-        "fixture fetch timeout: 30",
-        "fixture fetch timeout: 30",
-      ]);
-    }
-    expect(report.output.match(/fixture backoff: \d+/gu)).toEqual(["fixture backoff: 5"]);
-    const elapsed =
-      (report.backoffClockAdvancedSeconds + (report.fetchClockAdvancedSeconds ?? 0)) * 1000;
-    expect(elapsed).toBeGreaterThanOrEqual(fetchResults[0] === "hang" ? 35_000 : 5_000);
-  },
-  55_000,
-);
-
-posixIt.each([
-  { label: "owner inspection failure", fetchResults: ["cleanup-failure"], code: 125 },
-  { label: "fetch cancellation", fetchResults: ["hang"], scenario: "cancel-SIGTERM", code: 143 },
-  {
-    label: "timeout drain cancellation",
-    fetchResults: ["hang"],
-    cancelDuringCleanup: true,
-    code: 143,
-  },
-  {
-    label: "backoff cancellation",
-    fetchResults: [124],
-    cancelDuringBackoff: true,
-    realClock: true,
-    cooperativeTrees: true,
-    code: 143,
-  },
-  { label: "missing owner", fetchResults: [], setupFailure: "owner", code: 2 },
-  {
-    label: "missing Python interpreter",
-    fetchResults: [],
-    setupFailure: "python",
-    code: "launcher",
-  },
-  { label: "Git spawn failure", fetchResults: [], setupFailure: "git", code: 125 },
-] satisfies (Partial<Parameters<typeof runCiGitStep>[0]> & {
-  label: string;
-  code: number | "launcher";
-  fetchResults: FetchResult[];
-})[])(
-  "workflow sanity never recovers or publishes after $label",
-  async ({ label: _label, code, ...options }) => {
-    const report = await sanity(options);
-    if (code === "launcher") {
-      // Bash versions differ for a found executable whose interpreter is missing.
-      expect([126, 127], report.output).toContain(report.code);
-    } else {
-      expect(report.code, report.output).toBe(code);
-    }
-    expect(report.fetches).toHaveLength(options.fetchResults.length);
-    expect(report.commands.filter(({ args }) => args[0] === "show")).toEqual([]);
-    expect(report.githubEnv).toBe("");
-    expect(report.trustedConfig).toBe("");
-    expect(report.trustedZizmor).toBe("");
-    expect(report.cancelledDuringCleanup).toBe(Boolean(options.cancelDuringCleanup));
-    expect(report.boundaries.some(({ name }) => name === "backoff-cancel")).toBe(
-      Boolean(options.cancelDuringBackoff),
-    );
-  },
-  55_000,
-);
-
-posixIt.each([[0], [1]].map((missing) => ({ missing })))(
-  "workflow sanity selects missing exact configs independently ($missing)",
-  async ({ missing }) => {
-    const report = await sanity({
-      fetchResults: [],
-      baseAvailableAfter: 0,
-      objects: Object.fromEntries(
-        missing.map((index) => {
-          const file = auditFiles[index];
-          if (!file) {
-            throw new Error(`Missing audit fixture file at index ${index}`);
-          }
-          return [
-            `${base}:${file}`,
-            { ...requireAuditObject(base, file), probe: index === 0 ? 125 : 143 },
-          ];
-        }),
-      ),
-    });
-    expect(report.code, report.output).toBe(0);
-    expect(report.fetches).toEqual([]);
-    expect(
-      report.commands.filter(({ args }) => args[0] === "show").map(({ args }) => args),
-    ).toEqual(
-      auditFiles.map((file, index) => [
-        "show",
-        `${missing.includes(index) ? branch : base}:${file}`,
-      ]),
-    );
-    for (const index of missing) {
-      expect(report.output).toContain(
-        `Base SHA ${base} does not expose ${auditFiles[index]}; using origin/main instead.`,
-      );
-    }
-    expect(report.githubEnv).toBe(
-      `PRE_COMMIT_CONFIG_PATH=${report.runnerTemp}/pre-commit-base.yaml\n`,
-    );
-  },
-  55_000,
-);
-
-posixIt.each(
-  auditFiles.flatMap((file) => [
-    { file, fallback: false },
-    { file, fallback: true },
-  ]),
-)(
-  "workflow sanity rejects partial $file show (fallback=$fallback)",
-  async ({ file, fallback }) => {
-    const report = await sanity({
-      fetchResults: [],
-      baseAvailableAfter: 0,
-      objects: {
-        [`${base}:${file}`]: { text: "partial\n", probe: fallback ? 1 : 0, code: 23 },
-        [`${branch}:${file}`]: { text: "partial\n", code: 23 },
-      },
-    });
-    expect(report.code, report.output).toBe(fallback ? 1 : 23);
-    expect(report.fetches).toEqual([]);
-    expect(report.githubEnv).toBe("");
-    expect(file === auditFiles[0] ? report.trustedConfig : report.trustedZizmor).toBe("");
-    const shows = report.commands
-      .filter(({ args }) => args[0] === "show")
-      .map(({ args }) => args.at(-1));
-    expect(shows.at(-1)).toBe(`${fallback ? branch : base}:${file}`);
-    expect(shows).not.toContain(`${fallback ? base : branch}:${file}`);
-    if (fallback) {
-      expect(report.output).toContain(`Could not read ${file} from ${base} or origin/main.`);
-    }
-  },
-  55_000,
-);
-
-posixIt("workflow sanity rejects a config without the Zizmor reference", async () => {
-  const report = await sanity({
-    fetchResults: [],
-    baseAvailableAfter: 0,
-    objects: { [`${base}:${auditFiles[0]}`]: { text: "repos: []\n" } },
-    poisonPython: true,
-  });
-  expect(report.code, report.output).toBe(1);
-  expect(report.output).toContain(
-    "trusted pre-commit config does not reference .github/zizmor.yml",
-  );
-  expect(report.githubEnv).toBe("");
-});
-
-const maturityValidation = {
-  file: ".github/workflows/maturity-scorecard.yml",
-  job: "validate_selected_ref",
-  step: "Validate selected ref",
-};
-const maturityEnvironment = {
-  EXPECTED_SHA: head,
-  INPUT_REF: "main",
-  EVIDENCE_RUN_ID: "123",
-  PUBLISH_PULL_REQUEST: "true",
-};
 
 posixIt(
   "generated publisher drains real Git descendants before every continuation",
@@ -1536,15 +1129,6 @@ function publisherRun(options: Partial<Parameters<typeof runCiGitStep>[0]> = {})
     step: "Publish generated pull request",
     fetchResults: [],
     publisher: {},
-    ...options,
-  });
-}
-function maturityRun(options: Partial<Parameters<typeof runCiGitStep>[0]> = {}) {
-  return runCiGitStep({
-    workflow: maturityValidation,
-    env: maturityEnvironment,
-    fetchResults: [],
-    mergeBase: { ancestor: true, revision: head },
     ...options,
   });
 }
@@ -1649,44 +1233,6 @@ posixIt.each([
   55_000,
 );
 
-posixIt.each([0, 2, 23, 125, 143, "hang", "cleanup-failure", "cancel"] as const)(
-  "maturity branch lookup %s preserves 0/2/ordinary/fatal policy after drain",
-  async (code) => {
-    const report = await maturityRun({
-      env: { ...maturityEnvironment, INPUT_REF: "release/2026.8.1" },
-      gitFault: { match: "^ls-remote ", code },
-    });
-    const success = code === 0 || code === 2;
-    expect(report.code, report.output).toBe(
-      success
-        ? 0
-        : code === "hang"
-          ? 124
-          : code === "cancel"
-            ? 143
-            : code === "cleanup-failure"
-              ? 125
-              : code,
-    );
-    expect(report.fetches).toHaveLength(success ? 2 : 1);
-    if (success) {
-      expect(report.githubOutput).toContain(
-        `publication_base=${code === 0 ? "release/2026.8.1" : "main"}\n`,
-      );
-    } else {
-      expect(report.githubOutput).toBe("");
-      expect(report.githubSummary).toBe("");
-      expect(report.commands.at(-1)?.args[0]).toBe("ls-remote");
-      if (typeof code === "number" || code === "hang") {
-        expect(report.output).toContain(`(status ${code === "hang" ? 124 : code})`);
-      } else {
-        expect(report.output).not.toContain("Unable to determine");
-      }
-    }
-  },
-  55_000,
-);
-
 posixIt(
   "generated publisher retries one timed-out push under the unchanged lease",
   async () => {
@@ -1699,31 +1245,6 @@ posixIt(
     expect(report.publication?.generatedA).toBe("desired-a");
     expect(report.githubSummary).toContain("Generated pull request:");
     expect(report.output).toContain("retrying once under the same lease");
-  },
-  55_000,
-);
-
-posixIt.each(
-  [
-    { match: "^fetch ", occurrence: 1 },
-    { match: "^fetch ", occurrence: 2 },
-    { match: "^rev-parse refs/remotes", occurrence: 1 },
-    { match: "^rev-parse refs/remotes", occurrence: 2 },
-    { match: "^diff ", occurrence: 1 },
-  ].flatMap((site) =>
-    (["cleanup-failure", "cancel"] as const).map((code) => Object.assign({}, site, { code })),
-  ),
-)(
-  "maturity $code at $match/$occurrence stops before fallback/output",
-  async ({ match, occurrence, code }) => {
-    const report = await maturityRun({
-      env: { ...maturityEnvironment, EXPECTED_SHA: "" },
-      gitFault: { match, occurrence, code },
-    });
-    expect(report.code, report.output).toBe(code === "cancel" ? 143 : 125);
-    expect(report.commands.at(-1)?.args.join(" ")).toMatch(new RegExp(match));
-    expect(report.githubOutput).toBe("");
-    expect(report.githubSummary).toBe("");
   },
   55_000,
 );
@@ -1845,92 +1366,10 @@ posixIt(
   55_000,
 );
 
-posixIt.each(["main-ancestor", "release-tag", "release-branch-head", "floating-main"])(
-  "maturity preserves exact trust order, output hash bytes and fetches: %s",
-  async (reason) => {
-    const release = "release/2026.8.1";
-    const floating = reason === "floating-main";
-    const tag = reason === "release-tag";
-    const releaseBranch = reason === "release-branch-head";
-    const revision = floating ? "d".repeat(40) : head;
-    const publicationBase = releaseBranch ? release : "main";
-    const report = await maturityRun({
-      realClock: true,
-      realDrain: false,
-      env: {
-        ...maturityEnvironment,
-        EXPECTED_SHA: floating ? "" : head,
-        PUBLISH_PULL_REQUEST: tag ? "false" : "true",
-        INPUT_REF: tag ? "refs/tags/v2026.8.1" : releaseBranch ? release : "main",
-      },
-      revisions: { "refs/heads/main": revision, [`refs/heads/${release}`]: head },
-      commandResults: {
-        ...(tag || releaseBranch
-          ? { [`merge-base --is-ancestor ${head} refs/remotes/origin/main`]: { code: 1 } }
-          : {}),
-        ...(tag ? { [`tag --points-at ${head}`]: { code: 0, output: "v2026.8.1\n" } } : {}),
-      },
-    });
-    expect(report.code, report.output).toBe(0);
-    const { createHash } = await import("node:crypto");
-    const digest = createHash("sha256")
-      .update(`123\n${publicationBase}\n${revision}\n`)
-      .digest("hex")
-      .slice(0, 16);
-    expect(report.githubOutput).toBe(
-      `publication_base=${publicationBase}\npublication_head=${tag ? "" : `automation/maturity-scorecard-123-${digest}`}\nselected_revision=${revision}\ntrusted_reason=${floating ? "main-ancestor" : reason}\n`,
-    );
-    expect(report.fetches.map(({ args }) => args)).toEqual([
-      ["fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"],
-      ...(releaseBranch
-        ? [
-            [
-              "fetch",
-              "--no-tags",
-              "origin",
-              `+refs/heads/${release}:refs/remotes/origin/${release}`,
-            ],
-          ]
-        : []),
-      ...(!tag
-        ? [
-            [
-              "fetch",
-              "--no-tags",
-              "origin",
-              `+refs/heads/${publicationBase}:refs/remotes/origin/${publicationBase}`,
-            ],
-          ]
-        : []),
-    ]);
-    expect(report.commands.some(({ args }) => args[0] === "tag")).toBe(tag || releaseBranch);
-    expect(report.commands.at(-1)?.args).toEqual(
-      tag
-        ? ["tag", "--points-at", head]
-        : [
-            "diff",
-            "--quiet",
-            revision,
-            `refs/remotes/origin/${publicationBase}`,
-            "--",
-            ".",
-            ":(exclude)qa/maturity-scores.yaml",
-            ":(exclude)docs/maturity/scorecard.md",
-            ":(exclude)docs/maturity/taxonomy.md",
-          ],
-    );
-  },
-  55_000,
-);
-
-posixIt.each(
-  ["publisher", "maturity"].flatMap((surface) =>
-    (["owner", "python", "git"] as const).map((setupFailure) => ({ surface, setupFailure })),
-  ),
-)(
-  "$surface setup failure ($setupFailure) never reaches Git, GH, or outputs",
-  async ({ surface, setupFailure }) => {
-    const report = await (surface === "publisher" ? publisherRun : maturityRun)({ setupFailure });
+posixIt.each((["owner", "python", "git"] as const).map((setupFailure) => ({ setupFailure })))(
+  "publisher setup failure ($setupFailure) never reaches Git, GH, or outputs",
+  async ({ setupFailure }) => {
+    const report = await publisherRun({ setupFailure });
     expect(report.code).not.toBe(0);
     expect(report.commands).toEqual([]);
     expect(report.githubOutput).toBe("");
@@ -1969,59 +1408,6 @@ posixIt.each([125, 143])(
     ]);
     expect(report.publication?.generatedA).toBe("desired-a");
     expect(report.authHeaderPresent).toBe(false);
-  },
-  55_000,
-);
-
-posixIt.each([
-  {
-    label: "invalid expected SHA",
-    env: { EXPECTED_SHA: "bad" },
-    fetches: 0,
-    diagnostic: "expected_sha must be a full",
-  },
-  {
-    label: "mismatched expected SHA",
-    env: { EXPECTED_SHA: "f".repeat(40) },
-    fetches: 0,
-    diagnostic: "expected fffff",
-  },
-  {
-    label: "invalid evidence id",
-    env: { EVIDENCE_RUN_ID: "1x" },
-    fetches: 1,
-    diagnostic: "must be a numeric",
-  },
-  {
-    label: "publication ancestry",
-    fault: { match: "^merge-base ", occurrence: 2, code: 1 },
-    fetches: 2,
-    diagnostic: "not an ancestor of pull request base",
-  },
-  {
-    label: "changed publication inputs",
-    fault: { match: "^diff ", code: 1 },
-    fetches: 2,
-    diagnostic: "changed maturity inputs",
-  },
-  {
-    label: "failed publication diff",
-    fault: { match: "^diff ", code: 23 },
-    fetches: 2,
-    diagnostic: "",
-    code: 23,
-  },
-])(
-  "maturity rejects $label without outputs",
-  async ({ env, fault, fetches, diagnostic, code }) => {
-    const report = await maturityRun({ env: { ...maturityEnvironment, ...env }, gitFault: fault });
-    expect(report.code, report.output).toBe(code ?? 1);
-    expect(report.fetches).toHaveLength(fetches);
-    expect(report.githubOutput).toBe("");
-    expect(report.githubSummary).toBe("");
-    if (diagnostic) {
-      expect(report.output).toContain(diagnostic);
-    }
   },
   55_000,
 );

@@ -152,24 +152,6 @@ async function withArtifactFixtureCommands<T>(
 }
 
 describe("resolve-openclaw-package-candidate", () => {
-  it("preflights package-acceptance ref candidates before dependency installation", () => {
-    const script = readFileSync("scripts/resolve-openclaw-package-candidate.mts", "utf8");
-    const refPackageBuild = script.slice(
-      script.indexOf('if (options.source === "ref")'),
-      script.indexOf('} else if (options.source === "npm")'),
-    );
-    const workflow = readFileSync(".github/workflows/package-acceptance.yml", "utf8");
-
-    expect(workflow).toContain('--source "$SOURCE"');
-    expect(workflow).toContain("PACKAGE_REF: ${{ inputs.package_ref }}");
-    expect(refPackageBuild).toContain("validatePackageSourceDir(packageSource.sourceDir");
-    expect(refPackageBuild.indexOf("validatePackageSourceDir")).toBeLessThan(
-      refPackageBuild.indexOf("installPackageSourceDeps"),
-    );
-    expect(refPackageBuild).toContain('"scripts/package-openclaw-for-docker.mjs"');
-    expect(refPackageBuild).toContain('"--allow-unreleased-changelog"');
-  });
-
   it("accepts only OpenClaw release package specs for npm candidates", () => {
     for (const spec of [
       "openclaw@beta",

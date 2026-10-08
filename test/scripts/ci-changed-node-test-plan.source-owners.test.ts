@@ -296,11 +296,8 @@ describe("CI changed Node test plan", () => {
 
   it.each([
     {
-      source: "test/scripts/openclaw-npm-plugin-recovery-workflow.test.ts",
-      targets: [
-        "test/scripts/openclaw-npm-plugin-recovery-workflow.test.ts",
-        "test/scripts/test-projects.test.ts",
-      ],
+      source: "test/scripts/check.test.ts",
+      targets: ["test/scripts/check.test.ts", "test/scripts/test-projects.test.ts"],
     },
     ...[
       "extensions/codex/src/app-server/run-attempt.native-config.test.ts",
@@ -505,7 +502,6 @@ describe("CI changed Node test plan", () => {
           [
             "test/scripts/check-max-lines-ratchet.test.ts",
             "test/scripts/ci-changed-node-test-plan.test.ts",
-            "test/scripts/ci-workflow-planning.test.ts",
             ...companions,
           ],
           ["scripts", "src/scripts", "test/scripts"],
@@ -539,9 +535,6 @@ describe("CI changed Node test plan", () => {
       owner: ".github/workflows/ci.yml",
       tests: [
         "test/scripts/check-workflows.test.ts",
-        "test/scripts/ci-workflow-guards.test.ts",
-        "test/scripts/ci-workflow-planning.test.ts",
-        "test/scripts/ci-workflow-evidence.test.ts",
         "test/scripts/ci-changed-node-test-plan.test.ts",
       ],
     },
@@ -618,7 +611,7 @@ describe("CI changed Node test plan", () => {
 
   it.each([
     "src/agents/embedded-agent-runner/run/attempt-yield-handoff.test.ts",
-    "test/scripts/ci-linux-git.test.ts",
+    "test/scripts/ci-git-owner.test.ts",
   ])("retains the other test owner alongside a boundary target: %s", (companion) => {
     expect(
       createChangedNodeTestShards(["test/extension-import-boundaries.test.ts", companion]),
@@ -1053,10 +1046,7 @@ describe("CI changed Node test plan", () => {
     },
     {
       changedPath: "scripts/e2e/lib/upgrade-survivor/run.sh",
-      expected: [
-        "test/scripts/package-acceptance-workflow.test.ts",
-        "test/scripts/upgrade-survivor-missing-load-path.test.ts",
-      ],
+      expected: ["test/scripts/upgrade-survivor-missing-load-path.test.ts"],
     },
   ])(
     "retains explicit policy guards for $changedPath in automatic CI",

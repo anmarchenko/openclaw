@@ -1,19 +1,8 @@
 import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
-
-const LIVE_E2E_WORKFLOW = ".github/workflows/openclaw-live-and-e2e-checks-reusable.yml";
 const EXACT_TARGET_REF = "1".repeat(40);
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
@@ -102,20 +91,6 @@ function emittedWorkflowCommands(stdout: string): string[] {
     .split(/\r?\n/u)
     .filter((line) => line.includes("gh workflow run"))
     .map((line) => line.slice(line.indexOf("gh workflow run")));
-}
-
-function expectDeclaredDispatchInputs(command: string): void {
-  const workflow = parse(readFileSync(LIVE_E2E_WORKFLOW, "utf8")) as {
-    on?: { workflow_dispatch?: { inputs?: Record<string, unknown> } };
-  };
-  const declared = new Set(Object.keys(workflow.on?.workflow_dispatch?.inputs ?? {}));
-  const emitted = [...command.matchAll(/(?:^|\s)-f\s+([a-z0-9_]+)=/gu)].flatMap((match) =>
-    match[1] === undefined ? [] : [match[1]],
-  );
-  expect(emitted.length).toBeGreaterThan(0);
-  for (const input of emitted) {
-    expect(declared.has(input), `undeclared workflow_dispatch input: ${input}`).toBe(true);
-  }
 }
 
 describe("Docker E2E helper CLIs", () => {
@@ -450,9 +425,6 @@ describe("Docker E2E helper CLIs", () => {
     expect(result.stdout).not.toContain("do-not-copy");
     const commands = emittedWorkflowCommands(result.stdout);
     expect(commands.length).toBeGreaterThan(0);
-    for (const command of commands) {
-      expectDeclaredDispatchInputs(command);
-    }
   });
 
   it("rejects non-boolean unreleased changelog intent from summary artifacts", () => {

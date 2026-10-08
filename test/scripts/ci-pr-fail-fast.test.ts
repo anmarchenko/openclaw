@@ -1,10 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { monitorPrFailure } from "../../scripts/ci-pr-fail-fast.mjs";
-import {
-  evaluateWorkflowExpression,
-  readCiWorkflow,
-  type WorkflowStep,
-} from "./ci-workflow.test-support.js";
 
 const repository = "openclaw/openclaw";
 const headSha = "a".repeat(40);
@@ -45,24 +40,13 @@ type Job = ReturnType<typeof job> & { steps?: unknown };
 function plannedChecks(count: number): Job {
   return {
     ...job(70, "success", "check-plan"),
-    steps: readCiWorkflow()
-      .jobs["check-plan"].steps.filter((step: WorkflowStep) =>
-        step.name?.startsWith("CI check job count"),
-      )
-      .map((step: WorkflowStep) => ({
-        name: step.name!.replace(/\$\{\{[\s\S]*?\}\}/gu, (expression) =>
-          String(
-            evaluateWorkflowExpression(expression, {
-              eventName: "pull_request",
-              repository,
-              runAttempt: 1,
-              steps: { plan: { outputs: { check_job_count: String(count) } } },
-            }),
-          ),
-        ),
+    steps: [
+      {
+        name: `CI check job count v1: ${count}`,
         status: "completed",
         conclusion: "success",
-      })),
+      },
+    ],
   };
 }
 

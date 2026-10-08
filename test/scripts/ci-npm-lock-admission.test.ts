@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -171,16 +171,5 @@ describe("npm lock setup admission", () => {
     git("checkout", "--orphan", "unrelated");
     commit();
     expect(skip()).toBe(true);
-  });
-  it("wires the dependency-free decision before conditional setup", () => {
-    const workflow = readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
-    const shard = workflow.split("  check-shard:")[1]?.split("\n  check-test-types-core:")[0] ?? "";
-    const admission = shard.indexOf("node .ci-harness/scripts/ci-npm-lock-admission.mjs");
-    expect(admission).toBeGreaterThanOrEqual(0);
-    expect(admission).toBeLessThan(shard.indexOf("- name: Setup Node environment"));
-    expect(shard).toContain("if: steps.npm-lock-scope.outputs.skip != 'true'");
-    expect(shard).toContain(
-      'pnpm deps:npm-lock:check:changed --base "$CHECKOUT_BASE_SHA" --head HEAD',
-    );
   });
 });

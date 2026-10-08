@@ -4,7 +4,6 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parse as parseYaml } from "yaml";
 import {
   appendCrabboxOutputTail,
   buildCrabboxGateCommand,
@@ -32,28 +31,6 @@ const runId = "run_abc123";
 const leaseId = "cbx_def456";
 const serviceOwner = "unknown";
 const proofEndedAt = Date.parse("2026-08-28T01:30:00Z");
-
-type PublisherWorkflow = {
-  jobs: {
-    publish: {
-      environment: string;
-      permissions: Record<string, string>;
-      steps: Array<{
-        id?: string;
-        if?: string;
-        uses?: string;
-        "continue-on-error"?: boolean;
-        env?: Record<string, string>;
-        run?: string;
-        with?: Record<string, unknown>;
-      }>;
-      "timeout-minutes": number;
-    };
-  };
-  on: { workflow_dispatch: { inputs: Record<string, unknown> } };
-  permissions: Record<string, unknown>;
-  "run-name": string;
-};
 
 function env(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -879,98 +856,5 @@ describe("Crabbox broker authentication", () => {
         token: "coordinator-token",
       }),
     ).toThrow(/provided together/u);
-  });
-});
-
-describe("Crabbox gate workflow", () => {
-  it("refreshes membership only after proof and never falls back to its old token", () => {
-    const {
-      jobs: {
-        publish: { steps },
-      },
-    } = parseYaml(
-      readFileSync(".github/workflows/pr-crabbox-gate-publisher.yml", "utf8"),
-    ) as PublisherWorkflow;
-    const proofIndex = steps.findIndex((step) => step.id === "proof");
-    const proof = steps[proofIndex];
-    const fresh = steps[proofIndex + 1];
-    const fallback = steps[proofIndex + 2];
-    const publish = steps[proofIndex + 3];
-    expect(proof).toMatchObject({ run: "node scripts/pr-crabbox-gate-publisher.mjs --proof" });
-    expect(proof?.["continue-on-error"]).toBeUndefined();
-    expect(fresh).toMatchObject({
-      id: "publish-app-token",
-      if: "success() && steps.proof.outcome == 'success'",
-      uses: "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
-      "continue-on-error": true,
-      with: { "app-id": "2729701", "permission-members": "read" },
-    });
-    expect(fallback).toMatchObject({
-      id: "publish-app-token-fallback",
-      if: "success() && steps.proof.outcome == 'success' && steps.publish-app-token.outcome == 'failure'",
-      uses: fresh?.uses,
-      "continue-on-error": true,
-      with: { "app-id": "2971289", "permission-members": "read" },
-    });
-    expect(publish).toMatchObject({
-      if: "success() && steps.proof.outcome == 'success'",
-      env: {
-        CRABBOX_PROOF_RUN_ID: "${{ steps.proof.outputs.run_id }}",
-        CRABBOX_PROOF_LEASE_ID: "${{ steps.proof.outputs.lease_id }}",
-        GH_APP_TOKEN:
-          "${{ steps.publish-app-token.outputs.token || steps.publish-app-token-fallback.outputs.token }}",
-        GH_TOKEN: "${{ github.token }}",
-      },
-      run: "node scripts/pr-crabbox-gate-publisher.mjs --publish",
-    });
-    expect(publish?.["continue-on-error"]).toBeUndefined();
-    expect(steps.at(-1)).toBe(publish);
-  });
-
-  it("pins the publisher-owned run to protected main", () => {
-    const workflow = parseYaml(
-      readFileSync(".github/workflows/pr-crabbox-gate-publisher.yml", "utf8"),
-    ) as PublisherWorkflow;
-    const job = workflow.jobs.publish;
-    expect(workflow["run-name"]).toBe(
-      "PR Crabbox gate #${{ inputs.pr_number }} / ${{ inputs.head_sha }}",
-    );
-    expect(Object.keys(workflow.on.workflow_dispatch.inputs).toSorted()).toEqual([
-      "base_sha",
-      "head_sha",
-      "pr_number",
-    ]);
-    expect(workflow.permissions).toEqual({});
-    expect(job.environment).toBe("qa-live-shared");
-    expect(job["timeout-minutes"]).toBe(270);
-    expect(job.permissions).toEqual({
-      checks: "write",
-      contents: "read",
-      "pull-requests": "read",
-    });
-    expect(job.steps[0]).toMatchObject({
-      with: {
-        "fetch-depth": 0,
-        "persist-credentials": false,
-        ref: "${{ github.workflow_sha }}",
-      },
-    });
-    const installCommand = job.steps[2]?.run;
-    if (typeof installCommand !== "string") {
-      throw new Error("Crabbox install command is missing");
-    }
-    expect(installCommand).toContain("crabbox_0.46.0_linux_amd64.tar.gz");
-    expect(installCommand).toContain(
-      "6a9341e810307356361dbed4c4b84be28a036b5cc291af1566d2ccd376570d90",
-    );
-    expect(job.steps.at(-1)).toMatchObject({
-      env: {
-        CRABBOX_COORDINATOR:
-          "${{ secrets.CRABBOX_COORDINATOR || secrets.OPENCLAW_QA_MANTIS_CRABBOX_COORDINATOR }}",
-        CRABBOX_COORDINATOR_TOKEN:
-          "${{ secrets.CRABBOX_COORDINATOR_TOKEN || secrets.OPENCLAW_QA_MANTIS_CRABBOX_COORDINATOR_TOKEN }}",
-      },
-      run: "node scripts/pr-crabbox-gate-publisher.mjs --publish",
-    });
   });
 });
