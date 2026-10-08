@@ -136,7 +136,6 @@ const fileSeconds: Readonly<Record<string, number>> = {
   "test/scripts/managed-windows-job.test.ts": 0.1,
   "test/scripts/npm-runner.test.ts": 0.1,
   "test/scripts/openclaw-cross-os-installer.windows.test.ts": 2.1,
-  "test/scripts/openclaw-cross-os-release-workflow.test.ts": 1.6,
   "test/scripts/pnpm-runner.test.ts": 1.5,
   "test/scripts/run-with-env.test.ts": 0.4,
   "test/scripts/ts-topology.test.ts": 3.1,

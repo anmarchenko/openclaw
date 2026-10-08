@@ -199,7 +199,6 @@ const STRIPE_FILE_SECONDS_HINTS = new Map<string, number>([
   // Serial file-boundary intervals from run 33364935118, including import/setup.
   // Runtime prerequisites are charged once per batch, separately from test work.
   ["test/e2e/qa-lab/runtime/gateway-support-export-runtime.test.ts", 6],
-  ["test/scripts/plugin-release-git-lifecycle.test.ts", 35],
   ["test/scripts/pr-main-refresh.test.ts", 30],
   ["test/plugin-npm-package-manifest.test.ts", 26],
   ["test/scripts/ci-node-test-plan.test.ts", 24],
@@ -330,17 +329,12 @@ const STRIPE_FILE_SECONDS_HINTS = new Map<string, number>([
   ["test/scripts/ci-changed-node-test-plan.config-fallback.test.ts", 130],
   ["test/scripts/ci-changed-node-test-plan.process-owners.test.ts", 143],
   ["test/scripts/ci-git-owner.test.ts", 187],
-  // Blacksmith PR runs 33532741896/33545657559 recorded 127.288s/135.808s wrapper
-  // spans; canonical push plans omit this tooling workload.
-  ["test/scripts/openclaw-performance-git-lifecycle.test.ts", 136],
-  ["test/scripts/ci-linux-git.test.ts", 204],
   // Historical single-file wall from PR run 33576929814; this file has since grown.
   ["test/scripts/pr-merge-outcome.test.ts", 206],
   // Relative serial case costs from PR runs 33571672257/33576929814.
   // These mixed invocations do not report complete file walls.
   ["test/scripts/vitest-report-owner.test.ts", 203],
   ["test/scripts/write-plugin-sdk-entry-dts.test.ts", 74],
-  ["test/scripts/ci-workflow-guards.test.ts", 38],
   ["test/scripts/crabbox-wrapper.test.ts", 19],
   ["test/scripts/find-reusable-release-validation.test.ts", 8],
   ["test/scripts/install-sh.test.ts", 6],

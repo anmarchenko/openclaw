@@ -1,3 +1,5 @@
+/** @datadog {"unskippable": true} */
+// CI requires the proof artifacts produced by this suite on every run.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";

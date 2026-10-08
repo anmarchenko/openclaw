@@ -47,7 +47,7 @@ describe("CI changed Node test plan", () => {
         [docker],
         [isolated],
         [docker, isolated, "test/scripts/docker-e2e-update-suppression.test.ts", docker, isolated],
-        [isolated, "test/scripts/ci-linux-git.test.ts"],
+        [isolated, "test/scripts/ci-git-owner.test.ts"],
         [docker, "src/agents/embedded-agent-runner/run/attempt-yield-handoff.test.ts"],
         [docker, "src/tui/tui-pty-local.e2e.test.ts"],
       ]) {

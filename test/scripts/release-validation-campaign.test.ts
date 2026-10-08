@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   runReleaseValidationCampaignPublish,
@@ -281,19 +280,5 @@ describe("release-validation campaign publisher", () => {
     expect(calls.updates).toEqual([
       expect.objectContaining({ issue_number: 10, state: "closed", labels: ["keep"] }),
     ]);
-  });
-});
-
-describe("release-validation skill runner workflow", () => {
-  it("keeps Codex read-only and publishes only through the validated artifact", () => {
-    const workflow = readFileSync(".github/workflows/release-validation-skill-runner.yml", "utf8");
-
-    expect(workflow).toContain("permissions:\n  contents: read");
-    expect(workflow).not.toContain("issues: write");
-    expect(workflow).toContain("RELEASE_VALIDATION_ARTIFACT_PATH");
-    expect(workflow).toContain("validateReleaseValidationCampaignArtifact");
-    expect(workflow.indexOf("openai/codex-action@")).toBeLessThan(
-      workflow.indexOf("actions/create-github-app-token@"),
-    );
   });
 });

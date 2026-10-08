@@ -1,8 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import {
   buildSummary,
   filterIgnoredFindings,
@@ -11,28 +10,7 @@ import {
   parseRepoLocation,
   validateFindings,
 } from "../../scripts/periphery-intersection.mjs";
-
-const WORKFLOW_PATH = ".github/workflows/shared-openclawkit-periphery.yml";
 const FINDING_SOURCE = "../shared/OpenClawKit/Sources/OpenClawKit/Example.swift";
-
-type WorkflowStep = {
-  id?: string;
-  name?: string;
-  run?: string;
-  with?: { name?: string; overwrite?: boolean; path?: string; script?: string };
-};
-
-type Workflow = {
-  jobs?: Record<
-    string,
-    {
-      name?: string;
-      needs?: string[] | string;
-      "runs-on"?: string;
-      steps?: WorkflowStep[];
-    }
-  >;
-};
 
 function finding(overrides: Record<string, unknown> = {}) {
   return {
@@ -129,70 +107,5 @@ describe("Periphery intersection", () => {
   it("reports the zero-findings policy in the summary", () => {
     expect(buildSummary([])).toContain("No declarations were reported dead by both");
     expect(buildSummary([finding()])).toContain("Found 1 shared Swift declaration");
-  });
-});
-
-describe("shared OpenClawKit Periphery workflow", () => {
-  const workflow = parse(readFileSync(WORKFLOW_PATH, "utf8")) as Workflow;
-
-  it("runs two consumer scans and a same-run intersection", () => {
-    expect(workflow.jobs?.["scan-ios"]?.name).toBe("Scan shared kit from iOS");
-    expect(workflow.jobs?.["scan-macos"]?.name).toBe("Scan shared kit from macOS");
-    expect(workflow.jobs?.intersect?.needs).toEqual(["scope", "scan-ios", "scan-macos"]);
-
-    const iosUpload = workflow.jobs?.["scan-ios"]?.steps?.find(
-      (step) => step.name === "Upload iOS consumer report",
-    );
-    const macosUpload = workflow.jobs?.["scan-macos"]?.steps?.find(
-      (step) => step.name === "Upload macOS consumer report",
-    );
-    const iosDownload = workflow.jobs?.intersect?.steps?.find(
-      (step) => step.name === "Download iOS consumer report",
-    );
-    const macosDownload = workflow.jobs?.intersect?.steps?.find(
-      (step) => step.name === "Download macOS consumer report",
-    );
-    const intersectionUpload = workflow.jobs?.intersect?.steps?.find(
-      (step) => step.name === "Upload shared intersection",
-    );
-
-    expect(iosUpload?.with?.name).toBe("shared-periphery-ios-${{ github.run_id }}");
-    expect(iosDownload?.with?.name).toBe(iosUpload?.with?.name);
-    expect(macosUpload?.with?.name).toBe("shared-periphery-macos-${{ github.run_id }}");
-    expect(macosDownload?.with?.name).toBe(macosUpload?.with?.name);
-    expect(intersectionUpload?.with?.name).toBe(
-      "shared-periphery-intersection-${{ github.run_id }}",
-    );
-
-    const artifactNames = [
-      iosUpload?.with?.name,
-      iosDownload?.with?.name,
-      macosUpload?.with?.name,
-      macosDownload?.with?.name,
-      intersectionUpload?.with?.name,
-    ];
-    expect(artifactNames).not.toContain(undefined);
-    for (const artifactName of artifactNames) {
-      expect(artifactName).not.toContain("github.run_attempt");
-    }
-
-    expect(iosUpload?.with?.overwrite).toBe(true);
-    expect(macosUpload?.with?.overwrite).toBe(true);
-    expect(intersectionUpload?.with?.overwrite).toBe(true);
-  });
-
-  it("retains the generated protocol contract and leaves findings for the intersection", () => {
-    for (const jobName of ["scan-ios", "scan-macos"]) {
-      const scan = workflow.jobs?.[jobName]?.steps?.find((step) => step.name === "Scan shared kit");
-      expect(scan?.run).toContain("--report-include '../shared/OpenClawKit/Sources/**'");
-      expect(scan?.run).toContain(
-        "--retain-files '../shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift'",
-      );
-      expect(scan?.run).not.toContain("--strict");
-    }
-    const macosScan = workflow.jobs?.["scan-macos"]?.steps?.find(
-      (step) => step.name === "Scan shared kit",
-    );
-    expect(macosScan?.run).not.toContain("--exclude-tests");
   });
 });

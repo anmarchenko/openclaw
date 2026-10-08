@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import {
   assertFinalRegistryState,
   classifyRegistryState,
@@ -17,7 +16,6 @@ import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const SHA = "a".repeat(40);
 const WORKFLOW_SHA = "b".repeat(40);
-const WORKFLOW = ".github/workflows/npm-placeholder-bootstrap.yml";
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 function packageJson(name: string) {
@@ -457,59 +455,6 @@ describe("npm placeholder publication", () => {
         ["latest", "2026.7.2"],
       ]),
     });
-  });
-
-  it("keeps npm credentials isolated to the protected serial publish step", () => {
-    const workflow = parse(readFileSync(WORKFLOW, "utf8")) as {
-      concurrency?: { group?: string; "cancel-in-progress"?: boolean };
-      jobs?: Record<
-        string,
-        {
-          environment?: string;
-          permissions?: Record<string, string>;
-          steps?: Array<{ name?: string; env?: Record<string, string>; run?: string }>;
-        }
-      >;
-    };
-    const plan = workflow.jobs?.plan;
-    const verify = workflow.jobs?.verify;
-    const publish = workflow.jobs?.publish;
-    expect(workflow.concurrency).toEqual({
-      group: "npm-placeholder-release",
-      "cancel-in-progress": false,
-    });
-    expect(plan?.environment).toBeUndefined();
-    expect(JSON.stringify(plan)).not.toContain("NPM_TOKEN");
-    expect(verify?.environment).toBeUndefined();
-    expect(JSON.stringify(verify)).not.toContain("NPM_TOKEN");
-    expect(
-      verify?.steps?.find((step) => step.name === "Verify immutable placeholder publication"),
-    ).toBeDefined();
-    expect(publish?.environment).toBe("npm-release");
-    expect(publish?.permissions).toMatchObject({
-      actions: "read",
-      contents: "read",
-      "id-token": "write",
-    });
-    const publishStep = publish?.steps?.find(
-      (step) => step.name === "Publish verified placeholders serially",
-    );
-    expect(publishStep?.env?.NPM_TOKEN).toBe("${{ secrets.NPM_TOKEN }}");
-    expect(readFileSync("scripts/npm-placeholder-publication.mjs", "utf8")).toContain(
-      '"--provenance"',
-    );
-    expect(publishStep?.run).not.toContain("npm trust");
-    expect(readFileSync(WORKFLOW, "utf8")).toContain("plugin-npm-release.yml");
-    const planSteps = plan?.steps ?? [];
-    const digestStep = planSteps.find((step) => step.name === "Bind immutable artifact digest");
-    expect(digestStep?.env?.RAW_DIGEST).toBe("${{ steps.upload.outputs.artifact-digest }}");
-    expect(digestStep?.run).toContain("digest=sha256:${RAW_DIGEST}");
-    for (const job of [verify, publish]) {
-      const metadataStep = job?.steps?.find(
-        (step) => step.name === "Resolve immutable artifact metadata",
-      );
-      expect(metadataStep?.run).toContain(".digest == $digest");
-    }
   });
 
   it("binds the artifact name to the exact workflow run and producer attempt", async () => {

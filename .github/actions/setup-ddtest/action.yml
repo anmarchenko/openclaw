@@ -1,0 +1,31 @@
+name: Install ddtest
+description: Install the official ddtest release for the runner platform.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS" in
+          Linux) platform=linux ;;
+          macOS) platform=darwin ;;
+          Windows) platform=windows ;;
+          *) echo "Unsupported runner OS: $RUNNER_OS" >&2; exit 1 ;;
+        esac
+        case "$RUNNER_ARCH" in
+          X64) arch=amd64 ;;
+          ARM64) arch=arm64 ;;
+          *) echo "Unsupported runner architecture: $RUNNER_ARCH" >&2; exit 1 ;;
+        esac
+        suffix=""
+        if [[ "$RUNNER_OS" == Windows ]]; then suffix=.exe; fi
+        directory="$RUNNER_TEMP/ddtest-bin"
+        mkdir -p "$directory"
+        gh release download v1.11.0 --repo DataDog/ddtest \
+          --pattern "ddtest-$platform-$arch$suffix" --dir "$directory" --clobber
+        mv "$directory/ddtest-$platform-$arch$suffix" "$directory/ddtest$suffix"
+        chmod +x "$directory/ddtest$suffix"
+        echo "$directory" >> "$GITHUB_PATH"
+        "$directory/ddtest$suffix" --version

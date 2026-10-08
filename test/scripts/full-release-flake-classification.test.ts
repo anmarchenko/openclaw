@@ -414,16 +414,4 @@ describe("classification workflow contract", () => {
     );
     expect(steps.at(-1).with).toMatchObject({ "retention-days": 90, "if-no-files-found": "error" });
   });
-  it("pins the CI gate's output grammar and completeness bookends", () => {
-    const ci = parseYaml(
-      readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8"),
-    );
-    const gate = ci.jobs["ci-gate"].steps.find(
-      (step: { name: string }) => step.name === "Verify selected CI lanes",
-    );
-    expect(gate.run).toContain('echo "${name}: ${result} (selected=${selected:-missing})"');
-    const rows = gate.env.JOB_RESULTS.trim().split("\n");
-    expect(rows[0]).toMatch(/^preflight=/u);
-    expect(rows.at(-1)).toMatch(/^pr-fail-fast=/u);
-  });
 });

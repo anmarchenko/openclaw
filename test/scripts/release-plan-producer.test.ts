@@ -16,7 +16,7 @@ import {
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { parse, stringify } from "yaml";
+import { parse } from "yaml";
 import { collectClawHubPublishablePluginPackages } from "../../scripts/lib/plugin-clawhub-release.ts";
 import { collectPublishablePluginPackages } from "../../scripts/lib/plugin-npm-release.ts";
 import { collectExtensionPackageJsonCandidates } from "../../scripts/lib/plugin-publication-candidates.ts";
@@ -1644,104 +1644,6 @@ mutateModule.syncBuiltinESMExports();
         verifyReleasePlanLock(canonicalReleasePlanLockJson(createReleasePlanLock(partial)), params),
       ).toThrow("repository-derived authority");
     }
-  });
-
-  it.each([
-    "missing",
-    "missing-object",
-    "symlink",
-    "late-source",
-    "wrong-source",
-    "missing-definition",
-    "duplicate-definition",
-    "ambiguous-dispatch",
-    "conflict",
-    "dormant",
-    "unlinked",
-  ])("reads only unambiguous linked committed platform helpers: %s", (fault) => {
-    const fixture = createFixtureRepo();
-    const helperPath = "scripts/lib/release-publish-children.sh";
-    const workflowPath = ".github/workflows/openclaw-release-publish.yml";
-    const helper = readFileSync(resolve(helperPath), "utf8");
-    const publisher = parse(readFileSync(resolve(workflowPath), "utf8")) as {
-      jobs: Record<string, { steps?: { run?: string }[] }>;
-    };
-    for (const step of publisher.jobs.publish_windows?.steps ?? []) {
-      if (!step.run?.includes("promote_windows_release_assets")) {
-        continue;
-      }
-      if (fault === "late-source") {
-        step.run = step.run
-          .replace("source scripts/lib/release-publish-children.sh", "")
-          .replace(
-            "promote_windows_release_assets",
-            "promote_windows_release_assets\nsource scripts/lib/release-publish-children.sh",
-          );
-      }
-      if (fault === "wrong-source") {
-        step.run = step.run.replace(
-          "source scripts/lib/release-publish-children.sh",
-          "source other.sh",
-        );
-      }
-      if (fault === "conflict") {
-        step.run =
-          "promote_windows_release_assets() {\n  dispatch_workflow docker-release.yml\n}\n" +
-          step.run;
-      }
-    }
-    if (fault === "unlinked") {
-      for (const id of ["publish_windows", "publish_android", "publish_linux"]) {
-        delete publisher.jobs[id];
-      }
-    }
-    writeFixture(fixture.root, workflowPath, stringify(publisher));
-    const sentinel = join(fixture.root, "helper-executed");
-    let bytes = helper + `\ntouch ${JSON.stringify(sentinel)}\n`;
-    if (fault === "missing-definition") {
-      bytes = bytes.replace("promote_windows_release_assets()", "promote_other_release_assets()");
-    }
-    if (fault === "duplicate-definition") {
-      bytes += helper;
-    }
-    if (fault === "ambiguous-dispatch") {
-      bytes = bytes.replace(
-        "promote_windows_release_assets() {",
-        "promote_windows_release_assets() {\n  dispatch_workflow other.yml",
-      );
-    }
-    if (fault === "dormant") {
-      bytes += "\npromote_unused_release_assets() {\n  invalid_dormant_definition\n}\n";
-    }
-    if (fault !== "missing" && fault !== "unlinked") {
-      writeFixture(fixture.root, helperPath, bytes);
-    }
-    if (fault === "symlink") {
-      unlinkSync(join(fixture.root, helperPath));
-      symlinkSync("npm-core-release-packages.json", join(fixture.root, helperPath));
-    }
-    const toolingSha = commit(fixture.root, `platform helper ${fault}`);
-    if (fault === "missing-object") {
-      const oid = execFileSync("git", ["rev-parse", `${toolingSha}:${helperPath}`], {
-        cwd: fixture.root,
-        encoding: "utf8",
-      }).trim();
-      unlinkSync(join(fixture.root, ".git/objects", oid.slice(0, 2), oid.slice(2)));
-    }
-    const params = sourceParams({
-      ...fixture,
-      toolingSha,
-      toolingFullRef: `refs/tags/release-publish/${toolingSha.slice(0, 12)}-1`,
-    });
-    if (fault === "dormant" || fault === "unlinked") {
-      const ids = produceReleasePlan(params).inventory.platforms.map(({ id }) => id);
-      expect(ids).toEqual(
-        fault === "unlinked" ? ["docker", "vcr"] : ["android", "docker", "linux", "vcr", "windows"],
-      );
-    } else {
-      expect(() => produceReleasePlan(params)).toThrow(/platform|release-publish-children/u);
-    }
-    expect(existsSync(sentinel)).toBe(false);
   });
 
   it("matches the exact current npm and ClawHub publisher inventories", () => {

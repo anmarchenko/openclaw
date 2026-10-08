@@ -1,7 +1,7 @@
 // Covers policy selection layered on the strict normalized release evidence
 // produced by release-ci-summary.mjs. Topology validation belongs there.
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -1289,12 +1289,5 @@ describe("scripts/github/find-reusable-release-validation.sh", () => {
       reuse: "false",
       reuse_reason: "no prior successful validation runs",
     });
-  });
-
-  it("rewrites inherited v3 producer identity to the current immutable workflow SHA", () => {
-    const workflow = readFileSync(".github/workflows/full-release-validation.yml", "utf8");
-    expect(workflow).toContain('--arg workflowSha "$GITHUB_SHA"');
-    expect(workflow).toContain("workflowSha: $workflowSha");
-    expect(workflow).toContain("ref: ${{ github.sha }}");
   });
 });

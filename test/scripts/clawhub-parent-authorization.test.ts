@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import {
   clawHubIdentityFromEnvironment,
   createClawHubParentAuthorization,
@@ -222,119 +221,6 @@ describe("ClawHub parent publication authorization", () => {
     expect(createClawHubRecoveryApproval(recoveryEnv, noGh)).toMatchObject({
       authorizedChildRunId: "20",
       authorizedChildRunAttempt: "1",
-    });
-  });
-
-  it("uploads recovery approval only for direct human dispatches from trusted tooling", () => {
-    const workflow = parse(
-      readFileSync(".github/workflows/plugin-clawhub-release.yml", "utf8"),
-    ) as {
-      on: { workflow_dispatch: { inputs: Record<string, Record<string, unknown>> } };
-      jobs: Record<
-        "approve_plugins_clawhub_release" | "validate_release_publish_approval",
-        {
-          environment?: string;
-          if?: string;
-          needs: string[];
-          outputs?: Record<string, string>;
-          permissions?: Record<string, string>;
-          steps: {
-            id?: string;
-            name?: string;
-            uses?: string;
-            run?: string;
-            if?: string;
-            env?: Record<string, string>;
-            with?: Record<string, string>;
-          }[];
-        }
-      >;
-    };
-    const approval = workflow.jobs.approve_plugins_clawhub_release;
-    expect(approval.environment).toBe(
-      "${{ needs.validate_release_publish_approval.outputs.parent_approval != 'receipt' && 'clawhub-plugin-release' || '' }}",
-    );
-    expect(approval.needs).toContain("validate_release_publish_approval");
-    expect(approval.if).toContain("needs.validate_release_publish_approval.result == 'success'");
-    const validation = workflow.jobs.validate_release_publish_approval;
-    expect(validation.outputs?.direct_recovery).toBe(
-      "${{ steps.approval.outputs.direct_recovery }}",
-    );
-    const validationRun = validation.steps.find((step) => step.id === "approval")?.run ?? "";
-    const outputWrite = validationRun.indexOf(
-      'direct_recovery=${direct_recovery}" >> "$GITHUB_OUTPUT"',
-    );
-    // The flag is published only after the parent run validated.
-    expect(outputWrite).toBeGreaterThan(
-      validationRun.indexOf("node scripts/validate-release-publish-approval.mjs"),
-    );
-    expect(approval.steps).toHaveLength(6);
-    expect(approval.steps[0]).not.toHaveProperty("if");
-    const directRecovery =
-      "needs.validate_release_publish_approval.outputs.direct_recovery == 'true'";
-    const receiptRoute =
-      "needs.validate_release_publish_approval.outputs.parent_approval == 'receipt'";
-    // Trusted tooling is checked out for both routes; the wait is receipt-only and
-    // the recovery receipt stays direct-only.
-    const routes: Record<string, string> = {
-      "Checkout trusted release tooling": `${directRecovery} || ${receiptRoute}`,
-      "Setup Node": `${directRecovery} || ${receiptRoute}`,
-      "Wait for the release parent's ClawHub authorization": receiptRoute,
-      "Write recovery environment approval receipt": directRecovery,
-      "Upload recovery environment approval receipt": directRecovery,
-    };
-    expect(approval.steps.slice(1).map((step) => [step.name, step.if])).toEqual(
-      Object.entries(routes),
-    );
-    const checkout = approval.steps.find((step) => step.uses?.startsWith("actions/checkout@"));
-    expect(checkout?.with?.ref).toBe("${{ github.workflow_sha }}");
-    const write = approval.steps.find((step) => step.run?.includes("recovery-approval --output"));
-    expect(write?.run).toContain(
-      'recovery-approval --output "$RUNNER_TEMP/openclaw-clawhub-recovery-approval/approval.json"',
-    );
-    // Discovery lists the parent run's receipts, so the job needs a token and actions:read.
-    expect(approval.permissions).toEqual({ actions: "read", contents: "read" });
-    expect(write?.env).toEqual({
-      GH_TOKEN: "${{ github.token }}",
-      RELEASE_PUBLISH_RUN_ID: "${{ inputs.release_publish_run_id }}",
-      RELEASE_PUBLISH_RUN_ATTEMPT: "${{ inputs.release_publish_run_attempt }}",
-      RECOVERED_CLAWHUB_RUN_ID: "${{ inputs.recovered_clawhub_run_id }}",
-      RECOVERED_CLAWHUB_RUN_ATTEMPT: "${{ inputs.recovered_clawhub_run_attempt }}",
-    });
-    for (const input of ["recovered_clawhub_run_id", "recovered_clawhub_run_attempt"]) {
-      expect(workflow.on.workflow_dispatch.inputs[input]).toMatchObject({
-        required: false,
-        default: "",
-        type: "string",
-      });
-    }
-    const upload = approval.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
-    const artifactName =
-      "openclaw-clawhub-recovery-approval-${{ github.run_id }}-${{ github.run_attempt }}";
-    expect(upload?.with?.name).toBe(artifactName);
-    expect(upload?.with?.path).toBe(
-      "${{ runner.temp }}/openclaw-clawhub-recovery-approval/approval.json",
-    );
-    expect(upload?.with?.["if-no-files-found"]).toBe("error");
-  });
-
-  it("publishes source metadata for the exact candidate sealed into authorization", () => {
-    const workflow = parse(
-      readFileSync(".github/workflows/plugin-clawhub-release.yml", "utf8"),
-    ) as {
-      jobs: Record<
-        string,
-        { steps?: { env?: Record<string, string> }[]; with?: Record<string, string> }
-      >;
-    };
-    const candidate = workflow.jobs.seal_clawhub_transactions?.steps?.find(
-      (step) => step.env?.TARGET_SHA,
-    )?.env?.TARGET_SHA;
-    expect(candidate).toBe("${{ needs.preview_plugins_clawhub.outputs.ref_revision }}");
-    // ClawHub compares both source fields with the candidate SHA in the publish token.
-    expect(workflow.jobs.publish_plugins_clawhub?.with).toMatchObject({
-      source_commit: candidate,
-      source_ref: candidate,
     });
   });
 

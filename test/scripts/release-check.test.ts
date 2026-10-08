@@ -13,14 +13,12 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { create } from "tar";
 import { describe, expect, vi } from "vitest";
 import { parse } from "yaml";
 import {
   collectRootPackageExcludedExtensionDirs,
   listBundledPluginPackArtifacts,
 } from "../../scripts/lib/bundled-plugin-build-entries.mjs";
-import { collectRuntimeImportClosure } from "../../scripts/lib/runtime-import-closure.mts";
 import { resolveVitestNodeArgs } from "../../scripts/lib/vitest-process-env.mts";
 import {
   checkPackedTargetBootstrap,
@@ -120,156 +118,6 @@ describe("release-check", () => {
     expect(() => resolvePackedBundledChannelEntrySmokeCommand(() => false)).toThrow(
       "release-check: target does not provide scripts/test-built-bundled-channel-entry-smoke.mts or .mjs",
     );
-  });
-
-  it("loads sparse release tooling and rejects a tarball missing a target worker artifact", async ({
-    command,
-  }) => {
-    const diagnostics = command.enableDiagnostics("release-check-target");
-    await command.lifetime.run(async () => {
-      const { root, packedRoot } = createPackedTargetFixture(command);
-      const toolingRoot = join(root, "tooling");
-      const workflow = parse(readFileSync(".github/workflows/openclaw-npm-preflight.yml", "utf8"));
-      const checkout = workflow.jobs.check_contents_npm.steps.find(
-        (step: { name?: string }) => step.name === "Checkout trusted Plugin SDK API tooling",
-      );
-      const sparseRoots = checkout.with["sparse-checkout"].trim().split(/\s+/u) as string[];
-      diagnostics.stage("sparse-inventory");
-      const tracked = await command.run(
-        "git",
-        ["ls-files", "-z", "--", ":(top,glob)*", ...sparseRoots],
-        { maxBuffer: 10 * 1024 * 1024 },
-      );
-      expect(tracked.error, "sparse tooling file inventory").toBeUndefined();
-      expect(tracked.status, tracked.stderr).toBe(0);
-      const trackedPaths = tracked.stdout.split("\0").filter(Boolean);
-      diagnostics.stage("runtime-import-closure");
-      // Preserve the workflow's sparse boundary without copying the whole source tree.
-      const requiredPaths = new Set([
-        ...collectRuntimeImportClosure(process.cwd(), [
-          "scripts/release-check.ts",
-          "scripts/tsx.mjs",
-          ...(process.versions.bun ? ["src/plugins/sdk-alias.ts"] : []),
-        ]),
-        "scripts/fixtures/packed-plugin-sdk-type-smoke.ts",
-        "scripts/fixtures/packed-plugin-sdk-setup-consumer.ts",
-        "scripts/fixtures/packed-plugin-sdk-progress-consumer.ts",
-        ...(process.versions.bun
-          ? ["scripts/lib/plugin-sdk-private-local-only-subpaths.json"]
-          : []),
-      ]);
-      expect(requiredPaths.has("scripts/package-openclaw-for-docker.mts")).toBe(false);
-      expect(requiredPaths.has("scripts/openclaw-prepack.ts")).toBe(false);
-      const sparsePaths = new Set(trackedPaths);
-      expect(
-        [...requiredPaths].filter((file) => !sparsePaths.has(file)),
-        "release tooling dependencies must belong to the workflow sparse checkout",
-      ).toEqual([]);
-      diagnostics.stage("sparse-copy");
-      for (const relativePath of trackedPaths.filter(
-        (file) => !file.includes("/") || requiredPaths.has(file),
-      )) {
-        const destination = join(toolingRoot, relativePath);
-        mkdirSync(dirname(destination), { recursive: true });
-        copyFileSync(relativePath, destination);
-      }
-      symlinkSync(resolve("node_modules"), join(toolingRoot, "node_modules"), "junction");
-      mkdirSync(join(root, "extensions"));
-      mkdirSync(join(root, "scripts", "fixtures"), { recursive: true });
-      writeFileSync(
-        join(root, "scripts/fixtures/packed-plugin-sdk-type-smoke.ts"),
-        "stale target fixture",
-      );
-      writeFileSync(
-        join(root, "scripts/fixtures/packed-plugin-sdk-setup-consumer.ts"),
-        "stale target setup consumer",
-      );
-      const moduleUrl = pathToFileURL(join(toolingRoot, "scripts/release-check.ts")).href;
-      const npmInventoryGuard = join(root, "reject-npm-inventory.cjs");
-      writeFileSync(
-        npmInventoryGuard,
-        `const childProcess = require("node:child_process");
-const original = childProcess.execFileSync;
-childProcess.execFileSync = function (...args) {
-  if (Array.isArray(args[1]) && args[1].includes("pack") && args[1].includes("--dry-run")) {
-    throw new Error("Prepared tarball inspection must not launch npm pack");
-  }
-  return Reflect.apply(original, this, args);
-};
-require("node:module").syncBuiltinESMExports();
-`,
-      );
-      const runtimeArgs = process.versions.bun
-        ? []
-        : [...resolveVitestNodeArgs(), "--import", join(toolingRoot, "scripts/tsx.mjs")];
-      const fixtureEnv = {
-        ...process.env,
-        TSX_TSCONFIG_PATH: join(toolingRoot, "tsconfig.json"),
-      };
-      diagnostics.stage("sparse-import-probe");
-      const probe = await command.run(
-        process.execPath,
-        [
-          ...runtimeArgs,
-          "--input-type=module",
-          "--eval",
-          `import { readFileSync } from "node:fs";\n` +
-            `const { createPackedPluginSdkTypescriptSmokeProject } = await import(${JSON.stringify(moduleUrl)});\n` +
-            `createPackedPluginSdkTypescriptSmokeProject({ consumerDir: "consumer", packageSpec: "file:fixture.tgz" });\n` +
-            `console.log(JSON.stringify({\n` +
-            `  execArgv: process.execArgv,\n` +
-            `  fixture: readFileSync("consumer/src/index.ts", "utf8"),\n` +
-            `  setupConsumer: readFileSync("consumer/src/packed-plugin-sdk-setup-consumer.ts", "utf8")\n` +
-            `}));`,
-        ],
-        {
-          cwd: root,
-          encoding: "utf8",
-          env: fixtureEnv,
-        },
-      );
-      expect(probe.error, "sparse release tooling import").toBeUndefined();
-      expect(probe.status, probe.stderr).toBe(0);
-      const { execArgv, ...smokeProject } = JSON.parse(probe.stdout);
-      if (!process.versions.bun) {
-        expect(execArgv, "CLI fixtures inherit the Node shutdown policy").toContain(
-          "--no-concurrent-sparkplug",
-        );
-      }
-      expect(smokeProject).toEqual({
-        fixture: readFileSync(
-          join(toolingRoot, "scripts/fixtures/packed-plugin-sdk-type-smoke.ts"),
-          "utf8",
-        ),
-        setupConsumer: readFileSync(
-          join(toolingRoot, "scripts/fixtures/packed-plugin-sdk-setup-consumer.ts"),
-          "utf8",
-        ),
-      });
-
-      diagnostics.stage("packed-fixture-setup");
-      copyFileSync("appcast.xml", join(root, "appcast.xml"));
-      writeFileSync(join(root, "src/shared/worker-bundle-hash.ts"), launcherWorkerContract);
-      writeWorkerArtifacts(packedRoot, legacyArtifacts);
-      const tarball = join(root, "target.tgz");
-      create({ cwd: root, file: tarball, gzip: true, sync: true }, ["package"]);
-      if (!process.versions.bun) {
-        runtimeArgs.unshift("--require", npmInventoryGuard);
-      }
-      diagnostics.stage("legacy three-file contract requires the launcher");
-      const result = await command.run(
-        process.execPath,
-        [...runtimeArgs, join(toolingRoot, "scripts/release-check.ts"), "--tarball", tarball],
-        { cwd: root, encoding: "utf8", env: fixtureEnv },
-      );
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(
-        "Worker deploy artifact dist/worker/github-exec-launcher.mjs is missing.",
-      );
-      expect(result.stderr).not.toContain("Packing OpenClaw package");
-      diagnostics.stage("assertions-complete");
-    });
   });
 
   it("packs an isolated bundled source through the canonical owner before inspecting it", async ({

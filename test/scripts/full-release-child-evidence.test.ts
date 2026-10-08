@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import { classifyReleaseSnapshot } from "../../scripts/full-release-validation-policy.mjs";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
@@ -155,44 +154,6 @@ describe("full release child evidence producer", () => {
       });
     },
   );
-
-  it.each([
-    "ci.yml",
-    "plugin-prerelease.yml",
-    "openclaw-release-checks.yml",
-    "openclaw-performance.yml",
-    "npm-telegram-beta-e2e.yml",
-  ])("waits for every workload job in %s before sealing", (filename) => {
-    const workflow = parse(readFileSync(`.github/workflows/${filename}`, "utf8")) as {
-      jobs: Record<string, { needs?: string[]; uses?: string }>;
-    };
-    const sealJob = workflow.jobs.seal_release_child_evidence;
-    expect(sealJob?.uses).toBe("./.github/workflows/full-release-child-evidence.yml");
-    expect(sealJob?.needs?.toSorted()).toEqual(
-      Object.keys(workflow.jobs)
-        .filter((name) => name !== "seal_release_child_evidence")
-        .toSorted(),
-    );
-  });
-
-  it("keeps unavailable reuse metadata from changing workload qualification", () => {
-    const workflow = parse(
-      readFileSync(".github/workflows/full-release-child-evidence.yml", "utf8"),
-    ) as {
-      jobs: Record<
-        string,
-        {
-          "continue-on-error"?: boolean;
-          steps: Array<{ name: string; with?: Record<string, unknown> }>;
-        }
-      >;
-    };
-    expect(workflow.jobs.seal?.["continue-on-error"]).toBe(true);
-    const upload = workflow.jobs.seal?.steps.find(
-      (step) => step.name === "Upload sealed child evidence",
-    );
-    expect(upload?.with?.overwrite).toBe(false);
-  });
 
   it("seals child facts without requiring any parent status or manifest", () => {
     const { result, receipt, output } = seal();

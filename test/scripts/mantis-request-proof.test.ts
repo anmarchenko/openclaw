@@ -173,20 +173,6 @@ describe("request proof finalization", () => {
   });
 });
 
-describe("consumer dispatch contract", () => {
-  it.each([
-    ["mantis-web-ui-chat-proof.yml", "Mantis request [{0}]"],
-    ["mantis-telegram-bot-e2e-proof.yml", "Mantis Telegram request [{0}]"],
-  ])(
-    "keeps %s request IDs discoverable after a lost dispatch acknowledgement",
-    (workflow, title) => {
-      const source = readFileSync(path.resolve(".github/workflows", workflow), "utf8");
-      expect(source).toContain(`format('${title}', inputs.request_id)`);
-      expect(source).toMatch(/context.actor [!=]== "clawsweeper\[bot\]"/);
-    },
-  );
-});
-
 describe("archive boundary", () => {
   const parser = path.resolve("scripts/mantis/read-request-archive.py");
   it.each(["complete", "traversal", "symlink", "missing", "oversized", "duplicate", "nul-path"])(

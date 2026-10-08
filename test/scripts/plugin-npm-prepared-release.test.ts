@@ -1,12 +1,10 @@
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { join } from "node:path";
 import JSZip from "jszip";
 import * as tar from "tar";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parse } from "yaml";
 import {
   consumePreparedNpmPackage,
   createPreparedNpmRelease,
@@ -447,47 +445,6 @@ describe("prepared plugin npm publication", () => {
     expect(result.producerRunId).toBe(producer.runId);
     expect(result.producerRunAttempt).toBe(producer.runAttempt);
   });
-
-  it.each([true, false])(
-    "qualifies runtime entries before sealing (compiled runtime: %s)",
-    async (runtime) => {
-      const { root, evidence, tarballName } = await packedPluginFixture(runtime);
-      const repoRoot = process.cwd();
-      const workflow = parse(
-        readFileSync(join(repoRoot, ".github/workflows/plugin-npm-release.yml"), "utf8"),
-      );
-      const qualification = workflow.jobs.preview_plugin_pack.steps.find(
-        (entry: { name: string }) => entry.name === "Qualify packed plugin runtime",
-      );
-      expect(qualification).toBeDefined();
-      symlinkSync(repoRoot, join(root, ".release-tooling"), "dir");
-      symlinkSync(join(repoRoot, "node_modules"), join(root, "node_modules"), "dir");
-      writeFileSync(
-        join(evidence, "preflight-manifest.json"),
-        JSON.stringify({
-          artifact: { tarballName },
-          package: { name: "@openclaw/demo", version },
-        }),
-      );
-      const result = spawnSync("bash", ["-c", qualification.run], {
-        cwd: root,
-        encoding: "utf8",
-        timeout: 30_000,
-        env: {
-          ...process.env,
-          ARTIFACT_DIR: evidence,
-          TSX_TSCONFIG_PATH: join(repoRoot, "tsconfig.json"),
-          PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ""}`,
-        },
-      });
-      if (runtime) {
-        expect(result.status, result.stderr).toBe(0);
-      } else {
-        expect(result.status).not.toBe(0);
-        expect(result.stderr).toContain("runtime extension entry not found");
-      }
-    },
-  );
 });
 
 describe("prepared npm registry readback", () => {

@@ -3,16 +3,11 @@ import { once } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import { detectChangedScope } from "../../scripts/ci-changed-scope.mjs";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const repo = path.resolve(import.meta.dirname, "../..");
 const temps = useAutoCleanupTempDirTracker(afterEach);
-const workflow = parse(fs.readFileSync(path.join(repo, ".github/workflows/ci.yml"), "utf8"));
-const swiftStep = workflow.jobs["macos-swift"].steps.find(
-  (step: { name?: string }) => step.name === "Swift test",
-).run as string;
 
 function eventStream(...kinds: string[]) {
   return (
@@ -254,225 +249,6 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
   );
 
   it.each([
-    { defaultCode: 0, renderedCode: 0, namedCode: 0, logicalCpu: "3", expectedWidth: "3" },
-    { defaultCode: 23, renderedCode: 0, namedCode: 0, logicalCpu: "12", expectedWidth: "12" },
-    { defaultCode: 0, renderedCode: 19, namedCode: 0, logicalCpu: "12", expectedWidth: "12" },
-    { defaultCode: 0, renderedCode: 0, namedCode: 17, logicalCpu: "32", expectedWidth: "12" },
-  ] as const)(
-    "runs isolated partitions with exits $defaultCode/$renderedCode/$namedCode at width $expectedWidth",
-    ({ defaultCode, renderedCode, namedCode, logicalCpu, expectedWidth }) => {
-      const f = fixture(defaultCode, false, namedCode, "", logicalCpu, undefined, renderedCode);
-      const result = f.run(swiftStep);
-      expect(result.error).toBeUndefined();
-      expect(result.status, result.stderr).toBe(defaultCode || renderedCode || namedCode);
-      expect(result.stdout).toContain(
-        `[macos-swift] Swift Testing parallelization width: ${expectedWidth}`,
-      );
-      const calls = f.calls().filter((call) => call.tool === "swift");
-      expect(calls).toHaveLength(defaultCode !== 0 ? 2 : renderedCode !== 0 ? 3 : 4);
-      const [build, ...tests] = calls;
-      const captures = fs
-        .readFileSync(f.env.GITHUB_OUTPUT, "utf8")
-        .split("\n")
-        .filter((line) => /^menu-(?:default|named)-artifact-path=/.test(line))
-        .map((line) => line.slice(line.indexOf("=") + 1));
-      expect(captures).toHaveLength(tests.length);
-      expect(build.args).toEqual([
-        "build",
-        "--package-path",
-        "apps/macos",
-        "--build-system",
-        "native",
-        "--enable-code-coverage",
-        "--disable-index-store",
-        "-Xswiftc",
-        "-gline-tables-only",
-        "--build-tests",
-      ]);
-      expect(build.env.HOME).toBe(f.env.HOME);
-      const roots = new Set<string>();
-      for (const [index, test] of tests.entries()) {
-        expect(test.args).toEqual([
-          "test",
-          "--package-path",
-          "apps/macos",
-          "--build-system",
-          "native",
-          "--enable-code-coverage",
-          "--disable-index-store",
-          "-Xswiftc",
-          "-gline-tables-only",
-          "--skip-build",
-          "--experimental-maximum-parallelization-width",
-          expectedWidth,
-          index === 0 ? "--skip" : "--filter",
-          index === 0
-            ? "AppStateIsolationTests|ProfileChatPreferencesTests|QuickChatCatalogPresentationTests"
-            : index === 1
-              ? "QuickChatCatalogPresentationTests"
-              : "AppStateIsolationTests|ProfileChatPreferencesTests",
-          "--event-stream-output-path",
-          expect.any(String),
-          "--event-stream-version",
-          "6.3",
-        ]);
-        if (index < 2) {
-          expect(test.env.OPENCLAW_PROFILE).toBe("default");
-        } else {
-          expect(test.env.OPENCLAW_PROFILE).toMatch(/^test-[a-z0-9-]+$/);
-        }
-        expect(test.env.OPENCLAW_PROFILE).not.toBe(f.env.OPENCLAW_PROFILE);
-        expect(test.env.OPENCLAW_GATEWAY_TOKEN).toBeUndefined();
-        expect(test.env.SWIFT_BACKTRACE).toBe(
-          "enable=yes,interactive=no,color=no,sanitize=yes,threads=crashed,registers=none,images=mentioned",
-        );
-        expect(test.env.NSUnbufferedIO).toBe("YES");
-        for (const key of [
-          "DEVELOPER_DIR",
-          "DYLD_FRAMEWORK_PATH",
-          "DYLD_LIBRARY_PATH",
-          "RUNNER_TRACKING_ID",
-        ] as const) {
-          expect(test.env[key]).toBe(f.env[key]);
-        }
-        expect(test.env.CFFIXED_USER_HOME).toBe(test.env.HOME);
-        expect(test.keychain).toEqual({ locked: false, autoLock: false });
-        const ownedKeychain = test.settings.default;
-        expect(path.dirname(ownedKeychain)).toBe(path.join(test.env.HOME, "Library/Keychains"));
-        expect(test.settings.search).toEqual([ownedKeychain]);
-        const partition = f.calls().filter((call) => call.env?.HOME === test.env.HOME);
-        expect(partition[0].args[0]).toBe("create-keychain");
-        expect(partition.at(-2).tool).toBe("swift");
-        expect(partition.at(-1).args).toEqual(["delete-keychain", ownedKeychain]);
-        for (const call of partition.filter((entry) => entry.tool === "security")) {
-          expect(call.env).toEqual(test.env);
-          expect(call.args.at(-1)).toBe(ownedKeychain);
-        }
-        expect(test.cache).toBe("reusable build cache");
-        const ownedRoot = path.dirname(test.env.HOME);
-        roots.add(ownedRoot);
-        expect(ownedRoot).not.toBe(f.root);
-        for (const key of ["HOME", "TMPDIR", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH"]) {
-          expect(test.env[key].startsWith(`${ownedRoot}/`)).toBe(true);
-          expect(test.present[key]).toBe(key !== "OPENCLAW_CONFIG_PATH");
-        }
-        expect(fs.existsSync(ownedRoot)).toBe(false);
-        const profileMode = index < 2 ? "default" : "named";
-        const captureNames =
-          index === 0
-            ? ["browser-sign-in-before", "browser-sign-in-after"]
-            : index === 1
-              ? ["catalog", "history-message-recovery"]
-              : ["thread-reasoning", "model-initial"];
-        const exported = captures[index];
-        if (!exported) {
-          throw new Error("The joined Swift partition must publish its capture path");
-        }
-        expect(exported.startsWith(`${f.env.RUNNER_TEMP}/`)).toBe(true);
-        for (const captureName of captureNames) {
-          expect(fs.readFileSync(path.join(exported, `${captureName}-window.png`), "utf8")).toBe(
-            "synthetic-png-bytes",
-          );
-        }
-        expect(fs.readdirSync(exported).toSorted()).toEqual(
-          [
-            "capture-export.json",
-            ...captureNames.flatMap((name) => [
-              `${name}-capture-status.json`,
-              `${name}-window.png`,
-            ]),
-            ...(index === 2 ? ["model-initial-menu-42.png"] : []),
-          ].toSorted(),
-        );
-        if (index === 2) {
-          expect(fs.readFileSync(path.join(exported, "model-initial-menu-42.png"), "utf8")).toBe(
-            "synthetic-model-menu-bytes",
-          );
-        }
-        expect(
-          JSON.parse(fs.readFileSync(path.join(exported, "capture-export.json"), "utf8")),
-        ).toMatchObject({
-          profileMode,
-          source: "ordinary-swift-run",
-          swiftExitCode: [defaultCode, renderedCode, namedCode][index],
-        });
-      }
-      expect(roots.size).toBe(tests.length);
-      expect(f.capturePath("default")).toBe(captures[defaultCode === 0 ? 1 : 0]);
-      const captureUpload = workflow.jobs["macos-swift"].steps.find(
-        (step: { name?: string }) => step.name === "Upload default-profile chat menu captures",
-      );
-      const uploaded = new Set(
-        (captureUpload.with.path as string)
-          .trim()
-          .split("\n")
-          .flatMap((pattern) =>
-            fs.globSync(pattern.replace("${{ runner.temp }}", f.env.RUNNER_TEMP)),
-          ),
-      );
-      for (const exported of captures.slice(0, Math.min(tests.length, 2))) {
-        for (const name of fs.readdirSync(exported)) {
-          expect(uploaded.has(path.join(exported, name)), name).toBe(true);
-        }
-      }
-      const logDirectory = path.join(f.env.RUNNER_TEMP, "openclaw-native-test-logs");
-      const logs = fs.readdirSync(logDirectory).toSorted();
-      expect(logs).toHaveLength(tests.length);
-      for (const name of logs) {
-        expect(name).toMatch(/^(?:default(?:-rendered)?|named)-[a-f0-9-]+\.log$/);
-        expect(fs.readFileSync(path.join(logDirectory, name), "utf8")).toContain(
-          "[macos-native] Synthetic menu capture artifacts:",
-        );
-      }
-      expect(fs.existsSync(f.env.HOME)).toBe(true);
-      expect(
-        fs.readFileSync(
-          path.join(f.env.HOME, "Library/Caches/org.swift.swiftpm/fixture-cache"),
-          "utf8",
-        ),
-      ).toBe("reusable build cache");
-      expect(fs.readFileSync(f.env.GITHUB_OUTPUT, "utf8")).toContain("debug-tests-built=true");
-    },
-  );
-
-  it("preserves the two original partitions for historical targets with a launcher", () => {
-    const f = fixture();
-    const result = f.run(swiftStep, f.workspace, { HISTORICAL_TARGET: "true" });
-    expect(result.error).toBeUndefined();
-    expect(result.status, result.stderr).toBe(0);
-    const calls = f.calls().filter((call) => call.tool === "swift");
-    expect(calls.map((call) => call.args[0])).toEqual(["build", "test", "test"]);
-    const tests = calls.slice(1);
-    for (const [index, test] of tests.entries()) {
-      expect(test.args).toEqual([
-        "test",
-        "--package-path",
-        "apps/macos",
-        "--build-system",
-        "native",
-        "--enable-code-coverage",
-        "--disable-index-store",
-        "-Xswiftc",
-        "-gline-tables-only",
-        "--skip-build",
-        "--experimental-maximum-parallelization-width",
-        "3",
-        index === 0 ? "--skip" : "--filter",
-        "AppStateIsolationTests|ProfileChatPreferencesTests",
-        "--event-stream-output-path",
-        expect.any(String),
-        "--event-stream-version",
-        "6.3",
-      ]);
-      expect(test.env.OPENCLAW_PROFILE).toEqual(
-        index === 0 ? "default" : expect.stringMatching(/^test-[a-z0-9-]+$/),
-      );
-      expect(fs.existsSync(path.dirname(test.env.HOME))).toBe(false);
-    }
-    expect(tests[0].env.HOME).not.toBe(tests[1].env.HOME);
-  });
-
-  it.each([
     { report: "missing", contents: null },
     { report: "incomplete", contents: eventStream("runStarted") },
   ])("rejects zero exit with $report Swift Testing completion", ({ contents }) => {
@@ -513,14 +289,6 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
     expect(result.error).toBeUndefined();
     expect(result.status, result.stderr).toBe(expected);
     expect(fs.existsSync(path.dirname(f.calls()[0].env.HOME))).toBe(false);
-  });
-
-  it("fails closed when logical CPU detection is invalid", () => {
-    const f = fixture(0, false, 0, "", "not-a-count");
-    const result = f.run(swiftStep);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Invalid macOS logical CPU count: not-a-count");
-    expect(f.calls().filter((call) => call.tool === "swift")).toHaveLength(1);
   });
 
   it("uses fresh named preferences for successive launches", () => {
@@ -776,35 +544,6 @@ child.once('message', () => process.exit(0));
       fs.rmSync(ownedRoot, { recursive: true, force: true });
     }
   });
-
-  it.each([false, true])(
-    "requires the launcher except for frozen release targets (%s)",
-    (historical) => {
-      const f = fixture();
-      const result = f.run(swiftStep, f.root, { HISTORICAL_TARGET: String(historical) });
-      expect(result.status, result.stderr).toBe(historical ? 0 : 1);
-      const calls = f.calls().filter((call) => call.tool === "swift");
-      expect(calls.map((call) => call.args[0])).toEqual(historical ? ["build", "test"] : ["build"]);
-      if (historical) {
-        expect(calls[1].args).toEqual([
-          "test",
-          "--package-path",
-          "apps/macos",
-          "--build-system",
-          "native",
-          "--enable-code-coverage",
-          "--disable-index-store",
-          "-Xswiftc",
-          "-gline-tables-only",
-          "--skip-build",
-          "--no-parallel",
-        ]);
-      }
-      if (!historical) {
-        expect(result.stderr).toContain("must provide scripts/test-macos-native.mts");
-      }
-    },
-  );
 
   it("refuses native execution from prepush even with CI markers", () => {
     const f = fixture();

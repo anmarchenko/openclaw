@@ -814,10 +814,7 @@ describe("test-projects args", () => {
     },
     {
       changedPath: ".github/actions/setup-node-env/dependency-fingerprint.mjs",
-      targets: [
-        "test/scripts/ci-workflow-guards.test.ts",
-        "test/scripts/setup-node-env-dependency-fingerprint.test.ts",
-      ],
+      targets: ["test/scripts/setup-node-env-dependency-fingerprint.test.ts"],
     },
   ])("routes $changedPath changes to focused tooling tests", ({ changedPath, targets }) => {
     const changedPaths = [changedPath];

@@ -188,6 +188,8 @@ const config = {
   // This fixture deliberately mixes used, aliased, and unused exports so the
   // topology analyzer can prove each classification.
   ignoreIssues: {
+    // ci-build-manifest loads this target-owned module through a computed file URL.
+    "scripts/lib/ci-native-generated-scope.mjs": ["exports"],
     // The memory-state compatibility facade must retain its pre-registry-bundle type export.
     "src/plugins/memory-state.ts": ["types"],
     "test/fixtures/ts-topology/basic/**": [

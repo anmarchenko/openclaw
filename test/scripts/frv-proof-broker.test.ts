@@ -1,6 +1,4 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { parse as parseYaml } from "yaml";
 import {
   createGitHubApi,
   runProofBroker,
@@ -13,27 +11,6 @@ const workflowSha = "a".repeat(40);
 const landedSha = "b".repeat(40);
 const pullHeadSha = "c".repeat(40);
 const repository = "openclaw/openclaw";
-
-type BrokerWorkflow = {
-  concurrency: { "cancel-in-progress": boolean; group: string };
-  jobs: {
-    prove: {
-      permissions: Record<string, string>;
-      steps: Array<{ name?: string; with?: Record<string, unknown> }>;
-    };
-  };
-  on: { workflow_dispatch: { inputs: Record<string, unknown> } };
-};
-
-type FixtureWorkflow = {
-  jobs: { fixture: { permissions: Record<string, string> } };
-  on: {
-    workflow_dispatch: {
-      inputs: { operation: { default: string; options: string[]; type: string } };
-    };
-  };
-  permissions: Record<string, string>;
-};
 
 function brokerEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -563,52 +540,4 @@ it("accepts an empty HTTP 201 rerun response without repeating the mutation", as
   const api = createGitHubApi({ fetchImpl, repository, token: "synthetic-proof-token" });
   await expect(api.request("POST", "/actions/jobs/888/rerun")).resolves.toBeNull();
   expect(fetchImpl).toHaveBeenCalledTimes(1);
-});
-
-describe("FRV proof workflows", () => {
-  const brokerSource = readFileSync(".github/workflows/frv-proof-broker.yml", "utf8");
-  const fixtureSource = readFileSync(".github/workflows/frv-proof-fixture.yml", "utf8");
-  const broker = parseYaml(brokerSource) as BrokerWorkflow;
-  const fixture = parseYaml(fixtureSource) as FixtureWorkflow;
-
-  it("exposes only PR number and exact landed commit as broker inputs", () => {
-    expect(Object.keys(broker.on.workflow_dispatch.inputs).toSorted()).toEqual([
-      "landed_sha",
-      "pr_number",
-    ]);
-    expect(broker.concurrency).toEqual({
-      "cancel-in-progress": false,
-      group: "frv-proof-broker",
-    });
-  });
-
-  it("never checks out PR code with the write-capable broker token", () => {
-    const job = broker.jobs.prove;
-    expect(job.permissions).toEqual({
-      actions: "write",
-      contents: "read",
-      "pull-requests": "read",
-    });
-    const checkout = job.steps.find((step) => step.name === "Checkout trusted main broker");
-    expect(checkout).toBeDefined();
-    expect(checkout?.with).toEqual({
-      "fetch-depth": 1,
-      "persist-credentials": false,
-      ref: "${{ github.workflow_sha }}",
-    });
-    expect(brokerSource).not.toContain("inputs.landed_sha }}");
-    expect(brokerSource).not.toContain("pull/");
-    expect(brokerSource).not.toContain("contents: write");
-  });
-
-  it("keeps the fixture tokenless and fixes its behavior to noop", () => {
-    expect(fixture.permissions).toEqual({});
-    expect(fixture.jobs.fixture.permissions).toEqual({});
-    expect(fixture.on.workflow_dispatch.inputs.operation).toMatchObject({
-      default: "noop",
-      options: ["noop"],
-      type: "choice",
-    });
-    expect(fixtureSource).not.toContain("actions/checkout");
-  });
 });

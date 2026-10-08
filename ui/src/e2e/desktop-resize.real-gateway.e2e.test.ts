@@ -1,3 +1,5 @@
+/** @datadog {"unskippable": true} */
+// CI requires the proof artifacts produced by this suite on every run.
 import { createHash } from "node:crypto";
 import { renameSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";

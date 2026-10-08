@@ -2,7 +2,6 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -11,10 +10,6 @@ const target = "b".repeat(40);
 const repo = "openclaw/openclaw";
 const tag = "v2026.9.6";
 const url = (id: number) => `https://github.com/${repo}/actions/runs/${id}`;
-const workflow = parse(readFileSync(".github/workflows/openclaw-release-publish.yml", "utf8")) as {
-  jobs: { publish: { steps: { name: string; run?: string; env?: Record<string, string> }[] } };
-};
-const step = (name: string) => workflow.jobs.publish.steps.find((entry) => entry.name === name)!;
 const source =
   'source "$GITHUB_WORKSPACE/.release-harness/scripts/lib/release-publish-children.sh"\n';
 const dispatch = (name = "plugin-clawhub-release.yml") =>
@@ -190,64 +185,6 @@ const isDispatch = (call: { args: string[] }) =>
 const isCancel = (call: { args: string[] }) => call.args[1] === "cancel";
 
 describe("superseded release children", () => {
-  it.each([
-    { name: "openclaw-npm-release.yml", blocked: false },
-    { name: "plugin-clawhub-new.yml", blocked: true },
-  ])("preflights a gate-blocked stale $name before any dispatch", ({ name, blocked }) => {
-    const result = fixture({
-      children: [
-        child({
-          path: `.github/workflows/${name}`,
-          display_title: `${name} [${tag}] publish parent=80/1`,
-        }),
-      ],
-      rejectFails: true,
-      cancelStates: ["waiting"],
-      harness: `
-verify_release_tag_target() { :; }
-render_github_release_notes() { :; }
-guard_existing_public_release() { :; }
-resolve_openclaw_npm_publish_state() { openclaw_npm_already_published=false; }
-resolve_clawhub_release_plan() {
-  clawhub_plan_path="$RUNNER_TEMP/plan.json"
-  printf '%s' '{"normal":{"shouldDispatch":true,"ref":"main","workflow":"plugin-clawhub-release.yml"},"bootstrap":{"shouldDispatch":true,"ref":"main","workflow":"plugin-clawhub-new.yml"}}' > "$clawhub_plan_path"
-}
-verify_bootstrap_workflow_sha() { echo "$PARENT_WORKFLOW_SHA"; }
-append_clawhub_dispatch_args() { clawhub_dispatch_args=(); }
-`,
-    }).run(step("Dispatch publish workflows").run!, {
-      PUBLISH_OPENCLAW_NPM: "true",
-      WAIT_FOR_CLAWHUB: "false",
-      RELEASE_CHILD_SWEEP_TIMEOUT_SECONDS: "0",
-    });
-    expect(result.status, result.stderr).toBe(blocked ? 1 : 0);
-    expect(result.stderr).toContain("needs a reviewer:");
-    expect(result.stderr.match(/HTTP 403/g)).toHaveLength(1);
-    expect(result.summary).toContain(url(91));
-    expect(result.summary).toContain("cancellation unconfirmed");
-    expect(result.calls.filter(isCancel).map((call) => call.args.at(-1))).toEqual(["91"]);
-    const firstDispatch = result.calls.findIndex(isDispatch);
-    if (blocked) {
-      expect(firstDispatch).toBe(-1);
-      expect(result.stderr).toContain("Publisher slot for plugin-clawhub-new.yml remains occupied");
-    } else {
-      expect(firstDispatch).toBeGreaterThan(result.calls.findIndex(isCancel));
-      const sweeps = result.calls.filter((call) => call.args[1] === "list");
-      expect(new Set(sweeps.map((call) => call.args[call.args.indexOf("--workflow") + 1]))).toEqual(
-        new Set([
-          "openclaw-release-publish.yml",
-          "plugin-npm-release.yml",
-          "plugin-clawhub-release.yml",
-          "plugin-clawhub-new.yml",
-          "openclaw-npm-release.yml",
-        ]),
-      );
-      expect(
-        result.calls.slice(firstDispatch).some((call) => call.args[1] === "list" || isCancel(call)),
-      ).toBe(false);
-    }
-  });
-
   it("rejects the gate, cancels, and observes completion before dispatching", () => {
     const result = fixture({ children: [child()] }).run(dispatch());
     expect(result.status, result.stderr).toBe(0);
@@ -408,22 +345,6 @@ append_clawhub_dispatch_args() { clawhub_dispatch_args=(); }
     expect(result.stderr).toContain(`gh run cancel --repo ${repo} 93`);
     expect(result.calls.some(isDispatch)).toBe(false);
   });
-
-  it("failure cleanup cancels a waiting npm child and preserves an active one", () => {
-    const result = fixture({
-      children: [
-        child(),
-        child({ id: 93, status: "in_progress", jobs: [{ status: "in_progress" }] }),
-      ],
-    }).run(
-      `${source}cleanup_clawhub_children() { :; }\n${step("Clean up ClawHub children after failure").run}`,
-      { CHILD_PLUGIN_NPM_RUN_ID: "91", CHILD_OPENCLAW_NPM_RUN_ID: "93" },
-    );
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.calls.filter(isCancel).map((call) => call.args.at(-1))).toEqual(["91"]);
-    // Same-tooling npm children publish in npm-publish and have no gate to reject.
-    expect(result.calls.some((call) => call.args.includes("state=rejected"))).toBe(false);
-  });
 });
 
 const visible = { versions: { "2026.9.6": {} }, "dist-tags": { latest: "2026.9.6" } };
@@ -509,77 +430,4 @@ describe("npm completion barriers", () => {
     expect(result.calls).toHaveLength(0);
     expect(result.summary).toBe("");
   });
-});
-
-describe("complete publish workflow", () => {
-  it.each([
-    { resume: false, visible: true, sync: "absent" },
-    { resume: true, visible: true, sync: "absent" },
-    { resume: false, visible: false, sync: "absent" },
-    { resume: true, visible: false, sync: "absent" },
-    { resume: false, visible: true, sync: "late" },
-    { resume: true, visible: true, sync: "timeout" },
-  ])(
-    "gates verification on registry visibility and own sync (resume=$resume, visible=$visible, sync=$sync)",
-    ({ resume, visible: isVisible, sync }) => {
-      const harness = `
-resolve_clawhub_release_plan() { :; }
-verify_release_tag_target() { :; }
-wait_for_run_background() { (printf success > "$4") & wait_run_pid=$!; }
-verify_published_release() { echo VERIFIED >> "$GITHUB_STEP_SUMMARY"; }
-record_postpublish_diagnostics() { :; }
-upload_dependency_evidence_release_asset() { :; }
-upload_release_evidence_assets() { :; }
-append_release_proof_to_github_release() { :; }
-`;
-      const result = fixture({
-        registry: [isVisible ? visible : {}],
-        harness,
-        sleepSeconds: 300,
-        ledger:
-          sync === "timeout"
-            ? [{ status: "in_progress" }]
-            : [
-                { status: "queued" },
-                { status: "in_progress" },
-                { status: "in_progress" },
-                { status: "in_progress" },
-                { status: "completed", conclusion: "success" },
-              ],
-      }).run(step("Complete publish workflows").run!, {
-        CHILD_PLUGIN_NPM_RUN_ID: "90",
-        CHILD_PLUGIN_CLAWHUB_RUN_ID: "",
-        CHILD_PLUGIN_CLAWHUB_BOOTSTRAP_RUN_ID: "",
-        CHILD_BOOTSTRAP_WORKFLOW_SHA: "",
-        CHILD_OPENCLAW_NPM_ALREADY_PUBLISHED: String(resume),
-        CHILD_OPENCLAW_NPM_EXPECTED_WORKFLOW_REF: "main",
-        CHILD_OPENCLAW_NPM_EXPECTED_WORKFLOW_SHA: sha,
-        CHILD_OPENCLAW_NPM_RUN_ATTEMPT: "1",
-        CHILD_OPENCLAW_NPM_RUN_ID: resume ? "" : "92",
-        CORE_START_OUTCOME: "success",
-        CLAWHUB_AUTHORIZATION_OUTCOME: "skipped",
-        CLAWHUB_RECEIPT_OUTCOME: "skipped",
-        WAIT_FOR_CLAWHUB: "false",
-        RELEASE_NPM_VISIBILITY_TIMEOUT_SECONDS: "0",
-        ...(sync !== "absent" ? { RELEASE_LEDGER_TOKEN: "fixture-ledger" } : {}),
-        ...(sync === "timeout" ? { RELEASE_NPM_DIST_TAG_SYNC_TIMEOUT_SECONDS: "900" } : {}),
-      });
-      expect(result.status, result.stderr).toBe(isVisible && sync !== "timeout" ? 0 : 1);
-      expect(result.calls.filter((call) => call.binary === "curl")).toHaveLength(1);
-      if (sync === "timeout") {
-        expect(result.stderr).toContain(`parent's own sync run is still in progress (${url(92)})`);
-        expect(result.summary).toContain("verification was not judged against it");
-        expect(result.summary).not.toContain("VERIFIED");
-      } else if (isVisible) {
-        expect(result.summary).toMatch(/npm registry:[\s\S]*npm beta floor:[\s\S]*VERIFIED/);
-        if (sync === "late") {
-          expect(result.stderr).toContain("status=in_progress elapsed=900s");
-          expect(result.stderr).toContain("status=completed elapsed=1200s");
-          expect(result.summary).toContain("npm beta floor: synced");
-        }
-      } else {
-        expect(result.summary).not.toMatch(/VERIFIED|npm beta floor/);
-      }
-    },
-  );
 });

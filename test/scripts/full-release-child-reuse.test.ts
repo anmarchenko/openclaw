@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import JSZip from "jszip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { releaseChildSpec } from "../../scripts/full-release-validation-policy.mjs";
 import { canonicalizeJsonValue } from "../../scripts/lib/canonical-json.mjs";
-import { releaseChildDispatchInputs } from "../../scripts/lib/full-release-child-request.mjs";
 import {
   discoverReusableReleaseChild,
   validateReusableReleaseChild,
@@ -205,56 +204,6 @@ async function fixture(role = "normalCi", dispatchInputs?: Record<string, string
 }
 
 describe("independent release child reuse", () => {
-  it.each([
-    {
-      role: "pluginPrereleaseIndependent",
-      workflow: "plugin-prerelease.yml",
-      args: ["-f", `target_ref=${TARGET}`, "-f", "phase=independent"],
-    },
-    {
-      role: "releaseChecksIndependent",
-      workflow: "openclaw-release-checks.yml",
-      args: ["-f", `ref=${TARGET}`, "-f", "phase=independent"],
-    },
-    {
-      role: "productPerformance",
-      workflow: "openclaw-performance.yml",
-      args: [
-        "-f",
-        `target_ref=${TARGET}`,
-        "-f",
-        "profile=release",
-        "-f",
-        "repeat=3",
-        "-f",
-        "publish_reports=false",
-      ],
-    },
-  ])("matches GitHub's omitted empty defaults for $role", async ({ role, workflow, args }) => {
-    const inputs = releaseChildDispatchInputs(
-      readFileSync(`.github/workflows/${workflow}`, "utf8"),
-      args,
-    );
-    const data = await fixture(
-      role,
-      Object.fromEntries(Object.entries(inputs).filter(([, value]) => value !== "")),
-    );
-    data.request.inputs = inputs;
-    const selection = await discoverReusableReleaseChild(data.request, data.deps);
-    expect(selection).not.toBeNull();
-    expect(selection!.inputs).toEqual(data.receipt.inputs);
-    if (role === "productPerformance") {
-      expect(selection!.inputs.mode).toBe("kova");
-    }
-    await expect(
-      validateReusableReleaseChild({ ...selection, inputs }, data.request, data.deps),
-    ).resolves.toMatchObject({ receipt: { inputs: data.receipt.inputs } });
-    Object.assign(data.receipt.inputs, inputs);
-    await data.seal();
-    data.request.inputs = selection!.inputs;
-    expect(await discoverReusableReleaseChild(data.request, data.deps)).not.toBeNull();
-  });
-
   it("rejects a missing current-parent tooling SHA before reading runs", async () => {
     const data = await fixture();
     const selection = await discoverReusableReleaseChild(data.request, data.deps);

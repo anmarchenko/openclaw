@@ -2,6 +2,7 @@ node_modules
 
 # Datadog official CI action installation artifacts
 /.datadog/
+.testoptimization/
 /install_test_visibility.sh
 **/node_modules/
 .env
