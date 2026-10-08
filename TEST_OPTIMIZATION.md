@@ -1,76 +1,25 @@
-# Datadog Test Optimization on the personal fork
+# Datadog Test Optimization
 
-The GitHub-hosted baseline is recorded in [PR #1](https://github.com/anmarchenko/openclaw/pull/1), including every test job and its duration: 26h 03m 26s of aggregate runner execution and 1h 47m 58s elapsed. Keep runner selection and the test matrix unchanged when comparing TIA savings.
+CI uses the official `ddtest` CLI to plan and execute supported test suites. The comparison baseline is [PR #2](https://github.com/anmarchenko/openclaw/pull/2). There is no fixed-runner control arm or separate comparison workflow.
 
-## Configuration
+## Setup
 
-Set the `DD_API_KEY` Actions secret. The official action uses its default Datadog site.
+Set the Actions secret `DD_API_KEY`. The workflow installs the official ddtest release and the official `DataDog/test-visibility-github-action` with the latest tracer. Tests use service `openclaw-tests`, environment `ci`, and the default Datadog site.
 
-All supported Node/Vitest lanes use **one service, `openclaw-tests`**, with `DD_ENV=ci`. There is no E2E classification or service selection in the launcher.
+`DD_CIVISIBILITY_ITR_ENABLED` is the repository variable controlling TIA, defaulting to `true`. Early flake detection and automatic retries remain disabled. The existing OpenAI, HTTP, and OpenTelemetry instrumentation opt-outs and Node builtin compatibility preload from PR #2 remain in place.
 
-The repository variable **`DD_CIVISIBILITY_ITR_ENABLED`** is the single TIA switch, defaulting to `true`. Set it to the literal `false` to disable suite skipping while retaining test reporting. `true` permits skipping when enabled in the service's Datadog settings. Changes apply to the next run. The former `OPENCLAW_DD_TIA_TESTS` and `OPENCLAW_DD_TIA_E2E` variables are no longer read.
+## Execution
 
-In the previously validated dd-trace 6.18.0 Vitest integration, local `false` prevents fetching and selecting skippable suites, but coverage collection and the `test.itr.tests_skipping.enabled` tag still follow backend settings. That tag alone does not prove skipping occurred. Disabling backend TIA also disables its coverage collection.
+For Node/Vitest families and Control UI, a planning job runs `ddtest plan`. Its emitted matrix determines the number of test runners. Workers download `.testoptimization` and execute `ddtest run --ci-node ...`. Checkout is shallow. OpenClaw's preflight still supplies selected files, runtime prerequisites, and resource boundaries; ddtest owns skipping and partitioning within those boundaries. Vitest's old shard argument is not combined with ddtest assignments.
 
-## Why the launcher needs a small hook
+Existing singleton proof, contract, and platform boundaries use a one-runner ddtest plan. Python skills tests use ddtest's pytest integration. Plans sharing a working directory execute serially because ddtest stores its plan in `.testoptimization`.
 
-The official `DataDog/test-visibility-github-action` installs `dd-trace@latest` and exports the Datadog settings. There is no custom setup action or pinned tracer version. Datadog automatically instruments Vitest; no tests are manually wrapped.
+Bun and dual-runtime routing retain their existing runner because ddtest's JavaScript integration supports Node, not Bun. Swift, Android, custom QA process verifiers, lint, builds, and security audits retain their existing tools. Frozen target fallbacks remain explicit compatibility paths.
 
-The existing `resolveVitestTestCommand` adds the CI and ESM preloads to the final Node/Vitest child's `NODE_OPTIONS`, preserving its memory flags and test arguments. Both direct and batch callers forward that environment. OpenClaw overwrites Node options while constructing shard environments, so an earlier job-wide preload would be lost. Build/preparation and Bun commands remain uninstrumented. Vitest workers inherit the preloads before test setup clears `NODE_OPTIONS` from fixture environments.
+The former `scripts/ci-ddtest-tooling.mts` adapter and paired `ddtest-tooling.yml` workflow are removed. Native ddtest invokes Vitest directly. Vitest test/hook deadlines and GitHub job deadlines remain; the former OpenClaw launcher-specific no-output watchdog does not apply to direct execution.
 
-The launcher consumes the [official action](https://github.com/DataDog/test-visibility-github-action)'s `DD_TRACE_PACKAGE` and `DD_TRACE_ESM_IMPORT` variables. No installation-path adapter is needed.
+## Results
 
-## Compatibility fixes retained
+Report the main CI run against PR #2 only. Include planning jobs and setup time in aggregate runner duration. Separate queue-inclusive wall time from assigned runner time, and compare equivalent completed workloads. Jobs that never acquired runners are not savings. Backend omissions made during ddtest planning and tracer-reported TIA events are distinct measurements.
 
-- The small ESM preload imports Datadog's stock loader and preserves native Node builtin identities. Stock builtin proxies broke `syncBuiltinESMExports()` and produced resolved builtin URLs unusable in uninstrumented child processes. Package hooks, including Vitest instrumentation, remain enabled.
-- `DD_TRACE_OPENAI_ENABLED=false` prevents OpenAI tracing from mutating streamed SDK chunks.
-- `DD_TRACE_HTTP_ENABLED=false` preserves Node raw header arrays that HTTP propagation otherwise converts incorrectly.
-- `DD_TRACE_OTEL_ENABLED=false` keeps the application's native OpenTelemetry provider and OTLP exporter contract.
-
-Standalone probes reproduced all three application-instrumentation failures with `dd-trace@latest` (6.19.0 on 2026-10-01); each passed with its corresponding opt-out. The native builtin-binding probe also still failed with the stock loader. Recheck these workarounds when a tracer release fixes the underlying behavior. These exclusions preserve Vitest reporting and TIA. Datadog early flake detection and automatic retries stay disabled to preserve the comparison workload.
-
-## Coverage and verification
-
-The single TIA switch applies equally to normal and Node-driven E2E tests. Enabling it does not establish complete dependency coverage: Chromium and separately spawned Gateway/CLI processes are not covered by the test worker's V8 coverage. Validate representative application edits before treating skips as safe for those subprocesses. Datadog disables TIA for Vitest browser-mode invocations itself. Non-isolated workers may conservatively accumulate coverage and skip fewer suites.
-
-Bun tests, custom non-Vitest QA flows, native platform jobs, static checks and non-Vitest build verifiers are excluded. Frozen historical targets do not contain this launcher integration. The main CI matrix remains unchanged; the separate ddtest pilot below compares scheduling for one compatible cohort.
-
-Verify individual worker events for `openclaw-tests`, filtered by CI pipeline ID and PR head (`git.commit.head.sha`). Check actual suite-skip events separately from enabled tags. Historical runs used two services; their results do not prove the unified configuration.
-
-Compare equivalent changes with TIA off and on, recording selected/skipped suites, test-step time, summed assigned runner execution and queue-inclusive elapsed time. Preserve every test-job duration. Calculate monetary savings only from actual billed runner prices; public-repository standard GitHub-hosted runners can have zero direct runner charges.
-
-## Dynamic runner pilot
-
-The `DDTest tooling comparison` workflow runs only on the personal fork's
-`anmarchenko/ddtest-dynamic-tooling` branch or by explicit dispatch. It compares
-the canonical no-build, Node-only tooling stripes with a dynamically sized
-matrix from ddtest 1.11.0 (the current official release when the pilot was created).
-Both arms use the same checkout, runner image, setup, tracer, TIA settings and
-original OpenClaw test runner. Both arms and the planner use a shallow checkout
-(`fetch-depth: 1`). Datadog may fetch additional Git metadata as needed; include
-that work in the measured job duration. No test assertions, deadlines or retry settings change.
-
-The planner derives the complete compatible cohort from OpenClaw's canonical
-fork-push manifest. It rejects mixed environments or special build/toolchain
-requirements. ddtest uses the official [file-list integration](https://github.com/DataDog/ddtest/blob/main/docs/third-party-runners.md):
-Vitest discovery and backend durations/TIA information select the number of
-runners and their files; OpenClaw retains process supervision and instrumentation.
-The minimum is one runner and the maximum is the original cohort size. The
-64-second per-job overhead estimate comes from the latest completed cohort's
-900 non-test runner-seconds across 14 jobs. No target-time override is imposed.
-
-Before either arm executes, the helper verifies that every canonical file is
-either runnable or explicitly listed as a Vitest suite in the plan’s cached
-backend TIA response, and that every runnable file occurs in exactly one split,
-and the matrix count matches ddtest's output. Empty assignments are recorded
-explicitly. SHA-bound inventory, plan and execution receipts are uploaded as
-artifacts, including the hidden `.testoptimization` directory.
-
-Compare the sum of **planner plus all dynamic worker durations** against all
-fixed workers, including checkout, installation, upload and cleanup. Also report
-test-step time, queue-inclusive elapsed time, actual runner count and executed
-suite identities. The shared planning prerequisite is charged only to the ddtest
-arm for cost comparison; it is not a cost saving for the control. Missing runner
-allocations or failed/incomplete workloads invalidate a savings claim. Repeated
-same-SHA runs are not automatically independent measurements: backend history,
-cache state and runner variability can affect both arms.
+The migration must complete hosted CI before runtime or cost improvements can be claimed. Browser and separately spawned Gateway/CLI subprocess coverage remains incomplete; an enabled TIA tag alone does not establish safe skipping.

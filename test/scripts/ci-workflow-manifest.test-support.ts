@@ -614,7 +614,11 @@ export function runCiManifestFixture(options: {
     );
     const trustedReleasePolicy = path.join(root, ".ci-harness/scripts/lib");
     mkdirSync(trustedReleasePolicy, { recursive: true });
-    for (const name of ["release-context.mjs", "release-version.mjs"]) {
+    for (const name of [
+      "release-context.mjs",
+      "release-version.mjs",
+      "ci-node-test-groups-codec.mts",
+    ]) {
       writeFileSync(path.join(trustedReleasePolicy, name), readFileSync(`scripts/lib/${name}`));
     }
     copyFileSync(
@@ -758,9 +762,50 @@ export function runCiManifestFixture(options: {
           return [line.slice(0, separator), line.slice(separator + 1)];
         }),
     );
+    let cohortRun: ReturnType<typeof runWorkflowShellScript> | undefined;
+    let cohortOutputChars = 0;
+    let planningOutput = "";
+    const preflight = readCiWorkflow().jobs.preflight;
+    for (const [id, selected, env] of [
+      [
+        "ddtest-cohorts",
+        outputs.run_checks_node_core_nondist,
+        { NODE_MATRIX: outputs.checks_node_core_nondist_matrix },
+      ],
+      ["ddtest-ui", outputs.run_ui_e2e, { UI_E2E_MATRIX: outputs.ui_e2e_matrix }],
+    ] as const) {
+      if (run.status !== 0 || selected !== "true" || (cohortRun && cohortRun.status !== 0))
+        continue;
+      const step = expectDefined(
+        preflight.steps.find((candidate: WorkflowStep) => candidate.id === id),
+        id,
+      );
+      const stepOutput = path.join(root, `${id}.out`);
+      writeFileSync(stepOutput, "");
+      cohortRun = runWorkflowShellScript(step.run, {
+        cwd: root,
+        env: { ...process.env, ...env, GITHUB_OUTPUT: stepOutput },
+      });
+      planningOutput += `${cohortRun.stdout}${cohortRun.stderr}`;
+      const values = readWorkflowOutputs(stepOutput);
+      for (const [name, expression] of Object.entries(preflight.outputs ?? {})) {
+        const prefix = `\${{ steps.${id}.outputs.`;
+        if (String(expression).startsWith(prefix)) {
+          const key = String(expression)
+            .slice(prefix.length)
+            .replace(/ \}\}$/u, "");
+          outputs[name] = values[key] ?? "";
+        }
+      }
+      cohortOutputChars += readFileSync(stepOutput, "utf8").length;
+    }
     const checkPlanOutputs: Record<string, string> = {};
     let checkPlanRun: ReturnType<typeof runWorkflowShellScript> | undefined;
-    if (run.status === 0 && outputs.run_check_plan === "true") {
+    if (
+      run.status === 0 &&
+      (!cohortRun || cohortRun.status === 0) &&
+      outputs.run_check_plan === "true"
+    ) {
       const checkPlanStep = expectDefined(
         readCiWorkflow().jobs["check-plan"].steps.find((step: WorkflowStep) => step.id === "plan"),
         "dependency-equipped check planner",
@@ -786,11 +831,11 @@ export function runCiManifestFixture(options: {
       Object.assign(checkPlanOutputs, readWorkflowOutputs(checkPlanOutputPath));
     }
     return {
-      output: `${run.stdout}${run.stderr}${checkPlanRun?.stdout ?? ""}${checkPlanRun?.stderr ?? ""}`,
-      outputChars: readFileSync(outputPath, "utf8").length,
+      output: `${run.stdout}${run.stderr}${planningOutput}${checkPlanRun?.stdout ?? ""}${checkPlanRun?.stderr ?? ""}`,
+      outputChars: readFileSync(outputPath, "utf8").length + cohortOutputChars,
       outputs,
       checkPlanOutputs,
-      status: checkPlanRun ? checkPlanRun.status : run.status,
+      status: checkPlanRun ? checkPlanRun.status : cohortRun ? cohortRun.status : run.status,
       summary: readFileSync(summaryPath, "utf8"),
     };
   } finally {

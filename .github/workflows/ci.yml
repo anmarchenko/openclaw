@@ -78,7 +78,7 @@ on:
         default: ""
         type: string
   push:
-    branches: [main, anmarchenko/datadog-test-optimization]
+    branches: [main, anmarchenko/datadog-test-optimization, anmarchenko/ddtest-dynamic-tooling]
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -179,6 +179,12 @@ jobs:
       source_channel_test_env_json: ${{ steps.manifest.outputs.source_channel_test_env_json }}
       run_checks_node_core_nondist: ${{ steps.manifest.outputs.run_checks_node_core_nondist }}
       checks_node_core_nondist_matrix: ${{ steps.manifest.outputs.checks_node_core_nondist_matrix }}
+      checks_node_ddtest_matrix: ${{ steps.ddtest-cohorts.outputs.matrix }}
+      run_checks_node_ddtest: ${{ steps.ddtest-cohorts.outputs.run_node }}
+      checks_node_bun_matrix: ${{ steps.ddtest-cohorts.outputs.bun_matrix }}
+      run_checks_node_bun: ${{ steps.ddtest-cohorts.outputs.run_bun }}
+      run_ui_ddtest: ${{ steps.ddtest-ui.outputs.run }}
+      ui_ddtest_max_runners: ${{ steps.ddtest-ui.outputs.max_runners }}
       run_checks_node_core_dist: ${{ steps.manifest.outputs.run_checks_node_core_dist }}
       run_check: ${{ steps.manifest.outputs.run_check }}
       startup_corpus_node_revision: ${{ steps.manifest.outputs.startup_corpus_node_revision }}
@@ -1464,6 +1470,80 @@ jobs:
           fi
           node "${manifest_node_args[@]}" .ci-harness/scripts/ci-build-manifest.mjs
 
+      - name: Group selected Node configurations for ddtest
+        id: ddtest-cohorts
+        if: steps.manifest.outputs.run_checks_node_core_nondist == 'true'
+        env:
+          NODE_MATRIX: ${{ steps.manifest.outputs.checks_node_core_nondist_matrix }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from "node:fs";
+          import { createHash } from "node:crypto";
+          import { gzipSync } from "node:zlib";
+          import { decodeNodeTestGroups } from "./.ci-harness/scripts/lib/ci-node-test-groups-codec.mts";
+          // Retain the manifest's selections and process prerequisites. ddtest alone
+          // performs test discovery, TIA selection, balancing, and runner sizing.
+          const cohorts = new Map();
+          const rows = JSON.parse(process.env.NODE_MATRIX).include;
+          const bunRows = rows.filter((row) => row.requires_bun === true || (row.test_runtime_policy && row.test_runtime_policy !== "node"));
+          const nodeRows = rows.filter((row) => !bunRows.includes(row));
+          for (const [rowIndex, row] of nodeRows.entries()) {
+            const groups = row.groups_gzip_base64 ? decodeNodeTestGroups(row.groups_gzip_base64) : row.groups ?? [row];
+            for (const group of groups) {
+              if (!Array.isArray(group.configs) || !group.configs.length || group.targets?.length) {
+                throw new Error("ddtest cohorts require explicit canonical Vitest configurations");
+              }
+              const env = Object.fromEntries(Object.entries({ ...row.env, ...group.env }).sort(([a], [b]) => a.localeCompare(b)));
+              for (const config of group.configs) {
+                const owner = {
+                  config, env_json: JSON.stringify(env),
+                  build: row.pretest_build_mode ?? "",
+                  go: row.requires_go === true, ripgrep: row.requires_ripgrep === true,
+                  sandbox: row.requires_sandbox_image === true,
+                  git_commits_json: JSON.stringify([...(row.git_commits ?? [])].sort()),
+                  node_version: row.node_version ?? "24.x",
+                  runtime_policy: row.test_runtime_policy ?? "node",
+                  requires_bun: row.requires_bun === true,
+                  timeout_minutes: row.timeout_minutes ?? 60,
+                  fallback_max_workers: group.fallbackMaxWorkers ?? 0,
+                  min_total_memory_bytes: group.minTotalMemoryBytes ?? 0,
+                  plan_concurrency: String(row.plan_concurrency ?? ""),
+                  runner: row.runner === "blacksmith-8vcpu-ubuntu-2404" && ["checks-node-compact-large-9", "checks-node-compact-large-5"].includes(row.check_name) ? "blacksmith-16vcpu-ubuntu-2404" : row.runner ?? "blacksmith-4vcpu-ubuntu-2404",
+                };
+                const key = JSON.stringify(owner);
+                if (!cohorts.has(key)) cohorts.set(key, { ...owner, rows: new Set(), includes: new Set(), full: false });
+                const cohort = cohorts.get(key);
+                cohort.rows.add(rowIndex);
+                if (group.includePatterns?.length) {
+                  for (const file of group.includePatterns) cohort.includes.add(file);
+                } else {
+                  cohort.full = true;
+                }
+              }
+            }
+          }
+          const include = [...cohorts.entries()].map(([key, { rows, includes, full, ...owner }]) => ({
+            ...owner,
+            suite: `${owner.config.split("/").at(-1).replace(/^vitest\./, "").replace(/\.config\.ts$/, "")}-${createHash("sha256").update(key).digest("hex").slice(0, 12)}`,
+            max_runners: rows.size,
+            selection_gzip_base64: full ? "" : gzipSync(JSON.stringify([...includes].sort())).toString("base64"),
+          }));
+          appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify({ include })}\nrun_node=${include.length > 0}\nbun_matrix=${JSON.stringify({ include: bunRows })}\nrun_bun=${bunRows.length > 0}\n`);
+          NODE
+
+      - name: Retain selected Control UI E2E capacity
+        id: ddtest-ui
+        if: steps.manifest.outputs.run_ui_e2e == 'true'
+        env:
+          UI_E2E_MATRIX: ${{ steps.manifest.outputs.ui_e2e_matrix }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from "node:fs";
+          const rows = JSON.parse(process.env.UI_E2E_MATRIX).include;
+          const count = rows.filter((row) => row.task === "control-ui").length;
+          appendFileSync(process.env.GITHUB_OUTPUT, `run=${count > 0}\nmax_runners=${Math.max(1, count)}\n`);
+          NODE
+
       - name: Check mobile protocol event coverage
         if: steps.manifest.outputs.run_protocol_event_coverage == 'true'
         env:
@@ -1686,6 +1766,10 @@ jobs:
     runs-on: &shared_16vcpu_linux_runner ${{ (github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '')), toJSON((needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-16vcpu-ubuntu-2404' || 'ubuntu-24.04')))) || ((needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-16vcpu-ubuntu-2404' || 'ubuntu-24.04')) }}
     # Hosted rows (github backend, hybrid retries, full-release dispatches, fork PRs) run slower.
     timeout-minutes: &hosted_budget_timeout_minutes ${{ ((needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) || (github.event_name == 'workflow_dispatch' && needs.preflight.outputs.ci_shape != 'main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)) && 35 || 20 }}
+    env:
+      DD_API_KEY: ${{ secrets.DD_API_KEY }}
+      DD_SERVICE: openclaw-tests
+      DD_ENV: ci
     steps:
       - &linux_node_checkout_step
         name: Checkout
@@ -1714,6 +1798,8 @@ jobs:
           api_key: ${{ secrets.DD_API_KEY }}
           service: openclaw-tests
           js-tracer-version: latest
+
+      - uses: ./.ci-harness/.github/actions/setup-ddtest
 
       - name: Restore dist build cache
         id: dist_build_cache
@@ -1773,10 +1859,10 @@ jobs:
         run: |
           set -euo pipefail
           rm -f "${RUNNER_TEMP}/browser-native-host.json"
-          node scripts/run-vitest.mjs run --config test/vitest/vitest.e2e.config.ts \
-            extensions/browser/src/browser/extension-install.native-host.e2e.test.ts \
-            --reporter=default --reporter=json \
-            --outputFile.json "${RUNNER_TEMP}/browser-native-host.json"
+          command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts --reporter=default --reporter=json --outputFile.json '$RUNNER_TEMP/browser-native-host.json' -- extensions/browser/src/browser/extension-install.native-host.e2e.test.ts"
+          ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+          NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+            ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
           node --input-type=module <<'BROWSER_PROOF_REPORT'
           import assert from "node:assert/strict";
           import { readFileSync } from "node:fs";
@@ -1867,6 +1953,8 @@ jobs:
             OPENCLAW_VITEST_FS_MODULE_CACHE_PATH="${RUNNER_TEMP}/vitest-module-cache/${name}" \
               "$@" >"$log" 2>&1 &
             pids+=("$!")
+            # ddtest owns one .testoptimization directory; finish each plan/run pair before the next.
+            wait_checks
           }
 
           wait_checks() {
@@ -1892,13 +1980,48 @@ jobs:
             logs=()
           }
 
+          run_sqlite_session_lifecycle() {
+            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts -- test/scripts/sqlite-sessions-transcripts-flip-proof.built-cli.e2e.test.ts"
+            OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 \
+              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+            OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+              ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
+          }
+
+          run_channels() {
+            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.channels.config.ts"
+            NODE_OPTIONS="$CHANNEL_NODE_OPTIONS" OPENCLAW_VITEST_MAX_WORKERS="$CHANNEL_MAX_WORKERS" \
+              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+            NODE_OPTIONS="$CHANNEL_NODE_OPTIONS --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" OPENCLAW_VITEST_MAX_WORKERS="$CHANNEL_MAX_WORKERS" \
+              ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
+          }
+
+          run_core_support_boundary() {
+            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.full-core-support-boundary.config.ts"
+            NODE_OPTIONS=--max-old-space-size=8192 OPENCLAW_VITEST_MAX_WORKERS=2 \
+              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+            NODE_OPTIONS="--max-old-space-size=8192 --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" OPENCLAW_VITEST_MAX_WORKERS=2 \
+              ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
+          }
+
+          run_tui_pty() {
+            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.tui-pty.config.ts --testNamePattern 'launches openclaw (chat as local mode|tui against a real Gateway) through a real PTY' -- src/tui/tui-pty-local.e2e.test.ts"
+            NODE_OPTIONS=--max-old-space-size=8192 OPENCLAW_TUI_PTY_INCLUDE_LOCAL=1 OPENCLAW_TUI_PTY_USE_BUILT_CLI=1 OPENCLAW_VITEST_MAX_WORKERS=2 \
+              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+            NODE_OPTIONS="--max-old-space-size=8192 --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" OPENCLAW_TUI_PTY_INCLUDE_LOCAL=1 OPENCLAW_TUI_PTY_USE_BUILT_CLI=1 OPENCLAW_VITEST_MAX_WORKERS=2 \
+              ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
+          }
+
           run_doctor_plugin_index() {
             if [[ -f test/scripts/doctor-config-preflight-plugin-index.built-cli.e2e.test.ts ]]; then
               # Cold hosted runners can spend over five minutes in E2E setup before
               # this proof's own bounded test can report a result.
-              env OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 node scripts/run-vitest.mjs run \
-                --config test/vitest/vitest.e2e.config.ts \
-                test/scripts/doctor-config-preflight-plugin-index.built-cli.e2e.test.ts
+              local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts -- test/scripts/doctor-config-preflight-plugin-index.built-cli.e2e.test.ts"
+              OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 \
+                ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+              OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 \
+                NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+                ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
             else
               echo "Selected target predates the built Doctor plugin index persistence proof."
             fi
@@ -1911,12 +2034,12 @@ jobs:
               return 0
             fi
             rm -f "${RUNNER_TEMP}/discord-component-attachments.json" || return
-            env OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_E2E_WORKERS=1 OPENCLAW_E2E_VERBOSE=1 OPENCLAW_VITEST_MAX_WORKERS=1 \
-              node scripts/run-vitest.mjs run --config test/vitest/vitest.e2e.config.ts \
-              "$test_file" \
-              --testNamePattern "preserves component attachment filenames through the public Gateway message action" \
-              --reporter=default --reporter=json \
-              --outputFile.json "${RUNNER_TEMP}/discord-component-attachments.json" || return
+            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts --testNamePattern 'preserves component attachment filenames through the public Gateway message action' --reporter=default --reporter=json --outputFile.json '$RUNNER_TEMP/discord-component-attachments.json' -- $test_file"
+            OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_E2E_WORKERS=1 OPENCLAW_E2E_VERBOSE=1 OPENCLAW_VITEST_MAX_WORKERS=1 \
+              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+            OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_E2E_WORKERS=1 OPENCLAW_E2E_VERBOSE=1 OPENCLAW_VITEST_MAX_WORKERS=1 \
+              NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+              ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0 || return
             node --input-type=module <<'DISCORD_PROOF_REPORT'
           import assert from "node:assert/strict";
           import { readFileSync } from "node:fs";
@@ -1986,24 +2109,15 @@ jobs:
           fi
 
           if [ "$RUN_SQLITE_SESSION_LIFECYCLE" = "true" ]; then
-            run_verifier "sqlite-session-lifecycle" env \
-              OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 \
-              node scripts/run-vitest.mjs run --config test/vitest/vitest.e2e.config.ts \
-              test/scripts/sqlite-sessions-transcripts-flip-proof.built-cli.e2e.test.ts
+            run_verifier "sqlite-session-lifecycle" run_sqlite_session_lifecycle
           fi
 
           if [ "$RUN_CHANNELS" = "true" ]; then
-            start_check "channels" env \
-              NODE_OPTIONS="$CHANNEL_NODE_OPTIONS" \
-              OPENCLAW_VITEST_MAX_WORKERS="$CHANNEL_MAX_WORKERS" \
-              pnpm test:channels
+            start_check "channels" run_channels
           fi
 
           if [ "$RUN_CORE_SUPPORT_BOUNDARY" = "true" ]; then
-            start_check "core-support-boundary" env \
-              NODE_OPTIONS=--max-old-space-size=8192 \
-              OPENCLAW_VITEST_MAX_WORKERS=2 \
-              node scripts/run-vitest.mjs run --config test/vitest/vitest.full-core-support-boundary.config.ts
+            start_check "core-support-boundary" run_core_support_boundary
           fi
 
           if [ "$RUN_DISCORD_COMPONENT_PROOF" = "true" ] && [ "$PARALLEL_BUILT_VERIFIERS" = "true" ]; then
@@ -2029,15 +2143,7 @@ jobs:
           # These canaries verify the built CLI's local roundtrip and Gateway connection.
           # Full plans retain the PTY descriptor, but CI consumes it only as this selection flag.
           if [ "$RUN_TUI_PTY" = "true" ]; then
-            start_check "tui-pty" env \
-              NODE_OPTIONS=--max-old-space-size=8192 \
-              OPENCLAW_TUI_PTY_INCLUDE_LOCAL=1 \
-              OPENCLAW_TUI_PTY_USE_BUILT_CLI=1 \
-              OPENCLAW_VITEST_MAX_WORKERS=2 \
-              node scripts/run-vitest.mjs run \
-                --config test/vitest/vitest.tui-pty.config.ts \
-                src/tui/tui-pty-local.e2e.test.ts \
-                --testNamePattern "launches openclaw (chat as local mode|tui against a real Gateway) through a real PTY"
+            start_check "tui-pty" run_tui_pty
             wait_checks
           fi
 
@@ -2156,17 +2262,15 @@ jobs:
   checks-ui:
     permissions:
       contents: read
-    name: ${{ needs.preflight.outputs.compatibility_target == 'true' && 'checks-ui' || format('checks-ui ({0}/{1})', matrix.shard, needs.preflight.outputs.ui_test_shard_count) }}
+    name: checks-ui / plan
     needs: [preflight]
-    if: needs.preflight.outputs.run_ui_tests == 'true'
+    if: needs.preflight.outputs.run_ui_tests == 'true' && needs.preflight.outputs.ui_test_runtime_policy != 'bun-compatible' && needs.preflight.outputs.ui_test_runtime_policy != 'dual'
     # Keep three workers per row; admit hosted hybrid rows only within budget.
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '')), toJSON((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-8vcpu-ubuntu-2404' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04'))))) || ((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-8vcpu-ubuntu-2404' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04'))) }}
+    runs-on: &ui_ddtest_runner ${{ (github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '')), toJSON((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-8vcpu-ubuntu-2404' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04'))))) || ((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-8vcpu-ubuntu-2404' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04'))) }}
     # Hosted full-release shards measured ~15-20 min; grant the hosted budget.
     timeout-minutes: *hosted_budget_timeout_minutes
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix: ${{ fromJSON(needs.preflight.outputs.ui_test_matrix) }}
+    outputs:
+      matrix: ${{ steps.ddtest-plan.outputs.matrix }}
     env:
       COMPATIBILITY_TARGET: *historical_target
     steps:
@@ -2214,10 +2318,127 @@ jobs:
           fi
 
       - name: Lint Control UI window.open usage
-        if: ${{ matrix.shard == 1 }}
         run: pnpm lint:ui:no-raw-window-open
 
-      - name: Test Control UI
+      - uses: ./.ci-harness/.github/actions/setup-ddtest
+      - &prepare_ui_selection
+        name: Preserve selected Control UI files
+        env:
+          OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: ${{ needs.preflight.outputs.ui_test_groups_gzip_base64 }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, writeFileSync } from "node:fs";
+          import { gunzipSync } from "node:zlib";
+          import { join } from "node:path";
+          const packed = process.env.OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64;
+          if (!packed) process.exit(0);
+          const [group] = JSON.parse(gunzipSync(Buffer.from(packed, "base64")));
+          if (!group) throw new Error("Missing selected Control UI group");
+          if (group.includePatterns) {
+            const file = join(process.env.RUNNER_TEMP, "ui-include.json");
+            writeFileSync(file, JSON.stringify(group.includePatterns));
+            appendFileSync(process.env.GITHUB_ENV, `OPENCLAW_VITEST_INCLUDE_FILE=${file}\n`);
+          }
+          for (const [key, value] of Object.entries(group.env ?? {})) {
+            if (typeof value !== "string" || /[\r\n]/.test(value) || !/^\w+$/.test(key)) throw new Error("Invalid UI environment");
+            appendFileSync(process.env.GITHUB_ENV, `${key}=${value}\n`);
+          }
+          NODE
+
+      - name: Plan Control UI
+        id: ddtest-plan
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_SERVICE: openclaw-tests
+          DD_ENV: ci
+          OPENCLAW_VITEST_MAX_WORKERS: "3"
+        run: |
+          ddtest plan --platform javascript --framework vitest \
+            --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config ui/vitest.config.ts --maxWorkers 3 --reporter=verbose --reporter=github-actions --reporter=./scripts/lib/vitest-resource-reporter.mts ${{ needs.preflight.outputs.compatibility_target == 'true' && '--testTimeout=30000 --isolate' || '' }}" \
+            --min-parallelism 1 --max-parallelism 3 --ci-job-overhead 64s --strict-discovery
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ddtest-control-ui
+          path: .testoptimization
+          include-hidden-files: true
+          if-no-files-found: error
+
+  checks-ui-run:
+    needs: [preflight, checks-ui]
+    if: needs.preflight.outputs.run_ui_tests == 'true' && needs.preflight.outputs.ui_test_runtime_policy != 'bun-compatible' && needs.preflight.outputs.ui_test_runtime_policy != 'dual'
+    runs-on: *ui_ddtest_runner
+    timeout-minutes: *hosted_budget_timeout_minutes
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.checks-ui.outputs.matrix) }}
+    steps:
+      - *linux_node_checkout_step
+      - uses: ./.ci-harness/.github/actions/setup-node-env
+        with:
+          cache-mode: *cache_mode
+          node-version: "24.x"
+          install-bun: "false"
+          dependency-cache: *trusted_dependency_cache
+          restore-test-caches: *restore_test_caches
+      - *datadog_test_setup
+      - *cache_playwright_chromium
+      - *install_playwright_chromium
+      - uses: ./.ci-harness/.github/actions/setup-ddtest
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ddtest-control-ui
+          path: .testoptimization
+      - *prepare_ui_selection
+      - name: Run Control UI
+        env:
+          CI_NODE_INDEX: ${{ matrix.ci_node_index }}
+          OPENCLAW_VITEST_MAX_WORKERS: "3"
+          OPENCLAW_UI_E2E_DIAGNOSTIC_DIR: ${{ github.workspace }}/.artifacts/control-ui-e2e-timeouts/ui-shard-${{ matrix.ci_node_index }}-attempt-${{ github.run_attempt }}
+        run: |
+          export NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs"
+          ddtest run --platform javascript --framework vitest \
+            --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config ui/vitest.config.ts --maxWorkers 3 --reporter=verbose --reporter=github-actions --reporter=./scripts/lib/vitest-resource-reporter.mts ${{ needs.preflight.outputs.compatibility_target == 'true' && '--testTimeout=30000 --isolate' || '' }}" \
+            --ci-node "$CI_NODE_INDEX"
+      - name: Upload Control UI timeout diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: control-ui-test-timeout-${{ matrix.ci_node_index }}-${{ github.run_attempt }}
+          path: .artifacts/control-ui-e2e-timeouts/**/failure.public.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+
+  checks-ui-bun:
+    permissions:
+      contents: read
+    name: checks-ui-bun (${{ matrix.shard }})
+    needs: [preflight]
+    if: needs.preflight.outputs.run_ui_tests == 'true' && (needs.preflight.outputs.ui_test_runtime_policy == 'bun-compatible' || needs.preflight.outputs.ui_test_runtime_policy == 'dual')
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '')), toJSON((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-8vcpu-ubuntu-2404' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04'))))) || ((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-8vcpu-ubuntu-2404' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04'))) }}
+    timeout-minutes: *hosted_budget_timeout_minutes
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.preflight.outputs.ui_test_matrix) }}
+    env:
+      COMPATIBILITY_TARGET: *historical_target
+    steps:
+      - *linux_node_checkout_step
+      - uses: ./.ci-harness/.github/actions/setup-node-env
+        with:
+          cache-mode: *cache_mode
+          node-version: "24.x"
+          install-bun: "false"
+          dependency-cache: *trusted_dependency_cache
+          restore-test-caches: *restore_test_caches
+      - uses: ./.ci-harness/.github/actions/setup-test-bun
+      - *cache_playwright_chromium
+      - *install_playwright_chromium
+      - name: Lint Control UI window.open usage
+        if: matrix.shard == 1
+        run: pnpm lint:ui:no-raw-window-open
+      # ddtest supports Node/Vitest, not Bun or OpenClaw dual-runtime exception routing.
+      - name: Test Control UI on Bun
         env:
           OPENCLAW_CI_TEST_RUNTIME_POLICY: ${{ needs.preflight.outputs.ui_test_runtime_policy }}
           OPENCLAW_UI_E2E_DIAGNOSTIC_DIR: ${{ github.workspace }}/.artifacts/control-ui-e2e-timeouts/ui-shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
@@ -2249,101 +2470,53 @@ jobs:
           retention-days: 7
 
   checks-ui-e2e:
-    permissions:
-      contents: read
-    name: checks-ui-e2e (${{ matrix.shard }}/${{ matrix.shard_count }})
     needs: [preflight]
-    if: needs.preflight.outputs.run_ui_e2e == 'true' && needs.preflight.outputs.compatibility_target != 'true'
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '')), toJSON((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true' && matrix.task == 'browser-extension') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && (matrix.task == 'control-ui' && 'blacksmith-16vcpu-ubuntu-2404' || 'blacksmith-8vcpu-ubuntu-2404') || 'ubuntu-24.04')))) || ((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true' && matrix.task == 'browser-extension') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && (matrix.task == 'control-ui' && 'blacksmith-16vcpu-ubuntu-2404' || 'blacksmith-8vcpu-ubuntu-2404') || 'ubuntu-24.04')) }}
-    # Runtime-budget Chromium projects stay serial.
+    if: needs.preflight.outputs.run_ui_ddtest == 'true' && needs.preflight.outputs.compatibility_target != 'true'
+    uses: ./.github/workflows/ddtest-vitest.yml
+    with:
+      suite: ui-e2e
+      runner-json: ${{ toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '')), toJSON((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true' && 'control-ui' == 'browser-extension') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && ('control-ui' == 'control-ui' && 'blacksmith-16vcpu-ubuntu-2404' || 'blacksmith-8vcpu-ubuntu-2404') || 'ubuntu-24.04')))) || ((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true' && 'control-ui' == 'browser-extension') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && ('control-ui' == 'control-ui' && 'blacksmith-16vcpu-ubuntu-2404' || 'blacksmith-8vcpu-ubuntu-2404') || 'ubuntu-24.04'))) }}
+      config: test/vitest/vitest.ui-e2e.config.ts
+      max-runners: ${{ fromJSON(needs.preflight.outputs.ui_ddtest_max_runners || '1') }}
+      max-workers: 2
+      timeout-minutes: 25
+      browser: true
+      skip-real-gateway: true
+      groups-gzip-base64: ${{ needs.preflight.outputs.ui_e2e_test_groups_gzip_base64 }}
+      checkout-revision: ${{ needs.preflight.outputs.checkout_revision }}
+      cache-mode: ${{ needs.preflight.outputs.cache_mode }}
+    secrets: inherit
+
+  checks-browser-extension:
+    needs: [preflight]
+    if: needs.preflight.outputs.run_ui_e2e == 'true' && needs.preflight.outputs.compatibility_target != 'true' && contains(needs.preflight.outputs.ui_e2e_matrix, 'browser-extension')
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '')), toJSON((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true' && 'browser-extension' == 'browser-extension') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && ('browser-extension' == 'control-ui' && 'blacksmith-16vcpu-ubuntu-2404' || 'blacksmith-8vcpu-ubuntu-2404') || 'ubuntu-24.04')))) || ((contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && needs.preflight.outputs.hybrid_hosted_offload == 'true' && 'browser-extension' == 'browser-extension') && 'ubuntu-24.04' || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && ('browser-extension' == 'control-ui' && 'blacksmith-16vcpu-ubuntu-2404' || 'blacksmith-8vcpu-ubuntu-2404') || 'ubuntu-24.04')) }}
     timeout-minutes: 25
-    env:
-      OPENCLAW_UI_E2E_SKIP_REAL_GATEWAY: "1"
-    strategy:
-      fail-fast: false
-      max-parallel: 14
-      matrix: ${{ fromJson(needs.preflight.outputs.ui_e2e_matrix) }}
     steps:
       - *linux_node_checkout_step
-      - name: Setup Node environment
-        uses: ./.ci-harness/.github/actions/setup-node-env
+      - uses: ./.ci-harness/.github/actions/setup-node-env
         with:
           cache-mode: *cache_mode
           node-version: "24.x"
           install-bun: "false"
-          dependency-cache: &trusted_first_attempt_dependency_cache ${{ ((needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' || runner.environment != 'self-hosted' || (github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'false' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'true' || 'false') }}
-          restore-test-caches: *restore_test_caches
-
       - *datadog_test_setup
-
-      - *cache_playwright_chromium
+      - uses: ./.ci-harness/.github/actions/setup-ddtest
+      - name: Build browser extension test runtime
+        run: pnpm build qaRuntime
       - *install_playwright_chromium
-
-      - name: Test Control UI end-to-end
-        if: matrix.task == 'control-ui'
+      - name: Run browser extension tests
         env:
-          OPENCLAW_UI_E2E_DIAGNOSTIC_DIR: .artifacts/control-ui-e2e-timeouts/shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
-          VITEST_SHARD_INDEX: ${{ matrix.shard }}
-          VITEST_SHARD_COUNT: ${{ matrix.vitest_shard_count }}
-          OPENCLAW_VITEST_MAX_WORKERS: ${{ matrix.vitest_max_workers || 2 }}
-          OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: ${{ needs.preflight.outputs.ui_e2e_test_groups_gzip_base64 }}
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_SERVICE: openclaw-tests
+          DD_ENV: ci
+          OPENCLAW_BROWSER_EXTENSION_E2E: "1"
+          OPENCLAW_E2E_WORKERS: "1"
         run: |
-          if [[ -n "${OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64:-}" ]]; then
-            OPENCLAW_VITEST_INCLUDE_FILE="$(node --import tsx --input-type=module <<'NODE'
-          import { writeFileSync } from "node:fs";
-          import { join } from "node:path";
-          import { decodeNodeTestGroups } from "./scripts/lib/ci-node-test-groups-codec.mts";
-          const [group] = decodeNodeTestGroups(process.env.OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64);
-          if (group.includePatterns) {
-            const includeFile = join(process.env.RUNNER_TEMP, "ui-e2e-include.json");
-            writeFileSync(includeFile, JSON.stringify(group.includePatterns));
-            process.stdout.write(includeFile);
-          }
-          NODE
-          )"
-            export OPENCLAW_VITEST_INCLUDE_FILE
-          fi
-          node scripts/run-vitest.mjs run \
-            --config test/vitest/vitest.ui-e2e.config.ts \
-            --configLoader runner \
-            --maxWorkers "${OPENCLAW_VITEST_MAX_WORKERS:-2}" \
-            --shard "$VITEST_SHARD_INDEX/$VITEST_SHARD_COUNT"
-
-      - name: Upload Control UI E2E timeout diagnostics
-        if: failure() && matrix.task == 'control-ui'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: control-ui-e2e-timeout-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: .artifacts/control-ui-e2e-timeouts/shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}/failure-*/failure.public.json
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Upload synthetic desktop Picture-in-Picture proof
-        if: always() && matrix.task == 'control-ui' && hashFiles('.artifacts/control-ui-e2e/desktop-picture-in-picture-*/native-pip-after-tab-switch.png') != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: desktop-pip-proof-${{ strategy.job-index }}-${{ github.run_attempt }}
-          path: |
-            .artifacts/control-ui-e2e/desktop-picture-in-picture-*/desktop-before-pip.png
-            .artifacts/control-ui-e2e/desktop-picture-in-picture-*/native-pip-after-tab-switch.png
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload synthetic widget prompt failure evidence
-        if: failure() && hashFiles('.artifacts/control-ui-e2e/control-ui-authenticated-widget-sandbox-*/widget-prompt-failure.json') != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: widget-sandbox-ci-${{ strategy.job-index }}-${{ github.run_attempt }}
-          path: |
-            .artifacts/control-ui-e2e/control-ui-authenticated-widget-sandbox-*/widget-prompt-failure.json
-            .artifacts/control-ui-e2e/control-ui-authenticated-widget-sandbox-*/*.png
-            .artifacts/control-ui-e2e/control-ui-authenticated-widget-sandbox-*/*.webm
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Test browser extension bootstrap end-to-end
-        if: matrix.task == 'browser-extension'
-        run: pnpm test:e2e:browser-extension
+          ddtest plan --platform javascript --framework vitest \
+            --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run -- extensions/browser/chrome-extension/bootstrap.chromium.test.ts" \
+            --min-parallelism 1 --max-parallelism 1 --strict-discovery
+          export NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs"
+          ddtest run --platform javascript --framework vitest --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run -- extensions/browser/chrome-extension/bootstrap.chromium.test.ts" --ci-node 0
 
   checks-ui-e2e-real-gateway:
     permissions:
@@ -2366,9 +2539,10 @@ jobs:
           cache-mode: *cache_mode
           node-version: "24.x"
           install-bun: "false"
-          dependency-cache: *trusted_first_attempt_dependency_cache
+          dependency-cache: &trusted_first_attempt_dependency_cache ${{ ((needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' || runner.environment != 'self-hosted' || (github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'false' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'true' || 'false') }}
 
       - *datadog_test_setup
+      - uses: ./.ci-harness/.github/actions/setup-ddtest
 
       - *cache_playwright_chromium
       - *install_playwright_chromium
@@ -2403,6 +2577,9 @@ jobs:
       - name: Test Control UI suites with a real Gateway
         if: matrix.run_tests
         env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_SERVICE: openclaw-tests
+          DD_ENV: ci
           FROZEN_TARGET: *frozen_target
           OPENCLAW_CAPTURE_UI_PROOF: ${{ github.event_name == 'workflow_dispatch' && inputs.capture_ui_proof && '1' || '0' }}
           OPENCLAW_UI_E2E_ARTIFACT_DIR: .artifacts/control-ui-e2e/real-gateway
@@ -2442,11 +2619,12 @@ jobs:
           fi
           if [[ "$config" == test/vitest/vitest.ui-e2e-prebuilt.config.ts ]]; then
             # The canonical config owns this inventory; desktop transport proof runs above.
-            node scripts/run-vitest.mjs run \
-              --config "$config" \
-              --configLoader runner \
-              "${reporter_args[@]}" \
-              --exclude ui/src/e2e/desktop-resize.real-gateway.e2e.test.ts
+            ddtest plan --platform javascript --framework vitest \
+              --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config $config --configLoader runner --reporter verbose --reporter github-actions --reporter default --reporter ./scripts/lib/vitest-resource-reporter.mts --exclude ui/src/e2e/desktop-resize.real-gateway.e2e.test.ts" \
+              --min-parallelism 1 --max-parallelism 1 --strict-discovery
+            export NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs"
+            ddtest run --platform javascript --framework vitest \
+              --command "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config $config --configLoader runner --reporter verbose --reporter github-actions --reporter default --reporter ./scripts/lib/vitest-resource-reporter.mts --exclude ui/src/e2e/desktop-resize.real-gateway.e2e.test.ts" --ci-node 0
             exit 0
           fi
           node scripts/run-vitest.mjs run \
@@ -2691,6 +2869,9 @@ jobs:
       max-parallel: 12
       matrix: ${{ fromJson(needs.preflight.outputs.checks_fast_core_matrix) }}
     env:
+      DD_API_KEY: ${{ secrets.DD_API_KEY }}
+      DD_SERVICE: openclaw-tests
+      DD_ENV: ci
       CHECKOUT_BASE_SHA: ${{ (matrix.task == 'startup-corpus' || matrix.task == 'bundled-protocol' || startsWith(matrix.task, 'release-lint-')) && needs.preflight.outputs.diff_base_revision || '' }}
     steps:
       - *linux_node_checkout_step
@@ -2727,6 +2908,7 @@ jobs:
           restore-test-caches: ${{ (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && (matrix.task == 'bundled-protocol' || matrix.task == 'contracts-plugins-ci-routing' || matrix.task == 'ci-routing' || matrix.task == 'bun-launcher') && 'true' || 'false' }}
 
       - *datadog_test_setup
+      - uses: ./.ci-harness/.github/actions/setup-ddtest
 
       - name: Run ${{ matrix.task }} (${{ matrix.runtime }})
         env:
@@ -2740,17 +2922,31 @@ jobs:
           case "$TASK" in
             bundled-protocol)
               if [[ "$RUN_BUNDLED_TESTS" == "true" ]]; then
-                pnpm test:bundled
+                command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.bundled.config.ts"
+                ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+                NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+                  ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               fi
               test "$(git rev-parse refs/remotes/origin/ci-ratchet-base^{commit})" = "$PROTOCOL_SINCE_BASE_SHA"
               pnpm protocol:check
               ;;
             contracts-plugins-ci-routing)
-              pnpm test:contracts:plugins
-              pnpm test src/scripts/ci-changed-scope*.test.ts test/scripts/changed-lanes.test.ts test/scripts/changed-path-facts.test.ts test/scripts/ci-changed-node-test-plan.test.ts test/scripts/ci-changed-node-test-plan.config-fallback.test.ts test/scripts/ci-changed-node-test-plan.dependency-inputs.test.ts test/scripts/ci-changed-node-test-plan.dependency-hubs.test.ts test/scripts/ci-changed-node-test-plan.policy.test.ts test/scripts/ci-changed-node-test-plan.process-owners.test.ts test/scripts/ci-changed-node-test-plan.source-owners.test.ts test/scripts/ci-docker-seed-plan.test.ts test/scripts/ci-run-node-test-shard.test.ts test/scripts/ci-hourly.test.ts test/scripts/ci-workflow-guards.test.ts test/scripts/ci-workflow-planning.test.ts test/scripts/ci-workflow-evidence.test.ts test/scripts/run-vitest.test.ts test/scripts/test-projects.test.ts
+              command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.contracts-plugin.config.ts --maxWorkers=1"
+              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+              NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+                ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
+              routing_files=(src/scripts/ci-changed-scope*.test.ts test/scripts/changed-lanes.test.ts test/scripts/changed-path-facts.test.ts test/scripts/ci-changed-node-test-plan.test.ts test/scripts/ci-changed-node-test-plan.config-fallback.test.ts test/scripts/ci-changed-node-test-plan.dependency-inputs.test.ts test/scripts/ci-changed-node-test-plan.dependency-hubs.test.ts test/scripts/ci-changed-node-test-plan.policy.test.ts test/scripts/ci-changed-node-test-plan.process-owners.test.ts test/scripts/ci-changed-node-test-plan.source-owners.test.ts test/scripts/ci-docker-seed-plan.test.ts test/scripts/ci-run-node-test-shard.test.ts test/scripts/ci-hourly.test.ts test/scripts/ci-workflow-guards.test.ts test/scripts/ci-workflow-planning.test.ts test/scripts/ci-workflow-evidence.test.ts test/scripts/run-vitest.test.ts test/scripts/test-projects.test.ts)
+              command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts -- ${routing_files[*]}"
+              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+              NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+                ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               ;;
             ci-routing)
-              pnpm test src/scripts/ci-changed-scope*.test.ts test/scripts/changed-lanes.test.ts test/scripts/changed-path-facts.test.ts test/scripts/ci-changed-node-test-plan.test.ts test/scripts/ci-changed-node-test-plan.config-fallback.test.ts test/scripts/ci-changed-node-test-plan.dependency-inputs.test.ts test/scripts/ci-changed-node-test-plan.dependency-hubs.test.ts test/scripts/ci-changed-node-test-plan.policy.test.ts test/scripts/ci-changed-node-test-plan.process-owners.test.ts test/scripts/ci-changed-node-test-plan.source-owners.test.ts test/scripts/ci-docker-seed-plan.test.ts test/scripts/ci-run-node-test-shard.test.ts test/scripts/ci-hourly.test.ts test/scripts/ci-workflow-guards.test.ts test/scripts/ci-workflow-planning.test.ts test/scripts/ci-workflow-evidence.test.ts test/scripts/run-vitest.test.ts test/scripts/test-projects.test.ts
+              routing_files=(src/scripts/ci-changed-scope*.test.ts test/scripts/changed-lanes.test.ts test/scripts/changed-path-facts.test.ts test/scripts/ci-changed-node-test-plan.test.ts test/scripts/ci-changed-node-test-plan.config-fallback.test.ts test/scripts/ci-changed-node-test-plan.dependency-inputs.test.ts test/scripts/ci-changed-node-test-plan.dependency-hubs.test.ts test/scripts/ci-changed-node-test-plan.policy.test.ts test/scripts/ci-changed-node-test-plan.process-owners.test.ts test/scripts/ci-changed-node-test-plan.source-owners.test.ts test/scripts/ci-docker-seed-plan.test.ts test/scripts/ci-run-node-test-shard.test.ts test/scripts/ci-hourly.test.ts test/scripts/ci-workflow-guards.test.ts test/scripts/ci-workflow-planning.test.ts test/scripts/ci-workflow-evidence.test.ts test/scripts/run-vitest.test.ts test/scripts/test-projects.test.ts)
+              command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts -- ${routing_files[*]}"
+              ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+              NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+                ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               ;;
             coercion-helpers)
               pnpm check:coercion-helpers
@@ -2767,11 +2963,20 @@ jobs:
               node --import tsx scripts/run-oxlint-shards.mts --only=extensions --threads=1
               ;;
             bun-launcher)
-              OPENCLAW_E2E_SKIP_BUILD=1 OPENCLAW_TEST_BUN_LAUNCHER=1 pnpm test test/openclaw-launcher.e2e.test.ts
+              command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts -- test/openclaw-launcher.e2e.test.ts"
+              OPENCLAW_E2E_SKIP_BUILD=1 OPENCLAW_TEST_BUN_LAUNCHER=1 ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+              OPENCLAW_E2E_SKIP_BUILD=1 OPENCLAW_TEST_BUN_LAUNCHER=1 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+                ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               if [[ -f src/plugins/plugin-module-generation.bun.test.ts ]]; then
-                OPENCLAW_TEST_BUN_LAUNCHER=1 pnpm test src/plugins/plugin-module-generation.bun.test.ts
+                command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts -- src/plugins/plugin-module-generation.bun.test.ts"
+                OPENCLAW_TEST_BUN_LAUNCHER=1 ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+                OPENCLAW_TEST_BUN_LAUNCHER=1 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+                  ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               elif [[ -f src/plugins/plugin-module-generation.test.ts ]]; then
-                OPENCLAW_TEST_BUN_LAUNCHER=1 pnpm test src/plugins/plugin-module-generation.test.ts --testNamePattern Bun
+                command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts --testNamePattern Bun -- src/plugins/plugin-module-generation.test.ts"
+                OPENCLAW_TEST_BUN_LAUNCHER=1 ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+                OPENCLAW_TEST_BUN_LAUNCHER=1 NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+                  ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
               elif [[ "${{ needs.preflight.outputs.frozen_target }}" != "true" ]]; then
                 echo "Current CI targets must provide src/plugins/plugin-module-generation.test.ts." >&2
                 exit 1
@@ -2792,12 +2997,18 @@ jobs:
           # Prepare once before Vitest workers consume the runtime.
           pnpm build qaRuntime
           run_startup_corpus() {
-            if [[ "${{ needs.preflight.outputs.frozen_target }}" == "true" ]]; then
-              node scripts/run-vitest.mjs run --config test/vitest/vitest.runtime-config.config.ts "$@"
-            else
-              node scripts/run-vitest.mjs run --config test/vitest/vitest.runtime-config.config.ts \
-                --reporter verbose --reporter github-actions --reporter ./scripts/lib/vitest-resource-reporter.mts "$@"
+            local command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.runtime-config.config.ts"
+            if [[ "${{ needs.preflight.outputs.frozen_target }}" != "true" ]]; then
+              command+=" --reporter verbose --reporter github-actions --reporter ./scripts/lib/vitest-resource-reporter.mts"
             fi
+            if [[ "${1:-}" == --maxWorkers=* ]]; then
+              command+=" $1"
+              shift
+            fi
+            command+=" -- $*"
+            ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1 || return
+            NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+              ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
           }
           if [[ -n "${OPENCLAW_CI_STARTUP_CORPUS_TEST_FILES_JSON:-}" ]]; then
             # Use the manifest's inventory for both Node receipts and this fallback.
@@ -2823,6 +3034,8 @@ jobs:
           concurrency=$((cores / 4))
           if (( concurrency < 1 )); then concurrency=1; fi
           if (( concurrency > 5 )); then concurrency=5; fi
+          # Native ddtest shares .testoptimization: complete each legacy shard's plan/run pair.
+          concurrency=1
           echo "[corpus:resources] logicalCpuCount=$cores admitted runs=$concurrency"
           pids=()
           labels=()
@@ -3060,6 +3273,9 @@ jobs:
 
       - *datadog_test_setup
 
+      - name: Setup ddtest
+        uses: ./.ci-harness/.github/actions/setup-ddtest
+
       - name: Run plugin contract shard
         env:
           OPENCLAW_CONTRACT_INCLUDE_PATTERNS_JSON: ${{ toJson(matrix) }}
@@ -3071,11 +3287,16 @@ jobs:
           import { writeFileSync } from "node:fs";
 
           const { task, groups } = JSON.parse(process.env.OPENCLAW_CONTRACT_INCLUDE_PATTERNS_JSON ?? "{}");
-          const script = {
-            "contracts-plugins": "test:contracts:plugins",
-            "contracts-channels": "test:contracts:channels",
+          const configs = {
+            "contracts-plugins": ["test/vitest/vitest.contracts-plugin.config.ts"],
+            "contracts-channels": [
+              "test/vitest/vitest.contracts-channel-surface.config.ts",
+              "test/vitest/vitest.contracts-channel-config.config.ts",
+              "test/vitest/vitest.contracts-channel-registry.config.ts",
+              "test/vitest/vitest.contracts-channel-session.config.ts",
+            ],
           }[task];
-          if (!script || !Array.isArray(groups) || groups.length === 0) {
+          if (!configs || !Array.isArray(groups) || groups.length === 0) {
             throw new Error("Missing contract task or process groups");
           }
           const entries = groups.map(({ checkName, includePatterns }, index) => {
@@ -3084,19 +3305,20 @@ jobs:
             }
             const includeFile = `${process.env.INCLUDE_FILE}.${index}.json`;
             writeFileSync(includeFile, JSON.stringify(includePatterns), "utf8");
-            return `${includeFile}\t${script}\t${checkName}`;
+            return configs.map((config) => `${includeFile}\t${config}\t${checkName}`).join("\n");
           });
           writeFileSync(process.env.INCLUDE_FILE, `${entries.join("\n")}\n`, "utf8");
           EOF
           # A nonzero exit can mean unverified cleanup; do not admit another envelope.
-          while IFS=$'\t' read -r include_file contract_script contract_name; do
-            echo "::group::${contract_name}"
-            contract_exit=0
-            OPENCLAW_VITEST_INCLUDE_FILE="$include_file" pnpm "$contract_script" || contract_exit=$?
+          while IFS=$'\t' read -r include_file contract_config contract_name; do
+            echo "::group::${contract_name} (${contract_config})"
+            export OPENCLAW_VITEST_INCLUDE_FILE="$include_file"
+            command="node --no-maglev --no-concurrent-sparkplug node_modules/vitest/vitest.mjs run --config $contract_config --maxWorkers=1"
+            # Contracts keep their process envelopes and serial cleanup boundary.
+            ddtest plan --platform javascript --framework vitest --command "$command" --min-parallelism 1 --max-parallelism 1 --strict-discovery
+            NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+              ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
             echo "::endgroup::"
-            if [[ "$contract_exit" -ne 0 ]]; then
-              exit "$contract_exit"
-            fi
           done < "$include_list"
 
   checks-fast-channel-contracts-shard:
@@ -3116,6 +3338,9 @@ jobs:
       - *contract_node_setup_step
       - *datadog_test_setup
 
+      - name: Setup ddtest
+        uses: ./.ci-harness/.github/actions/setup-ddtest
+
       - name: Run channel contract shard
         env:
           OPENCLAW_CONTRACT_INCLUDE_PATTERNS_JSON: ${{ toJson(matrix) }}
@@ -3131,6 +3356,10 @@ jobs:
     if: needs.preflight.outputs.run_build_artifacts == 'true' && github.event_name == 'workflow_dispatch' && needs.preflight.outputs.validation_tier != 'main' && (needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true')
     runs-on: *shared_small_linux_runner
     timeout-minutes: 60
+    env:
+      DD_API_KEY: ${{ secrets.DD_API_KEY }}
+      DD_SERVICE: openclaw-tests
+      DD_ENV: ci
     steps:
       - *linux_node_checkout_step
       - name: Setup Node environment
@@ -3143,6 +3372,7 @@ jobs:
           build-all-cache-scope: full
 
       - *datadog_test_setup
+      - uses: ./.ci-harness/.github/actions/setup-ddtest
 
       - name: Configure Node test resources
         run: echo "OPENCLAW_VITEST_MAX_WORKERS=2" >> "$GITHUB_ENV"
@@ -3156,22 +3386,59 @@ jobs:
           node openclaw.mjs --help
           node openclaw.mjs status --json --timeout 1
           pnpm test:build:singleton
-          pnpm test src/config/sessions/session-accessor.test.ts src/config/sessions/store-writer.test.ts src/config/sessions/sessions.test.ts
+          command="node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config vitest.config.ts -- src/config/sessions/session-accessor.test.ts src/config/sessions/store-writer.test.ts src/config/sessions/sessions.test.ts"
+          ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1
+          NODE_OPTIONS="${NODE_OPTIONS:-} --import=$GITHUB_WORKSPACE/scripts/lib/datadog-test-register.mjs" \
+            ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0
 
   checks-node-core-test-nondist-shard:
+    name: ddtest / ${{ matrix.suite }}
+    needs: [preflight]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.preflight.outputs.run_checks_node_ddtest == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.preflight.outputs.checks_node_ddtest_matrix) }}
+    uses: ./.github/workflows/ddtest-vitest.yml
+    with:
+      suite: ${{ matrix.suite }}
+      config: ${{ matrix.config }}
+      max-runners: ${{ matrix.max_runners }}
+      selection-gzip-base64: ${{ matrix.selection_gzip_base64 }}
+      env-json: ${{ matrix.env_json }}
+      browser: ${{ contains(matrix.config, '/vitest.ui') }}
+      build: ${{ matrix.build }}
+      go: ${{ matrix.go }}
+      ripgrep: ${{ matrix.ripgrep }}
+      sandbox: ${{ matrix.sandbox }}
+      git-commits-json: ${{ matrix.git_commits_json }}
+      node-version: ${{ matrix.node_version }}
+      runtime-policy: ${{ matrix.runtime_policy }}
+      requires-bun: ${{ matrix.requires_bun }}
+      timeout-minutes: ${{ matrix.timeout_minutes }}
+      plan-concurrency: ${{ matrix.plan_concurrency }}
+      runner-json: ${{ toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '')), toJSON(needs.preflight.outputs.node_runner_backend == 'runson' && matrix.runner == 'runson-c8i-8xlarge' && github.run_attempt == 1 && format('runs-on={0}-{1}/family=c8i.8xlarge/cpu=32/ram=64/spot=true/retry=false/image=ubuntu24-full-x64/volume=80gb', github.run_id, matrix.suite) || matrix.runner == 'runson-c8i-8xlarge' && 'ubuntu-24.04' || (needs.preflight.outputs.node_runner_backend == 'runson' || needs.preflight.outputs.ci_qualification == 'true') && github.run_attempt == 1 && ((matrix.runner == 'blacksmith-8vcpu-ubuntu-2404' && contains(fromJSON('["checks-node-compact-large-9","checks-node-compact-large-5"]'), matrix.suite)) && 'blacksmith-16vcpu-ubuntu-2404' || matrix.runner || 'blacksmith-4vcpu-ubuntu-2404') || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && ((matrix.runner == 'blacksmith-8vcpu-ubuntu-2404' && contains(fromJSON('["checks-node-compact-large-9","checks-node-compact-large-5"]'), matrix.suite)) && 'blacksmith-16vcpu-ubuntu-2404' || matrix.runner || 'blacksmith-4vcpu-ubuntu-2404') || 'ubuntu-24.04')))) || (needs.preflight.outputs.node_runner_backend == 'runson' && matrix.runner == 'runson-c8i-8xlarge' && github.run_attempt == 1 && format('runs-on={0}-{1}/family=c8i.8xlarge/cpu=32/ram=64/spot=true/retry=false/image=ubuntu24-full-x64/volume=80gb', github.run_id, matrix.suite) || matrix.runner == 'runson-c8i-8xlarge' && 'ubuntu-24.04' || (needs.preflight.outputs.node_runner_backend == 'runson' || needs.preflight.outputs.ci_qualification == 'true') && github.run_attempt == 1 && ((matrix.runner == 'blacksmith-8vcpu-ubuntu-2404' && contains(fromJSON('["checks-node-compact-large-9","checks-node-compact-large-5"]'), matrix.suite)) && 'blacksmith-16vcpu-ubuntu-2404' || matrix.runner || 'blacksmith-4vcpu-ubuntu-2404') || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && ((matrix.runner == 'blacksmith-8vcpu-ubuntu-2404' && contains(fromJSON('["checks-node-compact-large-9","checks-node-compact-large-5"]'), matrix.suite)) && 'blacksmith-16vcpu-ubuntu-2404' || matrix.runner || 'blacksmith-4vcpu-ubuntu-2404') || 'ubuntu-24.04'))) }}
+      fallback-max-workers: ${{ matrix.fallback_max_workers }}
+      min-total-memory-bytes: ${{ matrix.min_total_memory_bytes }}
+      max-workers: 0
+      checkout-revision: ${{ needs.preflight.outputs.checkout_revision }}
+      compatibility-target: ${{ needs.preflight.outputs.compatibility_target == 'true' }}
+      cache-mode: ${{ needs.preflight.outputs.cache_mode }}
+    secrets: inherit
+
+  checks-node-bun:
     permissions:
       contents: read
     env:
       CHECKOUT_GIT_COMMITS_JSON: ${{ toJson(matrix.git_commits) }}
     name: ${{ matrix.check_name || 'checks-node-core-test-nondist-shard' }}
     needs: [preflight]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.preflight.outputs.run_checks_node_core_nondist == 'true' }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.preflight.outputs.run_checks_node_bun == 'true' }}
     runs-on: ${{ (github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '') != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON((github.event_name == 'workflow_dispatch' && startsWith(inputs.dispatch_id, 'full-release-validation-') && vars.OPENCLAW_RELEASE_RUNNER_GROUP || '')), toJSON(needs.preflight.outputs.node_runner_backend == 'runson' && matrix.runner == 'runson-c8i-8xlarge' && github.run_attempt == 1 && format('runs-on={0}-{1}/family=c8i.8xlarge/cpu=32/ram=64/spot=true/retry=false/image=ubuntu24-full-x64/volume=80gb', github.run_id, matrix.check_name) || matrix.runner == 'runson-c8i-8xlarge' && 'ubuntu-24.04' || (needs.preflight.outputs.node_runner_backend == 'runson' || needs.preflight.outputs.ci_qualification == 'true') && github.run_attempt == 1 && ((matrix.runner == 'blacksmith-8vcpu-ubuntu-2404' && contains(fromJSON('["checks-node-compact-large-9","checks-node-compact-large-5"]'), matrix.check_name)) && 'blacksmith-16vcpu-ubuntu-2404' || matrix.runner || 'blacksmith-4vcpu-ubuntu-2404') || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && ((matrix.runner == 'blacksmith-8vcpu-ubuntu-2404' && contains(fromJSON('["checks-node-compact-large-9","checks-node-compact-large-5"]'), matrix.check_name)) && 'blacksmith-16vcpu-ubuntu-2404' || matrix.runner || 'blacksmith-4vcpu-ubuntu-2404') || 'ubuntu-24.04')))) || (needs.preflight.outputs.node_runner_backend == 'runson' && matrix.runner == 'runson-c8i-8xlarge' && github.run_attempt == 1 && format('runs-on={0}-{1}/family=c8i.8xlarge/cpu=32/ram=64/spot=true/retry=false/image=ubuntu24-full-x64/volume=80gb', github.run_id, matrix.check_name) || matrix.runner == 'runson-c8i-8xlarge' && 'ubuntu-24.04' || (needs.preflight.outputs.node_runner_backend == 'runson' || needs.preflight.outputs.ci_qualification == 'true') && github.run_attempt == 1 && ((matrix.runner == 'blacksmith-8vcpu-ubuntu-2404' && contains(fromJSON('["checks-node-compact-large-9","checks-node-compact-large-5"]'), matrix.check_name)) && 'blacksmith-16vcpu-ubuntu-2404' || matrix.runner || 'blacksmith-4vcpu-ubuntu-2404') || (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND) == 'github' && 'ubuntu-24.04' || (contains(fromJSON('["hybrid","runson"]'), (needs.preflight.outputs.ci_qualification == 'true' && (github.run_attempt == 1 && needs.preflight.outputs.qualification_runner_backend || 'github') || vars.OPENCLAW_CI_RUNNER_BACKEND)) && github.run_attempt > 1) && 'ubuntu-24.04' || ((github.event_name == 'workflow_dispatch' && ((needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') || github.run_attempt != 1)) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)) && ((matrix.runner == 'blacksmith-8vcpu-ubuntu-2404' && contains(fromJSON('["checks-node-compact-large-9","checks-node-compact-large-5"]'), matrix.check_name)) && 'blacksmith-16vcpu-ubuntu-2404' || matrix.runner || 'blacksmith-4vcpu-ubuntu-2404') || 'ubuntu-24.04')) }}
     timeout-minutes: ${{ matrix.timeout_minutes || 60 }}
     strategy:
       fail-fast: ${{ github.event_name == 'pull_request' && (github.run_attempt != 1 || github.repository != 'openclaw/openclaw') }}
       max-parallel: ${{ github.event_name == 'pull_request' && github.repository == 'openclaw/openclaw' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association) && github.run_attempt == 1 && needs.preflight.outputs.frozen_target != 'true' && needs.preflight.outputs.runner_profile != 'github' && needs.preflight.outputs.node_runner_backend != 'runson' && contains(fromJSON('["","blacksmith","hybrid"]'), vars.OPENCLAW_CI_RUNNER_BACKEND) && 130 || 96 }}
-      matrix: ${{ fromJson(needs.preflight.outputs.checks_node_core_nondist_matrix) }}
+      matrix: ${{ fromJson(needs.preflight.outputs.checks_node_bun_matrix) }}
     steps:
       - *linux_node_checkout_step
       - name: Initialize RunsOn
@@ -3383,8 +3650,7 @@ jobs:
           NODE_OPTIONS: ""
         run: node scripts/datadog-tia-diagnostics.mjs
 
-      - &runner_memory_peak_step
-        name: Record runner memory peak
+      - name: Record runner memory peak
         if: always()
         shell: bash
         run: |
@@ -4459,11 +4725,24 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pytest ruff pyyaml
 
+      - name: Setup Datadog Python Test Optimization
+        uses: DataDog/test-visibility-github-action@1abae93083b69778facd7ee11f89184306c999e6 # v3.2.0
+        with:
+          languages: python
+          api_key: ${{ secrets.DD_API_KEY }}
+          service: openclaw-tests
+          python-tracer-version: latest
+
+      - name: Setup ddtest
+        uses: ./.ci-harness/.github/actions/setup-ddtest
+
       - name: Lint Python skill scripts
         run: python -m ruff check --config skills/pyproject.toml skills
 
       - name: Test skill Python scripts
-        run: python -m pytest -q -c skills/pyproject.toml skills
+        run: |
+          ddtest plan --platform python --framework pytest --command "python -m pytest -q -c skills/pyproject.toml" --tests-location 'skills/**/test_*.py' --min-parallelism 1 --max-parallelism 1
+          ddtest run --platform python --framework pytest --command "python -m pytest -q -c skills/pyproject.toml" --tests-location 'skills/**/test_*.py' --ci-node 0
 
   checks-windows:
     permissions:
@@ -4553,53 +4832,88 @@ jobs:
           # Windows setup does not restore or publish a shared dependency cache.
           pnpm install --frozen-lockfile --prefer-offline --config.ignore-scripts=false --config.engine-strict=false --config.enable-pre-post-scripts=true --config.side-effects-cache=true || pnpm install --frozen-lockfile --prefer-offline --config.ignore-scripts=false --config.engine-strict=false --config.enable-pre-post-scripts=true --config.side-effects-cache=true
 
+      - *datadog_test_setup
+
+      - name: Setup ddtest
+        uses: ./.ci-harness/.github/actions/setup-ddtest
+
       - name: Run ${{ matrix.task }} (${{ matrix.runtime }})
         env:
           TASK: ${{ matrix.task }}
+          PLATFORM_TEST_FAMILY: windows
           # The 16-class supplies four CPUs; hosted fallback stays serial.
           OPENCLAW_VITEST_MAX_WORKERS: ${{ runner.environment == 'self-hosted' && 4 || 1 }}
           WINDOWS_TARGETS_JSON: ${{ toJSON(matrix.targets || null) }}
         shell: bash
-        run: |
+        run: &run_ddtest_platform_targets |
           set -euo pipefail
-          # Allocation can undershoot labels; run complete matrix files serially per machine.
-          export OPENCLAW_TEST_PROJECTS_PARALLEL=1
-          case "$TASK" in
-            test)
-              node --input-type=module <<'WINDOWS_TESTS'
+          node --input-type=module <<'PLATFORM_TESTS'
           import { spawnSync } from "node:child_process";
-          const targets = JSON.parse(process.env.WINDOWS_TARGETS_JSON);
-          if (!Array.isArray(targets) || targets.length === 0 ||
-              targets.some((file) => typeof file !== "string" || !/^[\w./-]+\.test\.tsx?$/u.test(file))) {
-            throw new Error("Windows test row requires explicit test files");
+          import { readFileSync } from "node:fs";
+          import { resolve } from "node:path";
+          import { pathToFileURL } from "node:url";
+          const family = process.env.PLATFORM_TEST_FAMILY;
+          const task = process.env.TASK;
+          if (!["windows", "macos"].includes(family) || !/^test(?:-[123])?$/.test(task)) {
+            throw new Error("Unsupported platform test task");
           }
-          const result = spawnSync(process.execPath, [
-            "--import", "./scripts/tsx.mjs", "scripts/test-projects.mts", ...targets, "--fileParallelism",
-          ], { stdio: "inherit" });
-          if (result.error) throw result.error;
-          process.exit(result.status ?? 1);
-          WINDOWS_TESTS
-              ;;
-            # Linux owns full coverage; Windows targets native process/path wrappers.
-            test-1)
-              if node -e 'process.exit(require("./package.json").scripts?.["test:windows:ci:1"] ? 0 : 1)'; then
-                pnpm test:windows:ci:1 -- --fileParallelism
-              else
-                pnpm test:windows:ci
-              fi
-              ;;
-            test-2)
-              if node -e 'process.exit(require("./package.json").scripts?.["test:windows:ci:2"] ? 0 : 1)'; then
-                pnpm test:windows:ci:2 -- --fileParallelism
-              else
-                echo "[skip] target's combined Windows suite ran in test-1"
-              fi
-              ;;
-            *)
-              echo "Unsupported Windows checks task: $TASK" >&2
-              exit 1
-              ;;
-          esac
+          const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
+          const prefix = "node --import ./scripts/tsx.mjs scripts/test-projects.mts ";
+          const baseName = `test:${family}:ci`;
+          const shardCount = family === "windows" ? 2 : 3;
+          const scriptTargets = (name) => {
+            const value = scripts[name];
+            if (typeof value !== "string" || !value.startsWith(prefix)) {
+              throw new Error(`Unsupported canonical platform script: ${name}`);
+            }
+            return value.slice(prefix.length).trim().split(/\s+/);
+          };
+          let envelopes;
+          if (family === "windows" && task === "test") {
+            envelopes = [JSON.parse(process.env.WINDOWS_TARGETS_JSON)];
+          } else if (task === "test") {
+            const names = Array.from({ length: shardCount }, (_, index) => `${baseName}:${index + 1}`);
+            if (scripts[baseName] !== names.map((name) => `pnpm ${name}`).join(" && ")) {
+              throw new Error("Unsupported canonical platform aggregate script");
+            }
+            envelopes = names.map(scriptTargets);
+          } else {
+            const name = `${baseName}:${task.slice(5)}`;
+            if (typeof scripts[name] === "string") {
+              envelopes = [scriptTargets(name)];
+            } else if (family === "windows" && task === "test-2") {
+              console.log("[skip] target's combined Windows suite ran in test-1");
+              process.exit(0);
+            } else if (family === "windows" && task === "test-1") {
+              envelopes = [scriptTargets(baseName)];
+            } else {
+              throw new Error(`Missing canonical platform script: ${name}`);
+            }
+          }
+          const workers = process.env.OPENCLAW_VITEST_MAX_WORKERS;
+          if (!/^[1-9]\d*$/.test(workers ?? "")) throw new Error("Missing platform worker limit");
+          const execute = (args, env) => {
+            const result = spawnSync("ddtest", args, { stdio: "inherit", env });
+            if (result.error) throw result.error;
+            if (result.status !== 0) process.exit(result.status ?? 1);
+          };
+          for (const targets of envelopes) {
+            if (!Array.isArray(targets) || targets.length === 0 ||
+                targets.some((file) => typeof file !== "string" || !/^[\w./-]+\.test\.tsx?$/.test(file))) {
+              throw new Error("Platform test row requires explicit canonical test files");
+            }
+            // ddtest replaces paths after -- with its selected files during execution.
+            const command = `node --no-maglev --no-concurrent-sparkplug node_modules/vitest/vitest.mjs run --config vitest.config.ts --maxWorkers=${workers}${family === "windows" ? " --fileParallelism" : ""} -- ${targets.join(" ")}`;
+            const common = ["--platform", "javascript", "--framework", "vitest", "--command", command];
+            execute(["plan", ...common, "--min-parallelism", "1", "--max-parallelism", "1", "--strict-discovery"], {
+              ...process.env,
+            });
+            execute(["run", ...common, "--ci-node", "0"], {
+              ...process.env,
+              NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(resolve("scripts/lib/datadog-test-register.mjs")).href}`,
+            });
+          }
+          PLATFORM_TESTS
 
   macos-node:
     permissions:
@@ -4618,28 +4932,19 @@ jobs:
 
       - *plain_node_setup_step
 
+      - *datadog_test_setup
+
+      - name: Setup ddtest
+        uses: ./.ci-harness/.github/actions/setup-ddtest
+
       - name: TS tests (macOS)
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           OPENCLAW_VITEST_MAX_WORKERS: 2
           TASK: ${{ matrix.task }}
+          PLATFORM_TEST_FAMILY: macos
         shell: bash
-        run: |
-          set -euo pipefail
-          node -e 'const os = require("node:os"); console.log("Native OS resources: " + JSON.stringify({ logicalCpuCount: os.cpus().length, availableParallelism: os.availableParallelism(), osTotalMemoryBytes: os.totalmem(), osFreeMemoryBytes: os.freemem() }));'
-          case "$TASK" in
-            test-[123])
-              pnpm "test:macos:ci:${TASK#test-}"
-              ;;
-            test)
-              # Linux owns full coverage; macOS targets launchd/Homebrew, paths, and process groups.
-              pnpm test:macos:ci
-              ;;
-            *)
-              echo "Unsupported macOS node task: $TASK" >&2
-              exit 1
-              ;;
-          esac
+        run: *run_ddtest_platform_targets
 
   macos-swift:
     permissions:
@@ -6026,7 +6331,13 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
 
-      - *runner_memory_peak_step
+      - name: Record runner memory peak
+        if: always()
+        shell: bash
+        run: |
+          if peak_memory="$(cat /sys/fs/cgroup/memory.peak 2>/dev/null)"; then
+            echo "runner cgroup peak memory bytes=$peak_memory"
+          fi
 
   pr-fail-fast:
     permissions:
@@ -6080,7 +6391,10 @@ jobs:
       - control-ui-performance
       - native-i18n
       - checks-ui
+      - checks-ui-run
+      - checks-ui-bun
       - checks-ui-e2e
+      - checks-browser-extension
       - checks-ui-e2e-real-gateway
       - control-ui-i18n
       - checks-baseline-ratchets
@@ -6090,6 +6404,7 @@ jobs:
       - checks-fast-channel-contracts-shard
       - checks-node-compat
       - checks-node-core-test-nondist-shard
+      - checks-node-bun
       - check-shard
       - check-lint-hosted-core-shard
       - check-lint-hosted-extension-shard
@@ -6141,8 +6456,11 @@ jobs:
             build-artifacts=${{ needs.build-artifacts.result }}|${{ needs.preflight.outputs.run_build_artifacts }}
             control-ui-performance=${{ needs.control-ui-performance.result }}|${{ needs.preflight.outputs.run_control_ui_performance }}
             native-i18n=${{ needs.native-i18n.result }}|${{ needs.preflight.outputs.run_native_i18n }}
-            checks-ui=${{ needs.checks-ui.result }}|${{ needs.preflight.outputs.run_ui_tests }}
-            checks-ui-e2e=${{ needs.checks-ui-e2e.result }}|${{ needs.preflight.outputs.run_ui_e2e == 'true' && needs.preflight.outputs.compatibility_target != 'true' }}
+            checks-ui=${{ needs.checks-ui.result }}|${{ needs.preflight.outputs.run_ui_tests == 'true' && needs.preflight.outputs.ui_test_runtime_policy != 'bun-compatible' && needs.preflight.outputs.ui_test_runtime_policy != 'dual' }}
+            checks-ui-run=${{ needs.checks-ui-run.result }}|${{ needs.preflight.outputs.run_ui_tests == 'true' && needs.preflight.outputs.ui_test_runtime_policy != 'bun-compatible' && needs.preflight.outputs.ui_test_runtime_policy != 'dual' }}
+            checks-ui-bun=${{ needs.checks-ui-bun.result }}|${{ needs.preflight.outputs.run_ui_tests == 'true' && (needs.preflight.outputs.ui_test_runtime_policy == 'bun-compatible' || needs.preflight.outputs.ui_test_runtime_policy == 'dual') }}
+            checks-ui-e2e=${{ needs.checks-ui-e2e.result }}|${{ needs.preflight.outputs.run_ui_ddtest == 'true' && needs.preflight.outputs.compatibility_target != 'true' }}
+            checks-browser-extension=${{ needs.checks-browser-extension.result }}|${{ needs.preflight.outputs.run_ui_e2e == 'true' && needs.preflight.outputs.compatibility_target != 'true' && contains(needs.preflight.outputs.ui_e2e_matrix, 'browser-extension') }}
             checks-ui-e2e-real-gateway=${{ needs.checks-ui-e2e-real-gateway.result }}|${{ needs.preflight.outputs.run_ui_real_gateway == 'true' && needs.preflight.outputs.compatibility_target != 'true' }}
             control-ui-i18n=${{ needs.control-ui-i18n.result }}|${{ needs.preflight.outputs.run_control_ui_i18n }}
             checks-baseline-ratchets=${{ needs.checks-baseline-ratchets.result }}|${{ needs.preflight.outputs.run_baseline_ratchets }}
@@ -6151,7 +6469,8 @@ jobs:
             checks-fast-plugin-contracts-shard=${{ needs.checks-fast-plugin-contracts-shard.result }}|${{ needs.preflight.outputs.run_plugin_contracts_shards }}
             checks-fast-channel-contracts-shard=${{ needs.checks-fast-channel-contracts-shard.result }}|${{ needs.preflight.outputs.run_channel_contracts_shards }}
             checks-node-compat=${{ needs.checks-node-compat.result }}|${{ needs.preflight.outputs.run_build_artifacts == 'true' && github.event_name == 'workflow_dispatch' && needs.preflight.outputs.validation_tier != 'main' && (needs.preflight.outputs.node_runner_backend != 'runson' && needs.preflight.outputs.ci_qualification != 'true') }}
-            checks-node-core-test-nondist-shard=${{ needs.checks-node-core-test-nondist-shard.result }}|${{ needs.preflight.outputs.run_checks_node_core_nondist }}
+            checks-node-core-test-nondist-shard=${{ needs.checks-node-core-test-nondist-shard.result }}|${{ needs.preflight.outputs.run_checks_node_ddtest }}
+            checks-node-bun=${{ needs.checks-node-bun.result }}|${{ needs.preflight.outputs.run_checks_node_bun }}
             check-shard=${{ needs.check-shard.result }}|${{ needs.preflight.outputs.run_check }}
             check-lint-hosted-core-shard=${{ needs.check-lint-hosted-core-shard.result }}|${{ needs.preflight.outputs.run_check == 'true' && (needs.preflight.outputs.run_check_plan == 'true' && needs.check-plan.outputs.run_lint_core || needs.preflight.outputs.run_lint_core) == 'true' && (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && (needs.preflight.outputs.frozen_target != 'true' || needs.preflight.outputs.hosted_runner_profile_contract == 'true') }}
             check-lint-hosted-extension-shard=${{ needs.check-lint-hosted-extension-shard.result }}|${{ needs.preflight.outputs.run_check == 'true' && (needs.preflight.outputs.run_check_plan == 'true' && needs.check-plan.outputs.run_lint_extensions || needs.preflight.outputs.run_lint_extensions) == 'true' && needs.preflight.outputs.runner_profile == 'hybrid' && needs.preflight.outputs.frozen_target != 'true' && (!inputs.release_gate || needs.preflight.outputs.node_runner_backend == 'runson' || needs.preflight.outputs.ci_qualification == 'true') }}
@@ -6227,7 +6546,10 @@ jobs:
       - control-ui-performance
       - native-i18n
       - checks-ui
+      - checks-ui-run
+      - checks-ui-bun
       - checks-ui-e2e
+      - checks-browser-extension
       - checks-ui-e2e-real-gateway
       - control-ui-i18n
       - checks-fast-core
@@ -6237,6 +6559,7 @@ jobs:
       - checks-fast-channel-contracts-shard
       - checks-node-compat
       - checks-node-core-test-nondist-shard
+      - checks-node-bun
       - check-shard
       - check-lint-hosted-core-shard
       - check-lint-hosted-extension-shard

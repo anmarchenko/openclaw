@@ -43,7 +43,10 @@ import {
   startupCorpusTestFiles,
   stateStartupCorpusTestFiles,
 } from "../vitest/vitest.startup-corpus-paths.mjs";
-import { assertStartupCorpusCommand } from "./ci-startup-corpus.test-support.js";
+import {
+  assertStartupCorpusCommand,
+  startupCorpusDdtestStub,
+} from "./ci-startup-corpus.test-support.js";
 import {
   CI_MANIFEST_FIXTURE_TARGETS,
   runCiManifestFixture,
@@ -1981,7 +1984,11 @@ describe("ci workflow guards", () => {
     for (const name of ["checks-ui", "control-ui-performance"]) {
       expect(evaluateWorkflowExpression(`\${{ ${workflow.jobs[name].if} }}`, context)).toBe(true);
     }
-    for (const name of ["checks-ui-e2e", "checks-ui-e2e-real-gateway"]) {
+    for (const name of [
+      "checks-ui-e2e",
+      "checks-browser-extension",
+      "checks-ui-e2e-real-gateway",
+    ]) {
       expect(evaluateWorkflowExpression(`\${{ ${workflow.jobs[name].if} }}`, context)).toBe(false);
     }
     expect(JSON.stringify(manifest.outputs)).toContain("dedicated-ui-false");
@@ -2079,14 +2086,13 @@ describe("ci workflow guards", () => {
         changedPaths:
           scenario.eventName === "pull_request" ? selectedTestTargets : scenario.changedPaths,
       });
-      for (const [name, config, output, job, stepName] of [
-        ["ui", "ui/vitest.config.ts", "ui_test_groups_gzip_base64", "checks-ui", "Test Control UI"],
+      for (const [name, config, output, job] of [
+        ["ui", "ui/vitest.config.ts", "ui_test_groups_gzip_base64", "checks-ui"],
         [
           "e2e",
           "test/vitest/vitest.ui-e2e.config.ts",
           "ui_e2e_test_groups_gzip_base64",
           "checks-ui-e2e",
-          "Test Control UI end-to-end",
         ],
       ] as const) {
         const packed = expectDefined(manifest.outputs[output], `${name} packed test selection`);
@@ -2104,13 +2110,14 @@ describe("ci workflow guards", () => {
         expect(evaluateWorkflowExpression(workflow.jobs.preflight.outputs[output], context)).toBe(
           packed,
         );
-        const step = expectDefined(
-          workflow.jobs[job].steps.find((candidate: WorkflowStep) => candidate.name === stepName),
-          `${name} test command`,
-        );
-        expect(
-          evaluateWorkflowExpression(step.env.OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64, context),
-        ).toBe(packed);
+        const transported =
+          name === "ui"
+            ? workflow.jobs[job].steps.find(
+                (candidate: WorkflowStep) =>
+                  candidate.name === "Preserve selected Control UI files",
+              ).env.OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64
+            : workflow.jobs[job].with["groups-gzip-base64"];
+        expect(evaluateWorkflowExpression(transported, context)).toBe(packed);
       }
       const packedMatrix = expectDefined(
         manifest.outputs.ui_real_gateway_matrix,
@@ -5436,8 +5443,8 @@ describe("ci workflow guards", () => {
     ).toBe(
       "${{ github.event_name == 'pull_request' && '--max-old-space-size=8192' || '--max-old-space-size=16384' }}",
     );
-    expect(workflow.jobs["checks-node-core-test-nondist-shard"]["runs-on"]).toContain(
-      "blacksmith-4vcpu-ubuntu-2404",
+    expect(workflow.jobs["checks-node-core-test-nondist-shard"].uses).toBe(
+      "./.github/workflows/ddtest-vitest.yml",
     );
     for (const task of ["dependencies", "test-types"]) {
       expect(
@@ -6894,7 +6901,7 @@ describe("ci workflow guards", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ test_runtime_policy: policy, requires_bun: bun });
       expect(manifest.outputs.ui_test_runtime_policy).toBe(uiPolicy);
-      const job = readCiWorkflow().jobs["checks-node-core-test-nondist-shard"];
+      const job = readCiWorkflow().jobs["checks-node-bun"];
       const context = {
         eventName,
         repository: "openclaw/openclaw",
@@ -6905,23 +6912,21 @@ describe("ci workflow guards", () => {
       const run = job.steps.find((step: WorkflowStep) => step.name === "Run Node test shard");
       expect(setup.with["install-bun"]).toBe("false");
       const bunSetup = job.steps.find(
-        (step: WorkflowStep) => step.name === "Setup pinned Bun test runtime",
+        (step: WorkflowStep) => step.uses === "./.ci-harness/.github/actions/setup-test-bun",
       );
       expect(bunSetup.uses).toBe("./.ci-harness/.github/actions/setup-test-bun");
       expect(evaluateWorkflowExpression(`\${{ ${bunSetup.if} }}`, context)).toBe(bun);
       expect(evaluateWorkflowExpression(run.env.OPENCLAW_CI_TEST_RUNTIME_POLICY, context)).toBe(
         policy,
       );
-      const ui = readCiWorkflow().jobs["checks-ui"];
+      const ui = readCiWorkflow().jobs["checks-ui-bun"];
       const uiContext = { ...context, preflightOutputs: manifest.outputs };
       const uiBunSetup = ui.steps.find(
-        (step: WorkflowStep) => step.name === "Setup pinned Bun test runtime",
+        (step: WorkflowStep) => step.uses === "./.ci-harness/.github/actions/setup-test-bun",
       );
       expect(uiBunSetup.uses).toBe("./.ci-harness/.github/actions/setup-test-bun");
-      expect(evaluateWorkflowExpression(`\${{ ${uiBunSetup.if} }}`, uiContext)).toBe(
-        uiPolicy !== "node",
-      );
-      const uiRun = ui.steps.find((step: WorkflowStep) => step.name === "Test Control UI");
+      expect(uiBunSetup.if).toBeUndefined();
+      const uiRun = ui.steps.find((step: WorkflowStep) => step.name === "Test Control UI on Bun");
       expect(evaluateWorkflowExpression(uiRun.env.OPENCLAW_CI_TEST_RUNTIME_POLICY, uiContext)).toBe(
         uiPolicy,
       );
@@ -7262,6 +7267,7 @@ describe("ci workflow guards", () => {
       'case "$label" in */*) label="${label%/*}-${label#*/}" ;; esac',
       'printf "%s\\n" "$@" > "$STARTUP_CORPUS_ARGS.$label"',
     ]);
+    writeExecutable(path.join(bin, "ddtest"), startupCorpusDdtestStub);
     const script = expectDefined(step.run, "startup corpus command").replace(
       /\$\{\{[\s\S]*?\}\}/gu,
       (expression) => String(evaluateWorkflowExpression(expression, context)),
@@ -7271,6 +7277,7 @@ describe("ci workflow guards", () => {
       env: {
         ...process.env,
         PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+        GITHUB_WORKSPACE: directory,
         STARTUP_CORPUS_ARGS: argsPath,
         STARTUP_CORPUS_NODE: testNodeExecPath,
         OPENCLAW_CI_STARTUP_CORPUS_TEST_FILES_JSON: String(
@@ -7284,7 +7291,9 @@ describe("ci workflow guards", () => {
         .trim()
         .split("\n");
     const commonArgs = [
-      "scripts/run-vitest.mjs",
+      "--no-maglev",
+      "--no-concurrent-sparkplug",
+      "./node_modules/vitest/vitest.mjs",
       "run",
       "--config",
       "test/vitest/vitest.runtime-config.config.ts",
@@ -7303,6 +7312,7 @@ describe("ci workflow guards", () => {
       expect(readArgs("config")).toEqual([
         ...commonArgs,
         `--maxWorkers=${Math.min(4, availableParallelism())}`,
+        "--",
         ...scenario.expectedFiles,
       ]);
       expect(readdirSync(directory).filter((file) => file.startsWith("args."))).toEqual([
@@ -7311,11 +7321,13 @@ describe("ci workflow guards", () => {
     } else {
       expect(readArgs("config")).toEqual([
         ...commonArgs,
+        "--",
         "src/config/config-startup-corpus.test.ts",
       ]);
       for (const shard of ["1/4", "2/4", "3/4", "4/4"]) {
         expect(readArgs(shard), shard).toEqual([
           ...commonArgs,
+          "--",
           "src/config/state-startup-corpus.test.ts",
         ]);
       }
@@ -7326,32 +7338,35 @@ describe("ci workflow guards", () => {
     { cpus: 1, slots: 1 },
     { cpus: 2, slots: 1 },
     { cpus: 4, slots: 1 },
-    { cpus: 8, slots: 2 },
-    { cpus: 32, slots: 5 },
+    { cpus: 8, slots: 1 },
+    { cpus: 32, slots: 1 },
     { cpus: 2, slots: 1, fail: "1/4" },
-  ])("bounds frozen legacy startup corpus admission: %j", (scenario) => {
-    const steps: WorkflowStep[] = readCiWorkflow().jobs["checks-fast-core"].steps;
-    const step = steps.find((candidate) => candidate.name === "Check startup corpus");
-    const script = expectDefined(step?.run, "startup corpus command").replace(
-      /\$\{\{[\s\S]*?\}\}/gu,
-      (expression) =>
-        String(
-          evaluateWorkflowExpression(expression, {
-            eventName: "workflow_dispatch",
-            repository: "openclaw/openclaw",
-            releaseGate: true,
-            frozenTarget: true,
-            runAttempt: 1,
-          }),
-        ),
-    );
-    assertStartupCorpusCommand(
-      script,
-      tempDirs.make("startup-corpus-admission-"),
-      { ...scenario, frozenTarget: true },
-      runWorkflowShellScript,
-    );
-  });
+  ])(
+    "serializes frozen legacy startup plans sharing the native ddtest directory: %j",
+    (scenario) => {
+      const steps: WorkflowStep[] = readCiWorkflow().jobs["checks-fast-core"].steps;
+      const step = steps.find((candidate) => candidate.name === "Check startup corpus");
+      const script = expectDefined(step?.run, "startup corpus command").replace(
+        /\$\{\{[\s\S]*?\}\}/gu,
+        (expression) =>
+          String(
+            evaluateWorkflowExpression(expression, {
+              eventName: "workflow_dispatch",
+              repository: "openclaw/openclaw",
+              releaseGate: true,
+              frozenTarget: true,
+              runAttempt: 1,
+            }),
+          ),
+      );
+      assertStartupCorpusCommand(
+        script,
+        tempDirs.make("startup-corpus-admission-"),
+        { ...scenario, frozenTarget: true },
+        runWorkflowShellScript,
+      );
+    },
+  );
 
   it("starts Node fanout after preflight while ratchets remain required by the final gate", () => {
     const workflow = readCiWorkflow();
@@ -7374,7 +7389,7 @@ describe("ci workflow guards", () => {
               cancelled,
               preflightOutputs: {
                 run_baseline_ratchets: selected,
-                run_checks_node_core_nondist: nodeSelected,
+                run_checks_node_ddtest: nodeSelected,
               },
               jobResults: { "checks-baseline-ratchets": result },
             });
@@ -7388,7 +7403,7 @@ describe("ci workflow guards", () => {
         eventName: "pull_request",
         repository: "openclaw/openclaw",
         runAttempt: 1,
-        preflightOutputs: { run_baseline_ratchets: "true", run_checks_node_core_nondist: "true" },
+        preflightOutputs: { run_baseline_ratchets: "true", run_checks_node_ddtest: "true" },
         jobResults: { preflight: "failure" },
       }),
     ).toBe(false);
@@ -7663,11 +7678,15 @@ describe("ci workflow guards", () => {
         (step: WorkflowStep) => step.name === "Run ${{ matrix.task }} (${{ matrix.runtime }})",
       );
       const fakeBin = path.join(root, "bin");
-      const callsPath = path.join(root, "pnpm-calls.jsonl");
+      const callsPath = path.join(root, "ddtest-calls");
       mkdirSync(fakeBin);
-      writeExecutable(path.join(fakeBin, "pnpm"), [
-        "#!/usr/bin/env node",
-        'require("node:fs").appendFileSync(process.env.PNPM_CALLS, JSON.stringify(process.argv.slice(2)) + "\\n");',
+      writeExecutable(path.join(fakeBin, "ddtest"), [
+        "#!/bin/sh",
+        'mode="$1"; shift',
+        'while [ "$#" -gt 0 ]; do',
+        '  if [ "$1" = "--command" ]; then command="$2"; shift 2; else shift; fi',
+        "done",
+        'printf "%s\\n" "$mode" "$command" >> "$DDTEST_CALLS"',
       ]);
       // Historical release checkouts retain these tasks; current PRs select the owner row above.
       const run = spawnSync("bash", ["-c", runStep.run], {
@@ -7675,22 +7694,32 @@ describe("ci workflow guards", () => {
         env: {
           ...process.env,
           PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
-          PNPM_CALLS: callsPath,
+          GITHUB_WORKSPACE: root,
+          DDTEST_CALLS: callsPath,
           TASK: taskOverride ?? "ci-routing",
         },
       });
       expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-      const calls = readFileSync(callsPath, "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as string[]);
-      expect(calls.map(([command]) => command)).toEqual(
-        taskOverride ? ["test:contracts:plugins", "test"] : ["test"],
+      const calls = readFileSync(callsPath, "utf8").trim().split("\n");
+      expect(calls.filter((_, index) => index % 2 === 0)).toEqual(
+        taskOverride ? ["plan", "run", "plan", "run"] : ["plan", "run"],
       );
-      expect(
-        calls.find(([command]) => command === "test"),
-        "executed routing test argv",
-      ).toContain("test/scripts/changed-path-facts.test.ts");
+      for (let index = 0; index < calls.length; index += 4) {
+        expect(calls[index + 3]).toBe(calls[index + 1]);
+        expect(calls[index + 1]).toContain(
+          "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config",
+        );
+      }
+      if (taskOverride) {
+        expect(calls[1]).toContain("test/vitest/vitest.contracts-plugin.config.ts --maxWorkers=1");
+      }
+      const routingCommand = calls.at(-1);
+      expect(routingCommand, "executed routing test argv").toContain(
+        "--config vitest.config.ts -- ",
+      );
+      expect(routingCommand, "executed routing test argv").toContain(
+        "test/scripts/changed-path-facts.test.ts",
+      );
     },
   );
 
@@ -8915,8 +8944,8 @@ describe("ci workflow guards", () => {
     const uiBrowserCache = workflow.jobs["checks-ui"].steps.find(
       (step: { name?: string }) => step.name === "Cache Playwright Chromium",
     );
-    const uiTest = workflow.jobs["checks-ui"].steps.find(
-      (step: { name?: string }) => step.name === "Test Control UI",
+    const uiTest = workflow.jobs["checks-ui-run"].steps.find(
+      (step: { name?: string }) => step.name === "Run Control UI",
     );
     expect(workflow.jobs["checks-ui"].env.COMPATIBILITY_TARGET).toBe(
       "${{ needs.preflight.outputs.compatibility_target }}",
@@ -8947,10 +8976,10 @@ describe("ci workflow guards", () => {
         path: "~/.cache/ms-playwright",
       },
     });
-    expect(uiTest.run).toContain('if [[ "$COMPATIBILITY_TARGET" == "true" ]]');
-    expect(uiTest.run).toContain("pnpm --dir ui test --testTimeout=30000 --isolate");
+    expect(uiTest.run).toContain("needs.preflight.outputs.compatibility_target == 'true'");
+    expect(uiTest.run).toContain("--testTimeout=30000 --isolate");
     expect(uiTest.run).not.toContain("--retry");
-    expect(uiTest.run).toContain("pnpm --dir ui test");
+    expect(uiTest.run).toContain("ddtest run --platform javascript --framework vitest");
   });
 
   it.each<
@@ -9107,99 +9136,13 @@ describe("ci workflow guards", () => {
     }
 
     const uiE2E = readCiWorkflow().jobs["checks-ui-e2e"];
-    const scenario = expectDefined(
-      uiE2E.steps.find((step: WorkflowStep) => step.name === "Test Control UI end-to-end"),
-      "Control UI E2E suite",
-    );
-    const commandRoot = tempDirs.make("openclaw-ui-e2e-project-command-");
-    const commandBin = path.join(commandRoot, "bin");
-    const commandArgs = path.join(commandRoot, "args");
-    const commandInclude = path.join(commandRoot, "include-path");
-    const commandNativeWorkers = path.join(commandRoot, "native-workers");
-    const workerEnvKey = expectDefined(
-      Object.entries(scenario.env ?? {}).find(
-        ([, value]) => value === "${{ matrix.vitest_max_workers || 2 }}",
-      )?.[0],
-      "Control UI E2E worker count",
-    );
-    mkdirSync(commandBin);
-    writeExecutable(path.join(commandBin, "node"), [
-      "#!/bin/sh",
-      'printf "%s\\n" "$@" > "$UI_E2E_COMMAND_ARGS"',
-      'printf "%s" "${OPENCLAW_VITEST_INCLUDE_FILE:-}" > "$UI_E2E_COMMAND_INCLUDE"',
-      'printf "%s" "${VITEST_MAX_WORKERS:-}" > "$UI_E2E_COMMAND_NATIVE_WORKERS"',
-    ]);
-    const runCommand = (env: Record<string, string>) => {
-      const result = runWorkflowShellScript(expectDefined(scenario.run, "UI E2E command"), {
-        cwd: commandRoot,
-        env: {
-          ...process.env,
-          OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: "",
-          OPENCLAW_VITEST_INCLUDE_FILE: "",
-          OPENCLAW_VITEST_MAX_WORKERS: undefined,
-          VITEST_MAX_WORKERS: undefined,
-          RUNNER_TEMP: commandRoot,
-          ...env,
-          PATH: `${commandBin}:${process.env.PATH ?? ""}`,
-          UI_E2E_COMMAND_ARGS: commandArgs,
-          UI_E2E_COMMAND_INCLUDE: commandInclude,
-          UI_E2E_COMMAND_NATIVE_WORKERS: commandNativeWorkers,
-        },
-      });
-      expect(result.status, result.stdout + result.stderr).toBe(0);
-      // Vitest's native env override defeats the source-server project's serial limit.
-      expect(readFileSync(commandNativeWorkers, "utf8")).toBe("");
-      return readFileSync(commandArgs, "utf8").trim().split("\n");
-    };
-    const shardEnv = { VITEST_SHARD_COUNT: "3", VITEST_SHARD_INDEX: "1" };
-    const expectedArgs = [
-      "scripts/run-vitest.mjs",
-      "run",
-      "--config",
-      "test/vitest/vitest.ui-e2e.config.ts",
-      "--configLoader",
-      "runner",
-      "--maxWorkers",
-      "2",
-      "--shard",
-      "1/3",
-    ];
-    expect(runCommand(shardEnv)).toEqual(expectedArgs);
-    expect(runCommand({ ...shardEnv, [workerEnvKey]: "3" })).toEqual(
-      expectedArgs.with(expectedArgs.indexOf("--maxWorkers") + 1, "3"),
-    );
-    expect(readFileSync(commandInclude, "utf8")).toBe("");
-
-    const codec = "scripts/lib/ci-node-test-groups-codec.mts";
-    mkdirSync(path.dirname(path.join(commandRoot, codec)), { recursive: true });
-    copyFileSync(codec, path.join(commandRoot, codec));
-    const group = {
-      configs: ["test/vitest/vitest.ui-e2e.config.ts"],
-      shard_name: "test/vitest/vitest.ui-e2e.config.ts",
-    };
-    const includePatterns = [
-      "ui/src/e2e/chat-flow.navigation-presentation.e2e.test.ts",
-      "ui/src/e2e/chat-session-entry.e2e.test.ts",
-    ];
-    expect(
-      runCommand({
-        ...shardEnv,
-        OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: encodeNodeTestGroups([
-          { ...group, includePatterns },
-        ]),
-      }),
-    ).toEqual(expectedArgs);
-    const includeFile = readFileSync(commandInclude, "utf8");
-    expect(includeFile).toBe(path.join(commandRoot, "ui-e2e-include.json"));
-    expect(JSON.parse(readFileSync(includeFile, "utf8"))).toEqual(includePatterns);
-    expect(
-      runCommand({
-        ...shardEnv,
-        OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64: encodeNodeTestGroups([group]),
-        OPENCLAW_VITEST_INCLUDE_FILE: includeFile,
-      }),
-    ).toEqual(expectedArgs);
-    expect(readFileSync(commandInclude, "utf8")).toBe("");
+    expect(uiE2E.uses).toBe("./.github/workflows/ddtest-vitest.yml");
+    expect(uiE2E.with.config).toBe("test/vitest/vitest.ui-e2e.config.ts");
+    const native = readWorkflow(".github/workflows/ddtest-vitest.yml");
+    expect(native.jobs.test.strategy.matrix).toBe("${{ fromJSON(needs.plan.outputs.matrix) }}");
+    expect(native.env.DD_TEST_OPTIMIZATION_RUNNER_COMMAND).not.toContain("--shard");
+    expect(native.env.VITEST_MAX_WORKERS).toBeUndefined();
+    expect(native.env.OPENCLAW_VITEST_MAX_WORKERS).toBe("${{ inputs.max-workers }}");
 
     expect(
       evaluateWorkflowExpression(`\${{ ${uiE2E.if} }}`, {
@@ -9432,7 +9375,11 @@ describe("ci workflow guards", () => {
           vitest_shard_count: control ? 8 : 0,
         });
       }
-      for (const name of ["checks-ui-e2e", "checks-ui-e2e-real-gateway"]) {
+      for (const name of [
+        "checks-ui-e2e",
+        "checks-browser-extension",
+        "checks-ui-e2e-real-gateway",
+      ]) {
         expect(
           evaluateWorkflowExpression(`\${{ ${readCiWorkflow().jobs[name].if} }}`, {
             eventName: "pull_request",
@@ -9440,7 +9387,9 @@ describe("ci workflow guards", () => {
             runAttempt: 1,
             preflightOutputs: manifest.outputs,
           }),
-        ).toBe(name === "checks-ui-e2e" ? control || browser : real);
+        ).toBe(
+          name === "checks-ui-e2e" ? control : name === "checks-browser-extension" ? browser : real,
+        );
       }
     },
   );
@@ -9504,7 +9453,6 @@ describe("ci workflow guards", () => {
 
   it("gates current Control UI changes on ordinary and real-Gateway Chromium E2E", () => {
     const workflow = readCiWorkflow();
-    const ui = workflow.jobs["checks-ui"];
     const uiE2e = workflow.jobs["checks-ui-e2e"];
     const uiE2eRealGateway = workflow.jobs["checks-ui-e2e-real-gateway"];
 
@@ -9512,17 +9460,26 @@ describe("ci workflow guards", () => {
       "ui-e2e-projects-contract-v1",
     );
 
-    expect(uiE2e.permissions).toEqual({ contents: "read" });
+    expect(readWorkflow(".github/workflows/ddtest-vitest.yml").permissions).toEqual({
+      contents: "read",
+    });
     expect(uiE2e.needs).toEqual(["preflight"]);
     expect(uiE2e.if).toBe(
-      "needs.preflight.outputs.run_ui_e2e == 'true' && needs.preflight.outputs.compatibility_target != 'true'",
+      "needs.preflight.outputs.run_ui_ddtest == 'true' && needs.preflight.outputs.compatibility_target != 'true'",
     );
-    expect(uiE2e["runs-on"]).not.toBe(ui["runs-on"]);
-    expect(uiE2e["timeout-minutes"]).toBe(25);
-    expect(uiE2e.env).toEqual({ OPENCLAW_UI_E2E_SKIP_REAL_GATEWAY: "1" });
-    expect(uiE2e.strategy["fail-fast"]).toBe(false);
-    expect(uiE2e.strategy["max-parallel"]).toBe(14);
-    expect(uiE2e.strategy.matrix).toBe("${{ fromJson(needs.preflight.outputs.ui_e2e_matrix) }}");
+    expect(uiE2e.uses).toBe("./.github/workflows/ddtest-vitest.yml");
+    expect(uiE2e.with).toMatchObject({
+      config: "test/vitest/vitest.ui-e2e.config.ts",
+      "max-runners": "${{ fromJSON(needs.preflight.outputs.ui_ddtest_max_runners || '1') }}",
+      "timeout-minutes": 25,
+      browser: true,
+      "skip-real-gateway": true,
+    });
+    const nativeUi = readWorkflow(".github/workflows/ddtest-vitest.yml");
+    expect(nativeUi.jobs.test.strategy).toEqual({
+      "fail-fast": false,
+      matrix: "${{ fromJSON(needs.plan.outputs.matrix) }}",
+    });
     const expectedUiE2eMatrices = [6, 8, 12].map((vitestShardCount) => ({
       include: Array.from({ length: vitestShardCount + 1 }, (_, index) => {
         const shard = index + 1;
@@ -9560,7 +9517,7 @@ describe("ci workflow guards", () => {
     expect(workflow.jobs["ci-gate"].needs).toContain("checks-ui-e2e");
     expect(workflow.jobs["ci-gate"].needs).toContain("checks-ui-e2e-real-gateway");
 
-    expect(uiE2eRealGateway.permissions).toEqual(uiE2e.permissions);
+    expect(uiE2eRealGateway.permissions).toEqual({ contents: "read" });
     expect(uiE2eRealGateway.needs).toEqual(uiE2e.needs);
     expect(uiE2eRealGateway.if).toBe(
       "needs.preflight.outputs.run_ui_real_gateway == 'true' && needs.preflight.outputs.compatibility_target != 'true'",
@@ -9572,64 +9529,55 @@ describe("ci workflow guards", () => {
       matrix: "${{ fromJson(needs.preflight.outputs.ui_real_gateway_matrix) }}",
     });
 
-    const uiE2eSetup = expectDefined(
-      uiE2e.steps.find((step: WorkflowStep) => step.name === "Setup Node environment"),
-      "Control UI E2E Node setup",
+    for (const nativeJob of [nativeUi.jobs.plan, nativeUi.jobs.test]) {
+      const browserInstall = nativeJob.steps.find((step: WorkflowStep) =>
+        step.run?.includes("playwright install"),
+      );
+      expect(browserInstall).toMatchObject({
+        if: "inputs.browser",
+        run: expect.stringContaining("playwright install --with-deps chromium"),
+      });
+      expect(JSON.stringify(nativeJob)).not.toContain("OPENCLAW_UI_E2E_ALLOW_MISSING_CHROMIUM");
+      expect(JSON.stringify(nativeJob)).not.toContain("OPENCLAW_VITEST_NO_OUTPUT_RETRY");
+    }
+    const browserExtension = workflow.jobs["checks-browser-extension"];
+    expect(browserExtension.if).toBe(
+      "needs.preflight.outputs.run_ui_e2e == 'true' && needs.preflight.outputs.compatibility_target != 'true' && contains(needs.preflight.outputs.ui_e2e_matrix, 'browser-extension')",
     );
-    expect(uiE2eSetup.uses).toBe("./.ci-harness/.github/actions/setup-node-env");
-    const expectedSharedUiE2eSetup = {
-      "cache-mode": "${{ needs.preflight.outputs.cache_mode }}",
-      "node-version": "24.x",
-      "install-bun": "false",
-      "dependency-cache": expect.any(String),
-    } as const;
-    const expectedUiE2eSetup = {
-      ...expectedSharedUiE2eSetup,
-      "restore-test-caches":
-        "${{ (needs.preflight.outputs.runner_profile == 'github' || needs.preflight.outputs.runner_profile == 'hybrid') && 'true' || 'false' }}",
-    } as const;
-    expect(uiE2eSetup.with).toEqual(expectedUiE2eSetup);
+    expect(workflow.jobs["ci-gate"].needs).toContain("checks-browser-extension");
+    const extensionTest = browserExtension.steps.find((step: WorkflowStep) =>
+      step.run?.includes("ddtest run"),
+    );
+    expect(extensionTest.run).toContain(
+      "extensions/browser/chrome-extension/bootstrap.chromium.test.ts",
+    );
+    expect(extensionTest.run).not.toContain("--retry");
+    const nativeEvidence = nativeUi.jobs.test.steps.find(
+      (step: WorkflowStep) => step.name === "Upload browser evidence",
+    );
+    expect(nativeEvidence).toMatchObject({
+      if: "always() && inputs.browser",
+      with: { path: expect.stringContaining(".artifacts/control-ui-e2e-timeouts/") },
+    });
+
     const realGatewaySetup = expectDefined(
       uiE2eRealGateway.steps.find((step: WorkflowStep) => step.name === "Setup Node environment"),
       "real-Gateway Control UI E2E Node setup",
     );
-    expect(realGatewaySetup).toMatchObject({
-      uses: uiE2eSetup.uses,
-      with: expectedSharedUiE2eSetup,
-    });
-    expect(realGatewaySetup.with).toEqual(expectedSharedUiE2eSetup);
-
-    // Failed-job retries can retain an earlier six-shard plan while live routing
-    // selects hosted runners. Both widths retain the cache and contributor boundaries.
     const routedUiE2eJobs = [
-      ...expectedUiE2eMatrices
-        .flatMap(({ include }) => include)
-        .map((matrix) => ({
-          job: uiE2e,
-          name: `checks-ui-e2e (${matrix.shard}/${matrix.shard_count})`,
-          setup: uiE2eSetup,
-          matrix,
-          blacksmithRunner:
-            matrix.task === "control-ui"
-              ? "blacksmith-16vcpu-ubuntu-2404"
-              : "blacksmith-8vcpu-ubuntu-2404",
-        })),
-      ...[
-        { shard: 1, shard_count: 2, run_desktop: true },
-        { shard: 2, shard_count: 2, run_desktop: false },
-        { shard: 1, shard_count: 1, run_desktop: true },
-      ].map((matrix) => ({
-        job: uiE2eRealGateway,
-        name:
-          matrix.shard_count === 1
-            ? "checks-ui-e2e-real-gateway"
-            : `checks-ui-e2e-real-gateway (${matrix.shard}/${matrix.shard_count})`,
-        setup: realGatewaySetup,
-        matrix,
-        blacksmithRunner: "blacksmith-32vcpu-ubuntu-2404",
-      })),
-    ] as const;
-    expect(new Set(routedUiE2eJobs.map((job) => job.name)).size).toBe(routedUiE2eJobs.length);
+      { shard: 1, shard_count: 2, run_desktop: true },
+      { shard: 2, shard_count: 2, run_desktop: false },
+      { shard: 1, shard_count: 1, run_desktop: true },
+    ].map((matrix) => ({
+      job: uiE2eRealGateway,
+      name:
+        matrix.shard_count === 1
+          ? "checks-ui-e2e-real-gateway"
+          : `checks-ui-e2e-real-gateway (${matrix.shard}/${matrix.shard_count})`,
+      setup: realGatewaySetup,
+      matrix,
+      blacksmithRunner: "blacksmith-32vcpu-ubuntu-2404",
+    }));
     const routingScenarios = [
       {
         name: "same-repo pull request first attempt",
@@ -9765,80 +9713,6 @@ describe("ci workflow guards", () => {
       }
     }
 
-    const chromiumInstall = expectDefined(
-      uiE2e.steps.find((step: WorkflowStep) => step.name === "Install Playwright Chromium"),
-      "Control UI E2E Chromium installation",
-    );
-    expect(chromiumInstall.env.FROZEN_TARGET).toBe("${{ needs.preflight.outputs.frozen_target }}");
-    expect(chromiumInstall.run).toContain(
-      "node --import tsx scripts/ensure-playwright-chromium.mts",
-    );
-    expect(chromiumInstall.run).toContain("node scripts/ensure-playwright-chromium.mjs");
-    const chromiumCache = expectDefined(
-      uiE2e.steps.find((step: WorkflowStep) => step.name === "Cache Playwright Chromium"),
-      "Control UI E2E Chromium cache",
-    );
-    const realGatewayChromiumInstall = expectDefined(
-      uiE2eRealGateway.steps.find(
-        (step: WorkflowStep) => step.name === "Install Playwright Chromium",
-      ),
-      "real-Gateway Control UI E2E Chromium installation",
-    );
-    expect(realGatewayChromiumInstall).toEqual(chromiumInstall);
-    const realGatewayChromiumCache = expectDefined(
-      uiE2eRealGateway.steps.find(
-        (step: WorkflowStep) => step.name === "Cache Playwright Chromium",
-      ),
-      "real-Gateway Control UI E2E Chromium cache",
-    );
-    expect(realGatewayChromiumCache).toEqual(chromiumCache);
-
-    const scenario = expectDefined(
-      uiE2e.steps.find((step: WorkflowStep) => step.name === "Test Control UI end-to-end"),
-      "Control UI E2E suite",
-    );
-    expect(scenario.if).toBe("matrix.task == 'control-ui'");
-    expect(scenario.env).toEqual({
-      OPENCLAW_UI_E2E_DIAGNOSTIC_DIR:
-        ".artifacts/control-ui-e2e-timeouts/shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}",
-      VITEST_SHARD_INDEX: "${{ matrix.shard }}",
-      VITEST_SHARD_COUNT: "${{ matrix.vitest_shard_count }}",
-      OPENCLAW_VITEST_MAX_WORKERS: "${{ matrix.vitest_max_workers || 2 }}",
-      OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64:
-        "${{ needs.preflight.outputs.ui_e2e_test_groups_gzip_base64 }}",
-    });
-    expect(scenario.run).not.toContain("--project");
-    const timeoutDiagnostics = expectDefined(
-      uiE2e.steps.find(
-        (step: WorkflowStep) => step.name === "Upload Control UI E2E timeout diagnostics",
-      ),
-      "Control UI E2E timeout diagnostic upload",
-    );
-    expect(timeoutDiagnostics).toEqual({
-      name: "Upload Control UI E2E timeout diagnostics",
-      if: "failure() && matrix.task == 'control-ui'",
-      uses: UPLOAD_ARTIFACT_V7,
-      with: {
-        name: "control-ui-e2e-timeout-${{ matrix.shard }}-${{ github.run_attempt }}",
-        path: ".artifacts/control-ui-e2e-timeouts/shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}/failure-*/failure.public.json",
-        "if-no-files-found": "ignore",
-        "retention-days": 7,
-      },
-    });
-    const browserExtension = expectDefined(
-      uiE2e.steps.find(
-        (step: WorkflowStep) => step.name === "Test browser extension bootstrap end-to-end",
-      ),
-      "browser extension bootstrap E2E suite",
-    );
-    expect(browserExtension.if).toBe("matrix.task == 'browser-extension'");
-    expect(browserExtension.run).toBe("pnpm test:e2e:browser-extension");
-    for (const { job } of routedUiE2eJobs) {
-      const jobContract = JSON.stringify(job);
-      expect(jobContract).not.toContain("OPENCLAW_UI_E2E_ALLOW_MISSING_CHROMIUM");
-      expect(jobContract).not.toContain("OPENCLAW_VITEST_NO_OUTPUT_RETRY");
-    }
-
     const realGatewaySteps = uiE2eRealGateway.steps.filter((step: WorkflowStep) =>
       step.name?.includes("with a real Gateway"),
     );
@@ -9954,7 +9828,7 @@ describe("ci workflow guards", () => {
       },
     });
     expect(uiE2eRealGateway.steps.indexOf(desktopUpload)).toBeGreaterThan(realGatewayIndex);
-    expect(realGatewayStep.env).toEqual({
+    expect(realGatewayStep.env).toMatchObject({
       FROZEN_TARGET: "${{ needs.preflight.outputs.frozen_target }}",
       OPENCLAW_CAPTURE_UI_PROOF:
         "${{ github.event_name == 'workflow_dispatch' && inputs.capture_ui_proof && '1' || '0' }}",
@@ -10183,7 +10057,7 @@ describe("ci workflow guards", () => {
 
   it("keeps docs i18n CI on the workflow-owned Go toolchain", () => {
     const workflow = readCiWorkflow();
-    const nodeTestJob = workflow.jobs["checks-node-core-test-nondist-shard"];
+    const nodeTestJob = workflow.jobs["checks-node-bun"];
     const setupGoStep = nodeTestJob.steps.find(
       (step: WorkflowStep) => step.name === "Setup Go for docs i18n",
     );
@@ -10428,7 +10302,7 @@ describe("ci workflow guards", () => {
       expect(row).not.toHaveProperty("groups");
       expect(row).not.toHaveProperty("includePatterns");
       expect(row.env).toEqual(grouped ? jobEnv : singleGroup.env);
-      const runStep = readCiWorkflow().jobs["checks-node-core-test-nondist-shard"].steps.find(
+      const runStep = readCiWorkflow().jobs["checks-node-bun"].steps.find(
         (step: WorkflowStep) => step.name === "Run Node test shard",
       );
       const context = {
@@ -10662,7 +10536,7 @@ describe("ci workflow guards", () => {
       "shard_name",
       "timing_key",
     ]);
-    const runStep = readCiWorkflow().jobs["checks-node-core-test-nondist-shard"].steps.find(
+    const runStep = readCiWorkflow().jobs["checks-node-bun"].steps.find(
       (step: WorkflowStep) => step.name === "Run Node test shard",
     );
     const context = {
@@ -10879,7 +10753,7 @@ describe("ci workflow guards", () => {
       true,
     ]);
 
-    const nodeTestJob = readCiWorkflow().jobs["checks-node-core-test-nondist-shard"];
+    const nodeTestJob = readCiWorkflow().jobs["checks-node-bun"];
     const imageStep = expectDefined(
       nodeTestJob.steps.find((step: WorkflowStep) => step.name === "Prepare Docker sandbox image"),
       "Node shard Docker sandbox image preparation",
@@ -10901,7 +10775,10 @@ describe("ci workflow guards", () => {
       "control-ui-performance",
       "native-i18n",
       "checks-ui",
+      "checks-ui-run",
+      "checks-ui-bun",
       "checks-ui-e2e",
+      "checks-browser-extension",
       "checks-ui-e2e-real-gateway",
       "control-ui-i18n",
       "checks-baseline-ratchets",
@@ -10911,6 +10788,7 @@ describe("ci workflow guards", () => {
       "checks-fast-channel-contracts-shard",
       "checks-node-compat",
       "checks-node-core-test-nondist-shard",
+      "checks-node-bun",
       "check-shard",
       "check-lint-hosted-core-shard",
       "check-lint-hosted-extension-shard",
@@ -10957,6 +10835,48 @@ describe("ci workflow guards", () => {
       );
     }
     expect(resultRows).toHaveLength(gate.needs.length);
+  });
+
+  it("hands the selected Node cohorts to native planning without replacing their prerequisites", () => {
+    const workflow = readCiWorkflow();
+    const caller = workflow.jobs["checks-node-core-test-nondist-shard"];
+    expect(caller.strategy.matrix).toBe(
+      "${{ fromJSON(needs.preflight.outputs.checks_node_ddtest_matrix) }}",
+    );
+    expect(caller.with).toMatchObject({
+      config: "${{ matrix.config }}",
+      "max-runners": "${{ matrix.max_runners }}",
+      "selection-gzip-base64": "${{ matrix.selection_gzip_base64 }}",
+      "env-json": "${{ matrix.env_json }}",
+      "git-commits-json": "${{ matrix.git_commits_json }}",
+    });
+    const native = readWorkflow(".github/workflows/ddtest-vitest.yml");
+    for (const job of [native.jobs.plan, native.jobs.test]) {
+      const selection = job.steps.find(
+        (step: WorkflowStep) => step.name === "Restore manifest selection and environment",
+      );
+      expect(selection.env.SELECTION_GZIP_BASE64).toBe("${{ inputs.selection-gzip-base64 }}");
+      expect(selection.env.GROUP_ENV_JSON).toBe("${{ inputs.env-json }}");
+      expect(selection.run).toContain("OPENCLAW_VITEST_INCLUDE_FILE");
+      expect(
+        job.steps.find((step: WorkflowStep) => step.name === "Prepare Docker sandbox image"),
+      ).toMatchObject({
+        if: "inputs.sandbox",
+        run: expect.stringContaining("scripts/sandbox-setup.sh"),
+      });
+      expect(job.steps.find((step: WorkflowStep) => step.uses === SETUP_GO_V6)).toMatchObject({
+        if: "inputs.go",
+        with: { "go-version": "1.27.1", cache: false },
+      });
+      expect(job.steps.find((step: WorkflowStep) => step.name === "Install ripgrep").if).toBe(
+        "inputs.ripgrep",
+      );
+    }
+    expect(native.jobs.plan.steps.find((step: WorkflowStep) => step.id === "plan").run).toContain(
+      "--strict-discovery",
+    );
+    expect(native.jobs.test.strategy.matrix).toBe("${{ fromJSON(needs.plan.outputs.matrix) }}");
+    expect(native.env.DD_TEST_OPTIMIZATION_RUNNER_COMMAND).not.toContain("--shard");
   });
 
   it("ci-gate selection projections match their owning job predicates", () => {

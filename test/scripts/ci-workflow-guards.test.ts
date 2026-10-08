@@ -1559,8 +1559,7 @@ AFTER_CD
       "github.event_name == 'pull_request'",
     );
     expect(workflow.jobs["checks-fast-core"].strategy["max-parallel"]).toBe(12);
-    const nodeParallel =
-      workflow.jobs["checks-node-core-test-nondist-shard"].strategy["max-parallel"];
+    const nodeParallel = workflow.jobs["checks-node-bun"].strategy["max-parallel"];
     const canonicalNodePr = {
       eventName: "pull_request" as const,
       repository: "openclaw/openclaw",
@@ -1621,6 +1620,16 @@ AFTER_CD
         JSON.stringify(context),
       ).toBe(96);
     }
+    const native = readWorkflow(".github/workflows/ddtest-vitest.yml");
+    const node = workflow.jobs["checks-node-core-test-nondist-shard"];
+    expect(node.uses).toBe("./.github/workflows/ddtest-vitest.yml");
+    expect(node.strategy["fail-fast"]).toBe(false);
+    expect(native.jobs.test.strategy.matrix).toBe("${{ fromJSON(needs.plan.outputs.matrix) }}");
+    const plan = native.jobs.plan.steps.find((step: WorkflowStep) =>
+      step.run?.includes("ddtest plan"),
+    );
+    expect(plan.run).toContain('--max-parallelism "$MAX_RUNNERS"');
+    expect(plan.env.MAX_RUNNERS).toBe("${{ inputs.max-runners }}");
     expect(workflow.jobs["checks-fast-plugin-contracts-shard"].strategy["max-parallel"]).toBe(12);
     expect(workflow.jobs["checks-fast-channel-contracts-shard"].strategy["max-parallel"]).toBe(12);
     expect(workflow.jobs["check-shard"].strategy["max-parallel"]).toBe(12);
@@ -2206,16 +2215,21 @@ require("node:fs").writeFileSync("scheduler-baseline", process.env.OPENCLAW_UPGR
       ["preflight", undefined, "blacksmith-16vcpu-ubuntu-2404"],
       ["security-fast", undefined, "ubuntu-24.04"],
       ["checks-ui", undefined, "ubuntu-24.04"],
-      ["checks-ui-e2e", "browser-extension", "ubuntu-24.04"],
+      ["checks-browser-extension", "browser-extension", "ubuntu-24.04"],
       ["checks-ui-e2e", "control-ui", "blacksmith-16vcpu-ubuntu-2404"],
       ["checks-ui-e2e-real-gateway", undefined, "blacksmith-32vcpu-ubuntu-2404"],
     ] as const) {
       expect(
-        evaluateWorkflowExpression(workflow.jobs[jobName]["runs-on"], {
-          ...context,
-          matrix: { task },
-          preflightOutputs: { hybrid_hosted_offload: "true" },
-        }),
+        evaluateWorkflowExpression(
+          jobName === "checks-ui-e2e"
+            ? `\${{ fromJSON(${workflow.jobs[jobName].with["runner-json"].slice(3, -3)}) }}`
+            : workflow.jobs[jobName]["runs-on"],
+          {
+            ...context,
+            matrix: { task },
+            preflightOutputs: { hybrid_hosted_offload: "true" },
+          },
+        ),
         `${jobName}: ${task ?? "default"}`,
       ).toBe(expected);
     }
@@ -3900,8 +3914,8 @@ server.listen(0, "127.0.0.1", () => {
     }
 
     const goSetup = expectDefined(
-      workflow.jobs["checks-node-core-test-nondist-shard"].steps.find(
-        (step: WorkflowStep) => step.name === "Setup Go for docs i18n",
+      readWorkflow(".github/workflows/ddtest-vitest.yml").jobs.plan.steps.find(
+        (step: WorkflowStep) => step.uses === SETUP_GO_V6,
       ),
       "docs i18n Go setup",
     );
@@ -4992,7 +5006,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       runtimes: ["node", "bun"],
       shards: [1, 2, 3],
     },
-  ])("executes the $label standalone UI envelope", async (scenario) => {
+  ])("executes the $label retained Bun-capable UI envelope", async (scenario) => {
     const workflow = readCiWorkflow();
     expect(workflow.env?.BUN_JSC_useFTLJIT).toBeUndefined();
     const ftlSteps: string[] = [];
@@ -5008,11 +5022,11 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       }
     }
     expect(ftlSteps).toEqual([]);
-    const ui = workflow.jobs["checks-ui"];
+    const ui = workflow.jobs["checks-ui-bun"];
     const lint = ui.steps.find(
       (step: WorkflowStep) => step.name === "Lint Control UI window.open usage",
     );
-    const test = ui.steps.find((step: WorkflowStep) => step.name === "Test Control UI");
+    const test = ui.steps.find((step: WorkflowStep) => step.name === "Test Control UI on Bun");
     const diagnostics = expectDefined(
       ui.steps.find((step: WorkflowStep) => step.name === "Upload Control UI timeout diagnostics"),
       "Control UI timeout diagnostic upload",
@@ -5051,7 +5065,9 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     expect(shards).toEqual(scenario.shards);
     expect(ui.strategy).toMatchObject({ "fail-fast": false, "max-parallel": 3 });
     expect(ui.needs).toEqual(["preflight"]);
-    expect(ui.if).toBe("needs.preflight.outputs.run_ui_tests == 'true'");
+    expect(ui.if).toBe(
+      "needs.preflight.outputs.run_ui_tests == 'true' && (needs.preflight.outputs.ui_test_runtime_policy == 'bun-compatible' || needs.preflight.outputs.ui_test_runtime_policy == 'dual')",
+    );
     expect(ui.permissions).toEqual({ contents: "read" });
     // Hosted rows (full-release dispatches, github backend, hybrid retries,
     // fork PRs) run the Control UI suites slower than Blacksmith; a frozen
@@ -5075,7 +5091,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
         preflightOutputs: { ...context.preflightOutputs, ci_shape: "main" },
       }),
     ).toBe(20);
-    expect(workflow.jobs["ci-gate"].needs).toContain("checks-ui");
+    expect(workflow.jobs["ci-gate"].needs).toContain("checks-ui-bun");
 
     const root = tempDirs.make("openclaw-ui-workflow-");
     const bin = path.join(root, "bin");
@@ -5098,11 +5114,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
         String(value).replace(/\$\{\{[\s\S]*?\}\}/gu, (expression) =>
           String(evaluateWorkflowExpression(expression, rowContext)),
         );
-      expect(resolveValue(ui.name)).toBe(
-        scenario.compatibilityTarget
-          ? "checks-ui"
-          : `checks-ui (${shard}/${scenario.shards.length})`,
-      );
+      expect(resolveValue(ui.name)).toBe(`checks-ui-bun (${shard})`);
       expect(evaluateWorkflowExpression(ui["runs-on"], rowContext)).toBe(
         scenario.frozenTarget ? "ubuntu-24.04" : "blacksmith-8vcpu-ubuntu-2404",
       );
@@ -5214,6 +5226,42 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     );
   });
 
+  it("uses the native UI plan matrix without repartitioning Vitest assignments", () => {
+    const workflow = readCiWorkflow();
+    const plan = workflow.jobs["checks-ui"];
+    const worker = workflow.jobs["checks-ui-run"];
+    expect(worker.needs).toEqual(["preflight", "checks-ui"]);
+    expect(worker.strategy.matrix).toBe("${{ fromJSON(needs.checks-ui.outputs.matrix) }}");
+    expect(worker.strategy["fail-fast"]).toBe(false);
+    const discovery = plan.steps.find((step: WorkflowStep) => step.name === "Plan Control UI");
+    const run = worker.steps.find((step: WorkflowStep) => step.name === "Run Control UI");
+    expect(discovery.run).toContain("--min-parallelism 1 --max-parallelism 3");
+    expect(discovery.run).toContain("--strict-discovery");
+    expect(run.run).toContain('--ci-node "$CI_NODE_INDEX"');
+    expect(run.env.CI_NODE_INDEX).toBe("${{ matrix.ci_node_index }}");
+    for (const step of [discovery, run]) {
+      expect(step.run).toContain("--config ui/vitest.config.ts");
+      expect(step.run).toContain("--maxWorkers 3");
+      expect(step.run).not.toContain("--shard");
+      expect(step.run).not.toContain("--retry");
+    }
+    const selection = (job: typeof worker) =>
+      job.steps.find((step: WorkflowStep) => step.name === "Preserve selected Control UI files");
+    expect(selection(worker)).toEqual(selection(plan));
+    expect(selection(plan).env.OPENCLAW_NODE_TEST_GROUPS_GZIP_BASE64).toBe(
+      "${{ needs.preflight.outputs.ui_test_groups_gzip_base64 }}",
+    );
+    expect(selection(plan).run).toContain("group.includePatterns");
+    expect(selection(plan).run).toContain("group.env");
+    expect(workflow.jobs["ci-gate"].needs).toContain("checks-ui-run");
+    expect(workflow.jobs["ci-gate"].needs).toContain("checks-ui-bun");
+    const diagnostics = worker.steps.find(
+      (step: WorkflowStep) => step.name === "Upload Control UI timeout diagnostics",
+    );
+    expect(diagnostics.if).toBe("failure()");
+    expect(diagnostics.with.path).toContain("failure.public.json");
+  });
+
   it("keeps private Control UI servers and resource-sensitive files under one serial owner", () => {
     assertControlUiE2eOwnership((prefix) => tempDirs.make(prefix), parser);
   });
@@ -5258,6 +5306,18 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
         'printf "called\\n" >> "$REAL_GATEWAY_COMMAND_CALLS"',
         'exit "$REAL_GATEWAY_COMMAND_EXIT"',
       ]);
+      writeExecutable(path.join(bin, "ddtest"), [
+        "#!/bin/sh",
+        'operation="$1"; shift',
+        'command=""',
+        'while [ "$#" -gt 0 ]; do if [ "$1" = "--command" ]; then command="$2"; shift; fi; shift; done',
+        'if [ "$operation" = "plan" ]; then exit 0; fi',
+        '[ "$operation" = "run" ] || exit 64',
+        'printf "%s" "$command" > "$REAL_GATEWAY_COMMAND_ARGS"',
+        'printf "%s" "${OPENCLAW_VITEST_INCLUDE_FILE:-}" > "$REAL_GATEWAY_INCLUDE_PATH"',
+        'printf "called\\n" >> "$REAL_GATEWAY_COMMAND_CALLS"',
+        'exit "$REAL_GATEWAY_COMMAND_EXIT"',
+      ]);
       const desktop = "ui/src/e2e/desktop-resize.real-gateway.e2e.test.ts";
       const groups =
         releaseTier === undefined
@@ -5294,6 +5354,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
             ...process.env,
             FROZEN_TARGET: String(evaluateWorkflowExpression(step.env.FROZEN_TARGET, context)),
             RUNNER_TEMP: rowDirectory,
+            GITHUB_WORKSPACE: directory,
             REAL_GATEWAY_NODE: testNodeExecPath,
             OPENCLAW_VITEST_INCLUDE_FILE: "",
             REAL_GATEWAY_INCLUDE_PATH: includePath,
@@ -5316,29 +5377,39 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
           return;
         }
         expect(readFileSync(callsPath, "utf8").trim().split("\n")).toEqual(["called"]);
-        const args = readFileSync(argsPath, "utf8").trim().split("\n");
-        expect(args.slice(0, 6)).toEqual([
-          "scripts/run-vitest.mjs",
-          "run",
-          "--config",
-          prebuilt ? prebuiltConfig : serialConfig,
-          "--configLoader",
-          "runner",
-        ]);
-        const reporterArgs = frozen
-          ? []
-          : [
-              "--reporter",
-              "verbose",
-              "--reporter",
-              "github-actions",
-              "--reporter",
-              "default",
-              "--reporter",
-              "./scripts/lib/vitest-resource-reporter.mts",
-            ];
-        expect(args.slice(6, 6 + reporterArgs.length)).toEqual(reporterArgs);
-        expect(args.slice(6 + reporterArgs.length).toSorted()).toEqual(
+        const args = readFileSync(argsPath, "utf8")
+          .trim()
+          .split(prebuilt ? / +/u : "\n");
+        const commandPrefix = prebuilt
+          ? [
+              "node",
+              "--no-maglev",
+              "--no-concurrent-sparkplug",
+              "./node_modules/vitest/vitest.mjs",
+              "run",
+              "--config",
+              prebuiltConfig,
+              "--configLoader",
+              "runner",
+            ]
+          : ["scripts/run-vitest.mjs", "run", "--config", serialConfig, "--configLoader", "runner"];
+        expect(args.slice(0, commandPrefix.length)).toEqual(commandPrefix);
+        const reporterArgs =
+          frozen && !prebuilt
+            ? []
+            : [
+                "--reporter",
+                "verbose",
+                "--reporter",
+                "github-actions",
+                "--reporter",
+                "default",
+                "--reporter",
+                "./scripts/lib/vitest-resource-reporter.mts",
+              ];
+        const flagsOffset = commandPrefix.length;
+        expect(args.slice(flagsOffset, flagsOffset + reporterArgs.length)).toEqual(reporterArgs);
+        expect(args.slice(flagsOffset + reporterArgs.length).toSorted()).toEqual(
           prebuilt
             ? ["--exclude", desktop]
             : uiE2eRealGatewayTestFiles.filter((file) => file !== desktop).toSorted(),
@@ -5418,7 +5489,23 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       "test/scripts/doctor-config-preflight-plugin-index.built-cli.e2e.test.ts",
     );
     expect(verifierStep.run).toContain(
-      "env OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000 node scripts/run-vitest.mjs run",
+      "OPENCLAW_E2E_USE_PREBUILT_DIST=1 OPENCLAW_VITEST_NO_OUTPUT_TIMEOUT_MS=660000",
+    );
+    expect(verifierStep.run).toContain(
+      "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run",
+    );
+    expect(verifierStep.run).toContain(
+      'ddtest plan --platform javascript --framework vitest --command "$command" --strict-discovery --min-parallelism 1 --max-parallelism 1',
+    );
+    expect(verifierStep.run).toContain(
+      'ddtest run --platform javascript --framework vitest --command "$command" --ci-node 0',
+    );
+    const startCheck = verifierStep.run.slice(
+      verifierStep.run.indexOf("start_check() {"),
+      verifierStep.run.indexOf("wait_checks() {"),
+    );
+    expect(startCheck.indexOf("\n  wait_checks\n")).toBeGreaterThan(
+      startCheck.indexOf('pids+=("$!")'),
     );
     expect(verifierStep.run).toContain("--config test/vitest/vitest.e2e.config.ts");
     expect(verifierStep.run).toContain("Selected target predates");
@@ -5537,17 +5624,40 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
           },
         ],
       };
-      mkdirSync(path.join(root, "scripts"));
+      const bin = path.join(root, "bin");
+      mkdirSync(bin);
+      writeFileSync(path.join(root, "fixture-report.json"), JSON.stringify(report));
       writeFileSync(
-        path.join(root, "scripts/run-vitest.mjs"),
-        `import fs from "node:fs";
-       const args = process.argv.slice(2);
-       fs.writeFileSync(args[args.indexOf("--outputFile.json") + 1], ${JSON.stringify(JSON.stringify(report))});`,
+        path.join(bin, "ddtest"),
+        [
+          "#!/bin/sh",
+          'mode="$1"; shift',
+          'while [ "$#" -gt 0 ]; do',
+          '  if [ "$1" = "--command" ]; then command="$2"; shift 2; else shift; fi',
+          "done",
+          'printf "%s\\n" "$mode" "$command" >> "$RUNNER_TEMP/ddtest-calls"',
+          'if [ "$mode" = "run" ]; then cp "$RUNNER_TEMP/fixture-report.json" "$RUNNER_TEMP/browser-native-host.json"; fi',
+        ].join("\n") + "\n",
+        { mode: 0o755 },
       );
       const result = runWorkflowShellScript(step.run, {
         cwd: root,
-        env: { ...process.env, ...step.env, FROZEN_TARGET: "true", RUNNER_TEMP: root },
+        env: {
+          ...process.env,
+          ...step.env,
+          PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+          GITHUB_WORKSPACE: root,
+          FROZEN_TARGET: "true",
+          RUNNER_TEMP: root,
+        },
       });
+      const calls = readFileSync(path.join(root, "ddtest-calls"), "utf8").trim().split("\n");
+      expect(calls).toEqual(["plan", calls[1], "run", calls[1]]);
+      expect(calls[1]).toContain(
+        "node --no-maglev --no-concurrent-sparkplug ./node_modules/vitest/vitest.mjs run --config test/vitest/vitest.e2e.config.ts",
+      );
+      expect(calls[1]).toContain("--reporter=default --reporter=json --outputFile.json");
+      expect(calls[1]).toContain(`-- ${file}`);
       expect(result.status, result.stderr).toBe(expected);
     },
   );
@@ -5667,15 +5777,20 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     expect(hostedDiscordWait).toBeGreaterThan(hostedDiscord);
     expect(tuiPty).toBeGreaterThan(hostedDiscordWait);
     expect(tuiPtyWait).toBeGreaterThan(tuiPty);
-    expect(run.slice(tuiPty, tuiPtyWait)).toContain("src/tui/tui-pty-local.e2e.test.ts");
-    expect(run.slice(tuiPty, tuiPtyWait)).toContain("--testNamePattern");
-    expect(run.slice(tuiPty, tuiPtyWait)).toContain(
+    expect(run.slice(tuiPty, tuiPtyWait)).toContain('start_check "tui-pty" run_tui_pty');
+    const tuiCommand = run.slice(
+      run.indexOf("run_tui_pty() {"),
+      run.indexOf("run_doctor_plugin_index() {"),
+    );
+    expect(tuiCommand).toContain("-- src/tui/tui-pty-local.e2e.test.ts");
+    expect(tuiCommand).toContain("--testNamePattern");
+    expect(tuiCommand).toContain(
       "launches openclaw (chat as local mode|tui against a real Gateway) through a real PTY",
     );
     expect(run).toContain("wait_checks()");
-    // Startup memory, artifact writers, and TUI retain explicit barriers;
-    // hosted runners also serialize the remaining verifiers inside run_verifier.
-    expect(run.match(/wait_checks$/gmu)).toHaveLength(8);
+    // The original explicit writer/reader barriers remain; start_check also joins
+    // each native ddtest plan/run pair to protect the shared .testoptimization directory.
+    expect(run.match(/wait_checks$/gmu)).toHaveLength(9);
   });
 
   it.each([
@@ -5683,7 +5798,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     { mode: "runtime", outcome: "success", expected: "" },
     { mode: "private-qa", outcome: "failure", expected: "" },
   ] as const)("hands prepared E2E runtime to children only after $mode $outcome", (scenario) => {
-    const steps = readCiWorkflow().jobs["checks-node-core-test-nondist-shard"].steps;
+    const steps = readCiWorkflow().jobs["checks-node-bun"].steps;
     const build = steps.find((step: WorkflowStep) => step.name === "Build Node test runtime");
     const run = steps.find((step: WorkflowStep) => step.name === "Run Node test shard");
     const prebuilt = evaluateWorkflowExpression(run.env.OPENCLAW_E2E_USE_PREBUILT_DIST, {
@@ -5710,9 +5825,9 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     expect(steps.indexOf(build)).toBeLessThan(steps.indexOf(run));
   });
 
-  it("fails and retries quiet Node test shard stalls quickly", () => {
+  it("retains quiet-stall policy for the Bun-capable shard owner", () => {
     const workflow = readCiWorkflow();
-    const nodeTestJob = workflow.jobs["checks-node-core-test-nondist-shard"];
+    const nodeTestJob = workflow.jobs["checks-node-bun"];
     const runStep = nodeTestJob.steps.find(
       (step: WorkflowStep) => step.name === "Run Node test shard",
     );
@@ -5793,9 +5908,9 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     expect(runtimeFiles).not.toContain("scripts/lib/vitest-worker-run.mts");
   });
 
-  it("keeps RunsOn Node workers bounded without invoking the Blacksmith scheduler", () => {
+  it("keeps retained Bun worker resources bounded without invoking the Blacksmith scheduler", () => {
     const step = expectDefined(
-      readCiWorkflow().jobs["checks-node-core-test-nondist-shard"].steps.find(
+      readCiWorkflow().jobs["checks-node-bun"].steps.find(
         (candidate: WorkflowStep) => candidate.name === "Configure Node test resources",
       ),
       "Node resources",
@@ -5827,6 +5942,37 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       expect(result.status, result.stderr).toBe(0);
       expect(readWorkflowOutputs(output)).toEqual({ OPENCLAW_VITEST_MAX_WORKERS: String(workers) });
     }
+  });
+
+  it("runs native assignments within the selected job deadline without custom retries", () => {
+    const workflow = readWorkflow(".github/workflows/ddtest-vitest.yml");
+    for (const job of [workflow.jobs.plan, workflow.jobs.test]) {
+      expect(job["timeout-minutes"]).toBe("${{ inputs.timeout-minutes }}");
+      expect(JSON.stringify(job)).not.toContain("OPENCLAW_VITEST_NO_OUTPUT_RETRY");
+    }
+    const run = workflow.jobs.test.steps.find(
+      (step: WorkflowStep) => step.name === "Run ddtest assignment",
+    );
+    expect(run.run).toContain('ddtest run --ci-node "$CI_NODE_INDEX"');
+    expect(run.run).not.toContain("ci-run-node-test-shard");
+    expect(run.run).not.toContain("--retry");
+    expect(workflow.env.DD_TEST_OPTIMIZATION_RUNNER_COMMAND).not.toContain("--shard");
+    expect(workflow.env.DD_TEST_OPTIMIZATION_RUNNER_COMMAND).toContain(
+      "inputs.compatibility-target && '--hookTimeout=600000'",
+    );
+    expect(workflow.env.DD_TEST_OPTIMIZATION_RUNNER_COMMAND).not.toContain("--testTimeout");
+    expect(workflow.env.DD_CIVISIBILITY_FLAKY_RETRY_ENABLED).toBe("false");
+    expect(workflow.env.DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED).toBe("false");
+  });
+
+  it("keeps native test workers bounded independently of the selected CI runner count", () => {
+    const native = readWorkflow(".github/workflows/ddtest-vitest.yml");
+    expect(native.env.OPENCLAW_VITEST_MAX_WORKERS).toBe("${{ inputs.max-workers }}");
+    expect(native.env.OPENCLAW_TEST_PROJECTS_PARALLEL).toBe("1");
+    expect(native.env.RAYON_NUM_THREADS).toBe("2");
+    expect(native.env.TOKIO_WORKER_THREADS).toBe("2");
+    expect(native.env.NODE_OPTIONS).toBe("--max-old-space-size=8192");
+    expect(native.jobs.test.strategy["fail-fast"]).toBe(false);
   });
 
   it("uses candidate-owned script interfaces for frozen target CI", () => {

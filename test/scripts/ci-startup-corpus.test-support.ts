@@ -2,6 +2,24 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect } from "vitest";
 
+// Capture the native plan and run without invoking ddtest or the real test runner.
+// The workflow commands here contain literal paths and whitespace-separated flags.
+export const startupCorpusDdtestStub = [
+  "#!/bin/sh",
+  'mode="$1"; shift',
+  'command=""',
+  'while [ "$#" -gt 0 ]; do',
+  '  if [ "$1" = "--command" ]; then command="$2"; shift 2; else shift; fi',
+  "done",
+  'if [ "$mode" = "plan" ]; then printf "%s\\n" "$command" > "$STARTUP_CORPUS_ARGS-plan"; exit 0; fi',
+  '[ "$mode" = "run" ] || exit 1',
+  '[ "$command" = "$(cat "$STARTUP_CORPUS_ARGS-plan")" ] || exit 1',
+  "set -f",
+  "set -- $command",
+  '[ "$1" = "node" ] && [ "$2" = "--no-maglev" ] && [ "$3" = "--no-concurrent-sparkplug" ] || exit 1',
+  'exec "$@"',
+];
+
 type CorpusScenario = { cpus: number; slots: number; frozenTarget: boolean; fail?: string };
 type ShellRunner = (
   script: string,
@@ -37,6 +55,7 @@ export function assertStartupCorpusCommand(
     '[ -f "$STARTUP_CORPUS_ARGS.release" ] || read -r release <&3',
     '[ "${OPENCLAW_TEST_STARTUP_CORPUS_SHARD:-config}" != "$STARTUP_CORPUS_FAIL" ]',
   ]);
+  writeExecutable(path.join(bin, "ddtest"), startupCorpusDdtestStub);
   const result = runWorkflowShellScript(
     `
     mkfifo "$STARTUP_CORPUS_ARGS.pipe"
@@ -55,6 +74,7 @@ export function assertStartupCorpusCommand(
       env: {
         ...process.env,
         PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+        GITHUB_WORKSPACE: directory,
         STARTUP_CORPUS_ARGS: argsPath,
         STARTUP_CORPUS_FAIL: scenario.fail ?? "",
       },
@@ -71,7 +91,9 @@ export function assertStartupCorpusCommand(
       .trim()
       .split("\n");
   const commonArgs = [
-    "scripts/run-vitest.mjs",
+    "--no-maglev",
+    "--no-concurrent-sparkplug",
+    "./node_modules/vitest/vitest.mjs",
     "run",
     "--config",
     "test/vitest/vitest.runtime-config.config.ts",
@@ -86,10 +108,15 @@ export function assertStartupCorpusCommand(
           "./scripts/lib/vitest-resource-reporter.mts",
         ]),
   ];
-  expect(readArgs("config")).toEqual([...commonArgs, "src/config/config-startup-corpus.test.ts"]);
+  expect(readArgs("config")).toEqual([
+    ...commonArgs,
+    "--",
+    "src/config/config-startup-corpus.test.ts",
+  ]);
   for (const shard of ["1/4", "2/4", "3/4", "4/4"]) {
     expect(readArgs(shard), shard).toEqual([
       ...commonArgs,
+      "--",
       "src/config/state-startup-corpus.test.ts",
     ]);
   }
